@@ -11,20 +11,22 @@ DMXWB является частью программной среды контр
 
 ## Текущий статус
 
-Repository reset завершён. Выполняется `DEV-001` — минимальная C++20/CMake foundation и deterministic unit-test harness без hardware side effects.
+`DEV-001` подтверждён commit SHA `6704b01ac25a44b5174178f52bdc7158d0295ef3`.
 
-В `DEV-001` уже предусмотрены:
+Выполняется `DEV-002 — DMX core types and deterministic frame model`. На этом этапе добавлены hardware-independent типы, которые позднее будут передаваться физическому DMX worker целым immutable snapshot:
 
-- production target `dmxwb`;
-- отдельная библиотека `dmxwb_core` для общего hardware-independent кода;
-- test target `dmxwb_tests` и CTest;
-- общий namespace `dmxwb`;
-- compiler warnings для MSVC/GCC/Clang;
-- минимальный CLI `--help` / `--version`, не обращающийся к hardware.
+- `DmxSnapshot` с максимум 512 DMX channels;
+- `slot_count` и generation;
+- безопасная one-based индексация channel `1..512`;
+- helper расчёта последнего физического slot;
+- отдельная модель Start Code `0x00` и channel payload;
+- atomic publication `shared_ptr<const DmxSnapshot>` без частично обновлённого snapshot;
+- abstraction монотонных часов для будущего deterministic scheduler;
+- deterministic host unit tests.
 
-Serial/DMX transport, `DmxSnapshot`, Fixture model, MQTT, Art-Net, persistence, systemd и web в этот gate намеренно не входят.
+Serial/termios/BREAK, непрерывный DMX worker, Fixture color algorithms, MQTT и Art-Net в `DEV-002` намеренно отсутствуют.
 
-Текущая целевая архитектура:
+## Текущая целевая архитектура
 
 ```text
 Static Web
@@ -46,20 +48,21 @@ DMXWB C++20
 
 Порт по умолчанию: `/dev/ttyRS485-1`.
 
-## Сборка DEV-001
+## Сборка DEV-002
 
 Требуется CMake 3.20+ и C++20 compiler. Внешние библиотеки на этом этапе не используются.
 
 Windows / Visual Studio:
 
 ```powershell
-cmake -S . -B build -DBUILD_TESTING=ON
+cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 .\build\Debug\dmxwb.exe --version
+.\build\Debug\dmxwb_tests.exe
 ```
 
-Для single-config генератора (например Ninja) последний запуск executable обычно будет `./build/dmxwb` вместо `build/Debug/dmxwb`.
+Для single-config генератора (например Ninja) executable обычно находится непосредственно в `build/`.
 
 ## Источники истины
 

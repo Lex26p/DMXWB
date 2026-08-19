@@ -1,5 +1,4 @@
 #include "dmxwb/app_info.hpp"
-
 #include <iostream>
 #include <string_view>
 
@@ -9,16 +8,15 @@ void print_help() {
     std::cout
         << "Usage: dmxwb [--help | --version]\n"
         << "\n"
-        << "DEV-001 foundation executable. Hardware, MQTT and Art-Net runtime\n"
+        << "DEV-002 core executable. Hardware, MQTT and Art-Net runtime\n"
         << "subsystems are intentionally not enabled yet.\n";
 }
 
 }  // namespace
-
 int main(int argc, char* argv[]) {
     if (argc == 1) {
         std::cout << dmxwb::application_name() << " " << dmxwb::application_version()
-                  << " (DEV-001 foundation; no runtime subsystems enabled)\n";
+                  << " (DEV-002 deterministic DMX core; no runtime subsystems enabled)\n";
         return 0;
     }
 
@@ -29,7 +27,6 @@ int main(int argc, char* argv[]) {
             std::cout << dmxwb::application_name() << " " << dmxwb::application_version() << '\n';
             return 0;
         }
-
         if (argument == "--help" || argument == "-h") {
             print_help();
             return 0;

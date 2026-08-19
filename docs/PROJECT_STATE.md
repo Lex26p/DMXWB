@@ -7,49 +7,56 @@
 Последний полный SHA, явно присланный пользователем и являющийся базой текущего gate:
 
 ```text
-f8e95681f60a337631d7afa19df10a15a01eaab6
+6704b01ac25a44b5174178f52bdc7158d0295ef3
 ```
 
-Этот SHA подтверждает завершение документационного шага с `AGENTS.md` и `docs/ROADMAP.md`. Текущий пакет реализует `DEV-001`. После его локальной проверки, commit и push пользователь присылает новый полный SHA; только после этого разрешён переход к `DEV-002`.
+Этот SHA подтверждает PASS и commit `DEV-001 — C++ foundation, build and test harness`.
 
 ## Current phase
 
-**DEV-001 — C++ foundation, build and test harness.**
+**DEV-002 — DMX core types and deterministic frame model.**
 
-Цель gate — создать минимальную воспроизводимую C++20/CMake основу без hardware side effects.
+Цель gate — создать hardware-independent ядро данных, которое будущий физический DMX thread сможет получать только целым immutable snapshot.
 
-## Implemented in current DEV-001 package
+## Implemented in current DEV-002 package
 
-- root `CMakeLists.txt`;
-- CMake minimum version 3.20;
-- C++20;
-- static library target `dmxwb_core` для общего hardware-independent кода;
-- production executable target `dmxwb`;
-- отдельный test executable `dmxwb_tests`;
-- CTest integration;
-- базовая структура `include/dmxwb/`, `src/`, `tests/`;
-- общий namespace `dmxwb`;
-- минимальный `app_info` API;
-- минимальный CLI `--help` / `--version`;
-- compiler warnings для MSVC и GCC/Clang;
-- optional `DMXWB_WARNINGS_AS_ERRORS`;
-- deterministic smoke unit tests без стороннего test framework;
-- CMake build directories добавлены в `.gitignore`.
+- `DmxSnapshot`:
+  - фиксированное хранилище максимум 512 channels;
+  - `slot_count` в диапазоне `0..512`;
+  - monotonic generation/revision value;
+  - one-based channel API `1..512`;
+  - immutable состояние после построения;
+- `DmxSnapshotBuilder` как отдельный mutable construction object;
+- helper `calculate_slot_count(start, count, width)` без Fixture model;
+- физический payload model:
+  - Start Code `0x00` отдельно;
+  - active channels `1..slot_count` отдельно;
+  - channel 1 соответствует payload index 0;
+- `DmxSnapshotPublisher`:
+  - C++20 atomic `shared_ptr<const DmxSnapshot>`;
+  - reader получает один целый snapshot;
+  - уже загруженный snapshot не изменяется после последующей публикации;
+  - null publication отклоняется;
+- `MonotonicClock` interface и `SteadyMonotonicClock` implementation без serial/scheduling loop;
+- deterministic unit tests всех требований `DEV-002`;
+- CLI/README обновлены текущим gate.
 
-## Intentionally not implemented in DEV-001
+## Intentionally not implemented in DEV-002
 
-- serial/termios;
-- физический DMX transport;
-- `DmxSnapshot` и deterministic DMX frame model — это `DEV-002`;
-- continuous DMX worker — это `DEV-004`;
-- Fixture/Group/Scene model;
+- `termios` и открытие `/dev/ttyRS485-*`;
+- BREAK generation;
+- физическая передача Start Code/channels;
+- continuous DMX worker и refresh scheduling;
+- Fixture/RGBW color algorithms;
 - configuration/persistence;
 - MQTT;
 - Art-Net;
 - systemd;
 - web.
 
-## DEV-001 verification commands
+Эти функции принадлежат следующим gates дорожной карты и не должны переноситься в `DEV-002`.
+
+## DEV-002 verification commands
 
 Windows / Visual Studio:
 
@@ -57,11 +64,11 @@ Windows / Visual Studio:
 Set-Location C:\Projects\DMXWB
 
 Remove-Item -Recurse -Force .\build -ErrorAction SilentlyContinue
-cmake -S . -B build -DBUILD_TESTING=ON
+cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 .\build\Debug\dmxwb.exe --version
-.\build\Debug\dmxwb.exe --help
+.\build\Debug\dmxwb_tests.exe
 ```
 
 Expected CTest result:
@@ -76,48 +83,74 @@ Expected version output:
 dmxwb 0.1.0
 ```
 
-`dmxwb --help` должен явно сообщать, что runtime hardware/MQTT/Art-Net подсистемы на `DEV-001` ещё не включены.
+`dmxwb_tests.exe` должен завершиться строкой:
+
+```text
+All tests passed
+```
+
+## DEV-002 deterministic test coverage
+
+Проверяются как минимум:
+
+- channel 1;
+- channel 512;
+- rejection channel 0 / 513;
+- rejection `slot_count > 512`;
+- `slot_count = 40` для start 1 / 10 items / width 4;
+- `slot_count = 60` для start 21 / 10 items / width 4;
+- выход за channel 512 отклоняется;
+- `Fixture Count = 0`-эквивалент helper даёт `slot_count = 0`;
+- Start Code остаётся отдельным `0x00`;
+- payload index 0 соответствует DMX channel 1;
+- generation и data публикуются целиком;
+- удерживаемый reader-ом старый snapshot остаётся неизменным после публикации нового;
+- deterministic fake monotonic clock может использовать будущий scheduler без real time.
 
 ## Local assistant verification
 
-Подготовленный `DEV-001` source tree проверяется ассистентом на доступном Linux host через clean configure/build/CTest и запуск CLI. Это подтверждает portable CMake/C++ foundation, но не заменяет пользовательский PASS на целевой dev host.
+Подготовленный source tree проверен ассистентом на Linux host:
 
-## PASS criteria for DEV-001
+- clean CMake configure;
+- clean build;
+- `DMXWB_WARNINGS_AS_ERRORS=ON`;
+- GCC 14.2.0;
+- CTest `1/1 PASS`;
+- `dmxwb --version` -> `dmxwb 0.1.0`;
+- полный `dmxwb_tests` -> `All tests passed`.
+
+Это не заменяет пользовательский PASS на локальном Windows/dev host.
+
+## PASS criteria for DEV-002
 
 Gate получает PASS только если пользователь подтвердил:
 
-- clean CMake configure завершился успешно;
-- clean Debug build завершился успешно;
-- `ctest` показывает `100% tests passed, 0 tests failed`;
-- `dmxwb.exe --version` выводит `dmxwb 0.1.0`;
-- `dmxwb.exe --help` запускается и завершается без hardware access;
-- в процессе DEV-001 не требуется Wiren Board, serial, MQTT или Art-Net.
+- clean configure/build завершены успешно;
+- warnings-as-errors build не дал ошибок;
+- CTest показывает `100% tests passed, 0 tests failed`;
+- `dmxwb_tests.exe` показывает PASS всех deterministic core tests;
+- executable не обращается к hardware;
+- для проверки не требуются Wiren Board, serial, MQTT или Art-Net.
 
-При FAIL остаёмся на `DEV-001` и исправляем только причину ошибки.
+При FAIL остаёмся на `DEV-002` и исправляем только причину ошибки.
 
-## Completed steps before DEV-001
+## Completed gates
 
-- Repository reset завершён.
-- Утверждён единый `docs/TECHNICAL_SPEC.md`.
-- Зафиксированы продуктовые границы: DMXWB — подсистема Wiren Board; physical DMX является основной функцией; Art-Net — внешний источник того же DMX output.
-- Зафиксирована trusted local LAN model; authentication/authorization/ACL вне scope.
-- Зафиксирована полностью offline production installation.
-- Зафиксирован обязательный handoff process в `AGENTS.md`.
-- Создана пошаговая дорожная карта `DEV-001`…`DEV-013`.
-- Документационный workflow/roadmap step подтверждён SHA `f8e95681f60a337631d7afa19df10a15a01eaab6`.
+- Repository reset / specification cleanup.
+- Workflow + development roadmap.
+- `DEV-001 — C++ foundation, build and test harness` — confirmed SHA `6704b01ac25a44b5174178f52bdc7158d0295ef3`.
 
 ## Next gate after PASS SHA
 
-**DEV-002 — DMX core types and deterministic frame model.**
+**DEV-003 — physical DMX transport proof on `/dev/ttyRS485-1`.**
 
-После получения нового полного SHA от пользователя реализовать только scope `DEV-002` из `docs/ROADMAP.md`:
+После нового полного SHA от пользователя выполнить только scope `DEV-003` из `docs/ROADMAP.md`:
 
-- immutable `DmxSnapshot`;
-- channels 1..512 и `slot_count`;
-- generation/revision;
-- Start Code / payload model без off-by-one;
-- безопасную публикацию целого snapshot;
-- scheduling/clock helper interface без serial;
-- deterministic host unit tests.
+- минимальный serial transport;
+- default `/dev/ttyRS485-1`;
+- `250000 8N2`;
+- проверенный WB BREAK method;
+- Start Code + небольшой фиксированный channel payload;
+- hardware test на реальном Wiren Board и RGBW fixture.
 
-Не начинать physical `termios`/BREAK до `DEV-003`.
+Если физический DMX не проходит hardware gate, не переходить к continuous engine, Fixture, MQTT или Art-Net.

@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.20)
 project(DMXWB VERSION 0.1.0 LANGUAGES CXX)
 
 option(DMXWB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
-
 function(dmxwb_enable_warnings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus)
@@ -24,9 +23,10 @@ function(dmxwb_enable_warnings target)
         endif()
     endif()
 endfunction()
-
 add_library(dmxwb_core STATIC
     src/app_info.cpp
+    src/dmx_snapshot.cpp
+    src/monotonic_clock.cpp
 )
 
 target_include_directories(dmxwb_core
@@ -47,7 +47,6 @@ target_compile_features(dmxwb PRIVATE cxx_std_20)
 dmxwb_enable_warnings(dmxwb)
 
 include(CTest)
-
 if(BUILD_TESTING)
     add_executable(dmxwb_tests
         tests/test_main.cpp
