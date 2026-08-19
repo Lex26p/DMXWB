@@ -11,7 +11,18 @@ DMXWB является частью программной среды контр
 
 ## Текущий статус
 
-Repository reset завершён. Техническое задание актуализировано с учётом границ продукта, доверенной LAN и обязательной офлайн-установки. Реализация приложения ещё не начата; следующий gate — DEV-001.
+Repository reset завершён. Выполняется `DEV-001` — минимальная C++20/CMake foundation и deterministic unit-test harness без hardware side effects.
+
+В `DEV-001` уже предусмотрены:
+
+- production target `dmxwb`;
+- отдельная библиотека `dmxwb_core` для общего hardware-independent кода;
+- test target `dmxwb_tests` и CTest;
+- общий namespace `dmxwb`;
+- compiler warnings для MSVC/GCC/Clang;
+- минимальный CLI `--help` / `--version`, не обращающийся к hardware.
+
+Serial/DMX transport, `DmxSnapshot`, Fixture model, MQTT, Art-Net, persistence, systemd и web в этот gate намеренно не входят.
 
 Текущая целевая архитектура:
 
@@ -35,6 +46,21 @@ DMXWB C++20
 
 Порт по умолчанию: `/dev/ttyRS485-1`.
 
+## Сборка DEV-001
+
+Требуется CMake 3.20+ и C++20 compiler. Внешние библиотеки на этом этапе не используются.
+
+Windows / Visual Studio:
+
+```powershell
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+.\build\Debug\dmxwb.exe --version
+```
+
+Для single-config генератора (например Ninja) последний запуск executable обычно будет `./build/dmxwb` вместо `build/Debug/dmxwb`.
+
 ## Источники истины
 
 Перед началом любой работы необходимо читать документы в таком порядке:
@@ -42,6 +68,7 @@ DMXWB C++20
 1. [`AGENTS.md`](AGENTS.md) — правила совместной разработки и передачи изменений.
 2. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — текущее состояние и ближайший шаг.
 3. [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) — утверждённые требования к конечному приложению.
+4. [`docs/ROADMAP.md`](docs/ROADMAP.md) — последовательность gates и критерии PASS.
 
 Если требования меняются в обсуждении, соответствующие документы должны быть обновлены вместе с кодом в том же шаге.
 

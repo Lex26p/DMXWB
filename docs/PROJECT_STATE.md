@@ -4,146 +4,120 @@
 
 ## Current base
 
-Последний полный SHA, явно присланный пользователем и являющийся базой текущего документационного шага:
+Последний полный SHA, явно присланный пользователем и являющийся базой текущего gate:
 
 ```text
-e111c1b5fd6df1b3df3a9c8ff2a68d8c1a230616
+f8e95681f60a337631d7afa19df10a15a01eaab6
 ```
 
-После применения текущего пакета, проверки, commit и push пользователь присылает новый полный SHA. Этот новый SHA становится единственной базой `DEV-001`.
+Этот SHA подтверждает завершение документационного шага с `AGENTS.md` и `docs/ROADMAP.md`. Текущий пакет реализует `DEV-001`. После его локальной проверки, commit и push пользователь присылает новый полный SHA; только после этого разрешён переход к `DEV-002`.
 
 ## Current phase
 
-**Development process and roadmap finalization.**
-
-Код приложения после repository reset ещё не реализован. Текущий шаг изменяет только служебную документацию разработки:
-
-- `AGENTS.md` получает точный обязательный формат взаимодействия с пользователем;
-- `docs/ROADMAP.md` становится основной пошаговой инструкцией реализации будущим моделям;
-- roadmap синхронизируется с текущими продуктовыми границами, включая fully offline deployment;
-- `DEV-001` согласуется между `ROADMAP.md` и `PROJECT_STATE.md` как узкий foundation/build/test-harness gate.
-
-## Completed documentation steps
-
-- Repository reset завершён.
-- Утверждён единый `docs/TECHNICAL_SPEC.md`.
-- Зафиксировано, что DMXWB — специализированная подсистема Wiren Board, а не самостоятельная универсальная платформа.
-- Главная функция — стабильный physical DMX512 output; Art-Net — полноценный внешний источник управления тем же выходом.
-- Эксплуатация предполагается в доверенной локальной LAN; authentication/authorization, Mosquitto ACL и отдельная security-модель `/mqtt` вне scope.
-- Production installation bundle обязан устанавливаться полностью офлайн.
-- Предыдущий документационный шаг подтверждён пользователем commit SHA `e111c1b5fd6df1b3df3a9c8ff2a68d8c1a230616`.
-
-## Decided development protocol
-
-Перед каждым изменением ассистент:
-
-1. работает только от последнего полного SHA пользователя;
-2. скачивает необходимые файлы с GitHub именно на этом SHA;
-3. выполняет один текущий gate по `docs/ROADMAP.md`;
-4. готовит финальные файлы и root-relative ZIP;
-5. выдаёт пользователю handoff по точному порядку из `AGENTS.md`:
-   - краткое описание;
-   - ZIP;
-   - `Expand-Archive`;
-   - build/run/test commands только если нужны;
-   - что проверить;
-   - Git-блок;
-6. при FAIL остаётся на текущем gate;
-7. при новом полном SHA переходит к следующему gate.
-
-Стандартные пользовательские пути на текущий момент:
-
-```text
-C:\Users\pereverworkki\Downloads
-C:\Projects\DMXWB
-```
-
-## Roadmap order
-
-```text
-DEV-001  C++20/CMake foundation and test harness
-DEV-002  DMX core types and deterministic frame model
-DEV-003  Physical DMX transport proof on Wiren Board
-DEV-004  Continuous DMX engine, timing and serial recovery
-DEV-005  Fixture RGBW model and addressing
-DEV-006  Configuration and persistence
-DEV-007  MQTT system + Fixture integration
-DEV-008  Groups and Scenes
-DEV-009  Art-Net protocol core
-DEV-010  Art-Net runtime, recovery and Source switching
-DEV-011  Static MQTT-only Web UI
-DEV-012  systemd, diagnostics and fully offline deployment
-DEV-013  Full integration, offline install and 24h acceptance
-```
-
-Полный scope и PASS каждого gate находится в `docs/ROADMAP.md`.
-
-## Not yet implemented
-
-После reset код приложения отсутствует намеренно.
-
-Ещё не реализованы:
-
-- C++ project skeleton;
-- unit test harness;
-- deterministic DMX core;
-- physical DMX transport;
-- continuous DMX engine;
-- Fixture/Group/Scene model;
-- configuration/persistence;
-- MQTT layer;
-- Art-Net;
-- static web;
-- systemd/offline deployment bundle.
-
-## Next gate
-
 **DEV-001 — C++ foundation, build and test harness.**
 
-DEV-001 начинается только после применения текущего документационного пакета, его проверки, commit/push и получения нового полного SHA от пользователя.
+Цель gate — создать минимальную воспроизводимую C++20/CMake основу без hardware side effects.
 
-### Цель DEV-001
-
-Создать минимальную воспроизводимую основу C++20-проекта без hardware side effects.
-
-### Реализовать
+## Implemented in current DEV-001 package
 
 - root `CMakeLists.txt`;
+- CMake minimum version 3.20;
 - C++20;
+- static library target `dmxwb_core` для общего hardware-independent кода;
 - production executable target `dmxwb`;
-- отдельный unit-test target;
-- базовую структуру `src/` и `tests/`;
-- минимальный `main.cpp`;
-- deterministic unit-test runner;
-- необходимые build warnings/rules.
+- отдельный test executable `dmxwb_tests`;
+- CTest integration;
+- базовая структура `include/dmxwb/`, `src/`, `tests/`;
+- общий namespace `dmxwb`;
+- минимальный `app_info` API;
+- минимальный CLI `--help` / `--version`;
+- compiler warnings для MSVC и GCC/Clang;
+- optional `DMXWB_WARNINGS_AS_ERRORS`;
+- deterministic smoke unit tests без стороннего test framework;
+- CMake build directories добавлены в `.gitignore`.
 
-### Не включать в DEV-001
+## Intentionally not implemented in DEV-001
 
 - serial/termios;
-- физический DMX;
-- полноценный `DmxSnapshot`/frame model — это `DEV-002`;
-- Fixture color model — это `DEV-005`;
+- физический DMX transport;
+- `DmxSnapshot` и deterministic DMX frame model — это `DEV-002`;
+- continuous DMX worker — это `DEV-004`;
+- Fixture/Group/Scene model;
+- configuration/persistence;
 - MQTT;
 - Art-Net;
-- persistence;
 - systemd;
 - web.
 
-### PASS DEV-001
+## DEV-001 verification commands
 
-- clean CMake configure;
-- clean build;
-- unit-test executable запускается и PASS;
-- production executable не обращается к hardware;
-- документация содержит фактические команды build/test.
+Windows / Visual Studio:
 
-## Notes for continuation
+```powershell
+Set-Location C:\Projects\DMXWB
 
-Перед любой реализацией следующая модель обязана:
+Remove-Item -Recurse -Force .\build -ErrorAction SilentlyContinue
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+.\build\Debug\dmxwb.exe --version
+.\build\Debug\dmxwb.exe --help
+```
 
-1. прочитать `AGENTS.md`;
-2. прочитать этот `PROJECT_STATE.md`;
-3. прочитать `docs/TECHNICAL_SPEC.md`;
-4. прочитать `docs/ROADMAP.md`;
-5. взять только новый полный SHA, присланный пользователем после commit текущего шага;
-6. выполнить `DEV-001` строго в его границах.
+Expected CTest result:
+
+```text
+100% tests passed, 0 tests failed
+```
+
+Expected version output:
+
+```text
+dmxwb 0.1.0
+```
+
+`dmxwb --help` должен явно сообщать, что runtime hardware/MQTT/Art-Net подсистемы на `DEV-001` ещё не включены.
+
+## Local assistant verification
+
+Подготовленный `DEV-001` source tree проверяется ассистентом на доступном Linux host через clean configure/build/CTest и запуск CLI. Это подтверждает portable CMake/C++ foundation, но не заменяет пользовательский PASS на целевой dev host.
+
+## PASS criteria for DEV-001
+
+Gate получает PASS только если пользователь подтвердил:
+
+- clean CMake configure завершился успешно;
+- clean Debug build завершился успешно;
+- `ctest` показывает `100% tests passed, 0 tests failed`;
+- `dmxwb.exe --version` выводит `dmxwb 0.1.0`;
+- `dmxwb.exe --help` запускается и завершается без hardware access;
+- в процессе DEV-001 не требуется Wiren Board, serial, MQTT или Art-Net.
+
+При FAIL остаёмся на `DEV-001` и исправляем только причину ошибки.
+
+## Completed steps before DEV-001
+
+- Repository reset завершён.
+- Утверждён единый `docs/TECHNICAL_SPEC.md`.
+- Зафиксированы продуктовые границы: DMXWB — подсистема Wiren Board; physical DMX является основной функцией; Art-Net — внешний источник того же DMX output.
+- Зафиксирована trusted local LAN model; authentication/authorization/ACL вне scope.
+- Зафиксирована полностью offline production installation.
+- Зафиксирован обязательный handoff process в `AGENTS.md`.
+- Создана пошаговая дорожная карта `DEV-001`…`DEV-013`.
+- Документационный workflow/roadmap step подтверждён SHA `f8e95681f60a337631d7afa19df10a15a01eaab6`.
+
+## Next gate after PASS SHA
+
+**DEV-002 — DMX core types and deterministic frame model.**
+
+После получения нового полного SHA от пользователя реализовать только scope `DEV-002` из `docs/ROADMAP.md`:
+
+- immutable `DmxSnapshot`;
+- channels 1..512 и `slot_count`;
+- generation/revision;
+- Start Code / payload model без off-by-one;
+- безопасную публикацию целого snapshot;
+- scheduling/clock helper interface без serial;
+- deterministic host unit tests.
+
+Не начинать physical `termios`/BREAK до `DEV-003`.

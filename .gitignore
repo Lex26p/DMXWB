@@ -361,3 +361,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# DMXWB CMake build trees and local user presets
+/build/
+/build-*/
+/cmake-build-*/
+/CMakeUserPresets.json
