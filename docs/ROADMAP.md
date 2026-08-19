@@ -1,8 +1,12 @@
 # DMXWB DEVELOPMENT ROADMAP
 
 **Статус:** рабочая дорожная карта реализации утверждённого `TECHNICAL_SPEC.md`  
-**База планирования:** `bcf18dd1e2092eebdddebe60c17001cce300c174`  
+**База актуализации дорожной карты:** `e111c1b5fd6df1b3df3a9c8ff2a68d8c1a230616`  
 **Цель:** последовательно реализовать полное приложение DMXWB с проверяемым PASS/FAIL после каждого значимого этапа.
+
+Дорожная карта является рабочей инструкцией для последующих моделей. Перед началом любого шага модель обязана прочитать `AGENTS.md`, затем `PROJECT_STATE.md`, определить текущий gate и выполнять **только его**. После успешного handoff пользователь присылает новый полный SHA; только после этого разрешён переход к следующему gate.
+
+Текущий продуктовый приоритет: физический DMX является ядром системы; Art-Net — полноценный внешний источник того же DMX-выхода; MQTT/Web — средства локального управления и интеграции Wiren Board; production installation bundle обязан устанавливаться полностью офлайн.
 
 ---
 
@@ -55,10 +59,30 @@ DEV-010  Art-Net runtime, recovery and Source switching
     |
 DEV-011  Static MQTT-only Web UI
     |
-DEV-012  systemd, deployment and diagnostics
+DEV-012  systemd, diagnostics and fully offline deployment
     |
-DEV-013  Full integration and 24h acceptance
+DEV-013  Full integration, offline install and 24h acceptance
 ```
+
+### 2.1. Краткая карта gates
+
+| Gate | Что делаем | Где подтверждаем PASS |
+|---|---|---|
+| `DEV-001` | C++20/CMake foundation и test harness | Windows/dev host |
+| `DEV-002` | Immutable DMX snapshots, channel/slot model, frame core | Host unit tests |
+| `DEV-003` | Минимальный физический DMX transport через RS-485 | Реальный Wiren Board + светильник |
+| `DEV-004` | Непрерывный DMX engine, timing, refresh, serial recovery | Host + Wiren Board |
+| `DEV-005` | RGBW Fixture model, addressing, stable IDs | Host + DMX smoke |
+| `DEV-006` | Config/state persistence и атомарные транзакции | Host/integration tests |
+| `DEV-007` | WB MQTT system + Fixture contract | Host/WB MQTT + DMX |
+| `DEV-008` | Groups и Scenes | Host + несколько DMX адресов |
+| `DEV-009` | Art-Net protocol parser/state machine | Host unit tests |
+| `DEV-010` | Art-Net UDP runtime, recovery, source switching | WB + внешний Art-Net источник |
+| `DEV-011` | Статический MQTT-only Web UI | Browser + локальный MQTT |
+| `DEV-012` | systemd, diagnostics и полностью офлайн deployment bundle | Чистая offline-установка на WB |
+| `DEV-013` | Полная функциональная и 24h acceptance | Реальная система целиком |
+
+Эта таблица задаёт границы. Подробный scope каждого gate ниже является обязательным. Задачу будущего gate не переносить в текущий без отдельной причины и изменения roadmap.
 
 Критический путь проекта:
 
@@ -795,11 +819,11 @@ Web не содержит никакого прямого serial/file/systemd AP
 
 ---
 
-# DEV-012 — systemd, deployment and diagnostics
+# DEV-012 — systemd, diagnostics and fully offline deployment
 
 ## Цель
 
-Оформить приложение как штатно устанавливаемый и самовосстанавливающийся daemon Wiren Board.
+Оформить приложение как штатно устанавливаемый и самовосстанавливающийся daemon Wiren Board и доказать, что production bundle устанавливается полностью офлайн.
 
 ## Реализовать
 
@@ -807,7 +831,10 @@ Web не содержит никакого прямого serial/file/systemd AP
 - `Type=simple`;
 - `Restart=on-failure`;
 - `RestartSec=2s`;
-- install/deploy script;
+- `deploy/install_wirenboard.sh`;
+- финальный локальный installation bundle: готовый ARM64 `dmxwb`, static web, systemd unit, installer и все требуемые локальные runtime-файлы;
+- installer не выполняет `apt update`, online `apt install`, `git clone`, `curl`, `wget`, `npm` или другие интернет-загрузки;
+- installer не требует C++ compiler, CMake или Node.js на целевом Wiren Board;
 - создание:
   - `/etc/dmxwb`;
   - `/var/lib/dmxwb`;
@@ -825,7 +852,9 @@ Web не содержит никакого прямого serial/file/systemd AP
 
 ## Tests
 
-- fresh install;
+- fresh install при физически недоступном внешнем интернете;
+- установка только из локального bundle и отсутствие сетевых загрузок;
+- отсутствие requirement на C++/CMake/Node.js toolchain на целевом WB;
 - start;
 - stop;
 - restart;
@@ -834,16 +863,19 @@ Web не содержит никакого прямого serial/file/systemd AP
 - serial recoverable error;
 - reboot WB;
 - state/config restored;
-- web доступен после reboot;
+- web доступен после reboot по локальной LAN;
+- backend подключается к локальному Mosquitto;
+- базовый physical DMX output работает после offline install;
+- Art-Net принимается из локальной сети;
 - standard WB UI не засорён скрытыми controls.
 
 ## PASS
 
-Обычные recoverable subsystem errors исправляются самим приложением, а systemd restart нужен только при реальном падении процесса.
+Обычные recoverable subsystem errors исправляются самим приложением, systemd restart нужен только при реальном падении процесса, а чистая установка, reboot и базовая работа DMXWB проходят без доступа во внешний интернет.
 
 ---
 
-# DEV-013 — full integration and final acceptance
+# DEV-013 — full integration, offline installation and final acceptance
 
 ## Цель
 
@@ -928,6 +960,19 @@ Web не содержит никакого прямого serial/file/systemd AP
 - state corruption test;
 - no damaged atomic file after simulated interrupted update where safely testable.
 
+### Offline installation
+
+На поддерживаемом Wiren Board при физически недоступном внешнем интернете:
+
+- установить только из финального локального bundle;
+- подтвердить отсутствие online package/download steps;
+- перезагрузить WB;
+- подтвердить запуск `dmxwb` через systemd;
+- открыть Web по локальной LAN;
+- подтвердить локальный MQTT;
+- подтвердить базовый DMX output;
+- подтвердить Art-Net input из локальной сети.
+
 ## 24-hour test
 
 Не менее 24 часов непрерывной работы.
@@ -950,8 +995,10 @@ Web не содержит никакого прямого serial/file/systemd AP
 
 - все automated tests PASS;
 - все hardware/network acceptance tests PASS;
+- offline installation acceptance PASS;
 - 24-hour test PASS;
 - не требуется ручной restart после recoverable Art-Net/MQTT/serial failure;
+- физический DMX и Art-Net выполняют главную функцию проекта на реальном Wiren Board;
 - документация соответствует реальному приложению;
 - `PROJECT_STATE.md` содержит итоговую проверенную конфигурацию и результаты acceptance.
 
@@ -993,3 +1040,22 @@ DEV-010 Art-Net recovery FAIL
 ```
 
 Цель roadmap — не скорость прохождения этапов, а сохранение локальности ошибок и доказуемость каждого слоя.
+
+---
+
+## 5. Как продолжать после каждого SHA
+
+После получения от пользователя нового полного SHA следующая модель действует механически:
+
+1. читает `AGENTS.md`;
+2. читает `PROJECT_STATE.md` и новый SHA пользователя;
+3. находит текущий/следующий gate в этом roadmap;
+4. скачивает необходимые файлы с GitHub именно на этом SHA;
+5. выполняет только scope выбранного gate;
+6. обновляет относящуюся к шагу документацию и `PROJECT_STATE.md`;
+7. упаковывает финальные файлы в root-relative ZIP;
+8. передаёт пользователю handoff строго по формату `AGENTS.md`;
+9. при ошибке остаётся на том же gate;
+10. при новом SHA переходит к следующему gate.
+
+Нельзя перескакивать через hardware gates ради ускорения UI/MQTT/Art-Net разработки. Конечный критерий — полностью рабочее управление реальным DMX-освещением и надёжное внешнее управление по Art-Net на Wiren Board.
