@@ -1,32 +1,41 @@
 # PROJECT_STATE
 
-**Last updated:** 2026-08-18
+**Last updated:** 2026-08-19
 
 ## Current base
 
-Подтверждённая Git база для добавления дорожной карты:
+Confirmed Git base после repository reset, явно присланная пользователем:
 
 ```text
-bcf18dd1e2092eebdddebe60c17001cce300c174
+09dc6cf99146df93c782f68ed0ae14686e0f6314
 ```
 
-После commit этого документа пользователь должен прислать новый полный SHA. Он станет базой `DEV-001`.
+Этот SHA является базой текущего документационного изменения. После применения пакета, проверки и commit пользователь присылает новый полный SHA; он становится единственной базой DEV-001.
 
 ## Current phase
 
-**Roadmap definition before implementation.**
+**Pre-implementation specification finalization.**
 
-Техническое задание согласовано. Репозиторий очищен от старой MOD1/WBEC исследовательской ветки. Подготовлена полная дорожная карта реализации `docs/ROADMAP.md`.
+Repository reset завершён. Пользователь уточнил продуктовые границы перед началом реализации:
 
-После commit roadmap реализация начинается с `DEV-001`.
+- DMXWB является специализированной подсистемой Wiren Board, а не самостоятельной универсальной платформой;
+- главная цель — стабильное управление физическим DMX512 и внешнее управление по Art-Net;
+- эксплуатация предполагается в доверенной локальной LAN; собственные authentication/authorization, Mosquitto ACL и политика доступа к `/mqtt` не входят в scope DMXWB;
+- установка конечного приложения на Wiren Board должна выполняться полностью офлайн, без доступа в интернет.
+
+Текущий шаг изменяет только документацию. Код приложения после repository reset всё ещё отсутствует намеренно.
 
 ## Decided
 
+- DMXWB — компонент программной среды Wiren Board, а не отдельная универсальная платформа.
+- Главная функция — физический DMX512 output; Art-Net является полноценным внешним источником управления этим выходом.
+- Целевая эксплуатация — доверенная локальная LAN; application-level authentication/authorization, Mosquitto ACL, anonymous access policy и security model `/mqtt` не проектируются в DMXWB.
+- Финальная installation bundle должна устанавливаться на поддерживаемый Wiren Board полностью офлайн и не выполнять интернет-загрузок.
 - Основное приложение: C++20.
 - Целевая система: Wiren Board 8.5.1.
 - Один физический DMX512 output.
 - Встроенный RS-485, default `/dev/ttyRS485-1`.
-- Userspace DMX transport по проверенному WB-подходу.
+- Userspace DMX transport по проверенному WB-подходу; без текущей разработки custom kernel/WBEC firmware.
 - Два независимых source: `WB MQTT` и `ART-NET`.
 - Source переключается явно; автоматического переключения нет.
 - Art-Net управляет DMX-каналами напрямую.
@@ -34,81 +43,61 @@ bcf18dd1e2092eebdddebe60c17001cce300c174
 - RGBW Fixture занимает 4 последовательных адреса.
 - Static web без Node.js runtime/build step.
 - Web ↔ backend только через MQTT.
-- Config/runtime state сохраняются на диске.
-- Art-Net автоматически восстанавливается после временной потери сети/источника без restart DMXWB.
-- Документация ведётся вместе с кодом.
-- Разработка выполняется по gates из `docs/ROADMAP.md`.
+- Конфигурация и runtime state сохраняются на диске.
+- Art-Net должен автоматически восстанавливаться после временной потери сети/пульта без restart DMXWB.
+- Документация обновляется вместе с реализацией.
 
 ## Confirmed
 
-- `docs/TECHNICAL_SPEC.md` согласован пользователем.
-- Repository cleanup commit получен:
-  `bcf18dd1e2092eebdddebe60c17001cce300c174`.
+- Утверждён единый документ `docs/TECHNICAL_SPEC.md`.
+- Repository reset завершён; пользователь прислал базовый SHA `09dc6cf99146df93c782f68ed0ae14686e0f6314`.
+- Пользователь подтвердил продуктовые границы, доверенную LAN-модель и обязательную полностью офлайн-установку.
 - Старый репозиторий сохранён пользователем отдельно перед очисткой.
-- Roadmap подготовлен как следующий documentation gate.
 
 ## Not yet implemented
 
-Код приложения отсутствует намеренно.
+После reset код приложения отсутствует намеренно.
 
-Не реализованы:
+Ещё не реализованы:
 
 - C++ project skeleton;
 - unit test harness;
-- DMX core;
-- physical DMX transport;
-- continuous DMX engine;
+- DMX transport;
 - Fixture/Group/Scene model;
+- MQTT layer;
 - persistence;
-- MQTT;
 - Art-Net;
 - static web;
 - systemd deployment.
 
-## Development sequence
+## Next gate
 
-Кратко:
+**DEV-001 — C++ project skeleton and deterministic core tests.**
 
-```text
-DEV-001 Foundation
-DEV-002 DMX core
-DEV-003 Physical DMX proof
-DEV-004 Continuous DMX/recovery
-DEV-005 Fixture RGBW
-DEV-006 Persistence
-DEV-007 MQTT
-DEV-008 Groups/Scenes
-DEV-009 Art-Net core
-DEV-010 Art-Net reliability/source switching
-DEV-011 Web
-DEV-012 systemd/deployment/diagnostics
-DEV-013 Full integration + 24h acceptance
-```
+DEV-001 начинается только после применения этого документационного пакета, его проверки, commit и получения нового полного SHA от пользователя.
 
-Полные цели и PASS criteria — в `docs/ROADMAP.md`.
-
-## Next gate after roadmap commit
-
-**DEV-001 — C++ foundation, build and test harness.**
-
-Цель:
+Цель следующего шага:
 
 1. создать минимальный CMake/C++20 project;
-2. production target `dmxwb`;
-3. отдельный unit-test target;
-4. базовая структура `src/` и `tests/`;
-5. clean configure/build/test;
-6. никаких hardware side effects;
-7. обновить документацию фактическими командами.
+2. определить production/test targets;
+3. создать базовые immutable `DmxSnapshot`/model types без hardware I/O;
+4. подключить unit test infrastructure;
+5. добавить первые deterministic tests для DMX address calculation и RGBW core;
+6. обновить `README.md` и `PROJECT_STATE.md`;
+7. не подключать serial/MQTT/Art-Net в этот gate.
 
-Не подключать serial/MQTT/Art-Net в DEV-001.
+PASS:
+
+- clean configure/build;
+- все unit tests PASS;
+- no hardware side effects;
+- документация соответствует фактическому состоянию.
 
 ## Notes for continuation
 
 Перед любой реализацией:
 
 1. прочитать `AGENTS.md`;
-2. прочитать `docs/PROJECT_STATE.md`;
+2. прочитать это состояние;
 3. прочитать `docs/TECHNICAL_SPEC.md`;
-4. прочитать `docs/ROADMAP.md`;
-5. работать только от нового полного SHA, присланного пользователем после commit roadmap.
+4. работать только от нового полного SHA, присланного пользователем после commit текущего документационного изменения.
