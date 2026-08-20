@@ -1,12 +1,26 @@
 # DMXWB DEVELOPMENT ROADMAP
 
 **Статус:** рабочая дорожная карта реализации утверждённого `TECHNICAL_SPEC.md`  
-**База актуализации дорожной карты:** `e111c1b5fd6df1b3df3a9c8ff2a68d8c1a230616`  
-**Цель:** последовательно реализовать полное приложение DMXWB с проверяемым PASS/FAIL после каждого значимого этапа.
+**База актуализации дорожной карты:** `e6b563da756023a3e87afe38fb25e59a98d7d21e`  
+**Дата актуализации:** 2026-08-20  
+**Цель:** последовательно реализовать полное приложение DMXWB с проверяемым PASS/FAIL после каждого значимого engineering gate.
 
-Дорожная карта является рабочей инструкцией для последующих моделей. Перед началом любого шага модель обязана прочитать `AGENTS.md`, затем `PROJECT_STATE.md`, определить текущий gate и выполнять **только его**. После успешного handoff пользователь присылает новый полный SHA; только после этого разрешён переход к следующему gate.
+Дорожная карта является рабочей инструкцией по порядку разработки. Источник истины — актуальное состояние репозитория. Перед каждым шагом необходимо прочитать `AGENTS.md`, `PROJECT_STATE.md`, относящиеся к задаче части `TECHNICAL_SPEC.md` и настоящий roadmap.
 
-Текущий продуктовый приоритет: физический DMX является ядром системы; Art-Net — полноценный внешний источник того же DMX-выхода; MQTT/Web — средства локального управления и интеграции Wiren Board; production installation bundle обязан устанавливаться полностью офлайн.
+Пользователь самостоятельно вносит подготовленные изменения в репозиторий. Новый полный SHA после пользовательского commit/push подтверждает завершение конкретного шага и разрешает переход к следующему шагу, если он предусмотрен. Engineering gate получает PASS только по своим фактическим критериям — один только documentation commit или наличие кода в `master` не заменяет hardware/integration test.
+
+Текущий продуктовый приоритет: физический DMX является ядром системы; Art-Net — полноценный внешний источник того же DMX-выхода; MQTT/Web — средства локального управления и интеграции с Wiren Board; production installation bundle устанавливается полностью офлайн.
+
+Целевая платформа — **контроллеры серии Wiren Board 8 (WB8)**. DMXWB является расширением возможностей Wiren Board, а не заменой контроллера или самостоятельной SCADA.
+
+Development/build environment:
+
+```text
+Windows + Visual Studio 2026 -> host development/tests
+Local Linux on laptop        -> Linux/target build and production artifacts
+WB8                          -> runtime/hardware/integration acceptance
+Docker                       -> не используется
+```
 
 ---
 
@@ -14,23 +28,40 @@
 
 Дорожная карта описывает порядок разработки, но не заменяет техническое задание.
 
-При конфликте документов приоритет:
+При конфликте документов по продуктовым требованиям приоритет:
 
-1. `docs/TECHNICAL_SPEC.md` — что должно быть реализовано в конечном приложении.
+1. `docs/TECHNICAL_SPEC.md` — что должно быть реализовано.
 2. `docs/ROADMAP.md` — в каком порядке это реализуется и проверяется.
-3. `docs/PROJECT_STATE.md` — где именно находится текущая работа.
+3. `docs/PROJECT_STATE.md` — где находится текущая работа и что уже подтверждено.
 
-Каждый этап:
+Процесс взаимодействия и формат handoff определяет `AGENTS.md`.
+
+Каждый engineering gate:
 
 - имеет одну основную инженерную цель;
-- строится только от полного SHA предыдущего PASS-коммита;
+- выполняется от актуального состояния репозитория;
 - включает код, тесты и относящуюся к этапу документацию;
 - не считается завершённым только потому, что код компилируется;
-- получает PASS только после предусмотренных автоматических и/или hardware tests;
-- при FAIL остаётся текущим этапом до устранения причины;
-- не расширяется побочными задачами, не нужными для его gate.
+- получает PASS только после предусмотренных automated/hardware/integration tests;
+- при FAIL остаётся текущим gate до устранения причины;
+- не расширяется задачами будущих gates без отдельной причины и изменения roadmap.
 
-Разработка идёт к одному полному приложению. Этапы не являются отдельными продуктовыми версиями.
+Между engineering gates и внутри текущего gate допускаются отдельные документационные, организационные и build-enablement шаги. Такой шаг завершается пользовательским commit SHA, но сам по себе не означает PASS текущего engineering gate.
+
+Перед каждым новым шагом ассистент заново сверяется с актуальным репозиторием. SHA из предыдущего handoff используется для трассируемости и подтверждения завершения шага, а не вместо чтения репозитория.
+
+Разработка идёт к одному приложению. Этапы не являются отдельными продуктовыми версиями.
+
+### 1.1. Platform/build rules
+
+- target = серия WB8, а не одна фиксированная версия контроллера;
+- конкретная модель WB8 и версия WB software фиксируются в hardware acceptance;
+- host build/tests выполняются на ноутбуке пользователя;
+- Windows / Visual Studio 2026 используется для host development/tests;
+- локальный Linux используется для Linux-specific и target build;
+- production binary не компилируется на WB8 как обязательная часть workflow;
+- конкретный non-Docker target toolchain должен быть практически подтверждён до production deployment;
+- Docker не используется для build, cross-build, runtime, deployment или обязательных tests.
 
 ---
 
@@ -68,23 +99,21 @@ DEV-013  Full integration, offline install and 24h acceptance
 
 | Gate | Что делаем | Где подтверждаем PASS |
 |---|---|---|
-| `DEV-001` | C++20/CMake foundation и test harness | Windows/dev host |
+| `DEV-001` | C++20/CMake foundation и test harness | Windows / Visual Studio 2026 |
 | `DEV-002` | Immutable DMX snapshots, channel/slot model, frame core | Host unit tests |
-| `DEV-003` | Минимальный физический DMX transport через RS-485 | Реальный Wiren Board + светильник |
-| `DEV-004` | Непрерывный DMX engine, timing, refresh, serial recovery | Host + Wiren Board |
-| `DEV-005` | RGBW Fixture model, addressing, stable IDs | Host + DMX smoke |
+| `DEV-003` | Target build path + минимальный физический DMX transport | Local Linux + реальный WB8 + светильник |
+| `DEV-004` | Непрерывный DMX engine, timing, refresh, serial recovery | Host + WB8 |
+| `DEV-005` | RGBW Fixture model, addressing, stable IDs | Host + WB8 DMX smoke |
 | `DEV-006` | Config/state persistence и атомарные транзакции | Host/integration tests |
-| `DEV-007` | WB MQTT system + Fixture contract | Host/WB MQTT + DMX |
-| `DEV-008` | Groups и Scenes | Host + несколько DMX адресов |
+| `DEV-007` | WB MQTT system + Fixture contract | Host/WB8 MQTT + DMX |
+| `DEV-008` | Groups и Scenes | Host + несколько DMX addresses |
 | `DEV-009` | Art-Net protocol parser/state machine | Host unit tests |
-| `DEV-010` | Art-Net UDP runtime, recovery, source switching | WB + внешний Art-Net источник |
-| `DEV-011` | Статический MQTT-only Web UI | Browser + локальный MQTT |
-| `DEV-012` | systemd, diagnostics и полностью офлайн deployment bundle | Чистая offline-установка на WB |
-| `DEV-013` | Полная функциональная и 24h acceptance | Реальная система целиком |
+| `DEV-010` | Art-Net UDP runtime, recovery, source switching | WB8 + внешний Art-Net source |
+| `DEV-011` | Статический MQTT-only Web UI | Browser + локальный MQTT/WB8 |
+| `DEV-012` | systemd, diagnostics и offline deployment bundle | Чистая offline-установка на WB8 |
+| `DEV-013` | Полная функциональная и 24h acceptance | Реальная WB8-система целиком |
 
-Эта таблица задаёт границы. Подробный scope каждого gate ниже является обязательным. Задачу будущего gate не переносить в текущий без отдельной причины и изменения roadmap.
-
-Критический путь проекта:
+Критический путь:
 
 ```text
 C++ foundation
@@ -94,10 +123,11 @@ C++ foundation
     -> MQTT
     -> Art-Net reliability
     -> Web
+    -> production/offline deployment
     -> final acceptance
 ```
 
-Физический DMX проверяется раньше остальных крупных подсистем, потому что именно он является основой всего приложения.
+Физический DMX проверяется раньше остальных крупных подсистем, потому что он является основой приложения.
 
 ---
 
@@ -116,11 +146,11 @@ C++ foundation
 - базовую структуру `src/` и `tests/`;
 - минимальный `main.cpp`;
 - общий namespace проекта;
-- правила warning/error для production build;
+- warning/error rules;
 - deterministic unit-test runner;
-- базовые типы ошибок/результатов, только если они реально нужны текущему коду.
+- базовые типы ошибок/результатов только при необходимости.
 
-До добавления новой сторонней runtime-зависимости подтвердить её доступность/пригодность для целевого WB8 ARM64.
+До добавления сторонней runtime-зависимости подтвердить её пригодность для поддерживаемых WB8 и офлайн-deployment.
 
 ## Не включать
 
@@ -134,21 +164,23 @@ C++ foundation
 
 ## Tests
 
-Минимум:
+На Windows / Visual Studio 2026:
 
 - clean CMake configure;
 - clean build;
 - unit-test executable запускается;
-- intentionally simple test PASS;
-- production executable запускается без обращения к hardware и корректно завершается в тестовом режиме/с минимальным CLI, если такой режим нужен.
+- simple test PASS;
+- production executable запускается без hardware side effects.
+
+При необходимости те же core tests повторяются в локальном Linux.
 
 ## PASS
 
 - проект собирается с нуля;
-- unit tests = PASS;
+- unit tests PASS;
 - нет hardware side effects;
-- структура проекта соответствует `TECHNICAL_SPEC.md`;
-- `README.md` и `PROJECT_STATE.md` обновлены фактическими командами сборки/тестов.
+- структура соответствует ТЗ;
+- README/PROJECT_STATE содержат фактические команды.
 
 ---
 
@@ -156,7 +188,7 @@ C++ foundation
 
 ## Цель
 
-Создать hardware-independent ядро данных, которое физический DMX thread позже сможет получать целым immutable snapshot.
+Создать hardware-independent ядро данных, которое физический DMX thread получает только целым immutable snapshot.
 
 ## Реализовать
 
@@ -164,35 +196,32 @@ C++ foundation
 - максимум 512 каналов;
 - `slot_count`;
 - generation/revision snapshot;
-- безопасную индексацию DMX channel 1..512;
-- расчёт `slot_count` по последнему используемому адресу;
-- модель физического payload:
-  - Start Code отдельно от channels;
-  - channels 1..N;
-- double-buffer/immutable snapshot publication primitive либо эквивалентную безопасную схему;
-- clock/scheduling helper interface, не привязанный пока к serial.
+- безопасную one-based индексацию 1..512;
+- расчёт slot_count;
+- Start Code отдельно от channels;
+- immutable/double-buffer publication primitive или эквивалент;
+- clock/scheduling helper interface без serial.
 
 ## Не включать
 
-- реальный `termios`;
+- реальный termios;
 - BREAK;
-- Fixture color algorithms;
+- Fixture algorithms;
 - MQTT;
 - Art-Net.
 
 ## Tests
 
-- channel 1 и channel 512;
+- channel 1 и 512;
 - invalid channel rejection;
-- `slot_count = 40`;
-- `slot_count = 60` при Start Address 21 / 10 RGBW fixtures — только на уровне расчётного helper;
-- snapshot не может наблюдаться частично обновлённым;
-- Start Code не создаёт off-by-one относительно channel 1;
-- копирование/публикация snapshot сохраняет generation и data целостно.
+- slot_count 40/60 examples;
+- snapshot не наблюдается частично обновлённым;
+- Start Code не создаёт off-by-one;
+- generation/data сохраняются целиком.
 
 ## PASS
 
-Все core tests deterministic и не требуют WB.
+Core tests deterministic и hardware-independent.
 
 ---
 
@@ -200,58 +229,78 @@ C++ foundation
 
 ## Цель
 
-Доказать на реальном Wiren Board 8.5.1, что C++ transport способен физически выдавать рабочий DMX512 через встроенный `/dev/ttyRS485-1`.
+Доказать на реальном контроллере **серии WB8**, что C++ transport физически выдаёт рабочий DMX512 через встроенный `/dev/ttyRS485-1`.
 
 Это первый обязательный hardware gate проекта.
 
-## Реализовать
+Конкретная модель WB8 и версия установленного ПО фиксируются в `PROJECT_STATE.md` вместе с результатом hardware test, но они не становятся единственной целевой платформой проекта.
+
+## DEV-003A — target build enablement
+
+Перед физическим запуском должен существовать способ получить Linux binary для тестируемого WB8 **на ноутбуке пользователя**.
+
+Используется локальный Linux. Docker не используется.
+
+Нужно определить и подтвердить фактический target build path:
+
+- архитектура тестируемого WB8;
+- подходящий compiler/cross compiler;
+- sysroot/runtime ABI при необходимости;
+- CMake toolchain/configuration при необходимости;
+- способ доставки готового binary на WB8;
+- запуск `dmxwb --version` на WB8.
+
+Этот подпункт не требует production installer и не является DEV-012. Его задача только дать воспроизводимый бинарник для текущего hardware gate.
+
+## DEV-003B — physical transport proof
 
 Минимальный `DmxTransport`:
 
 - открыть выбранный serial;
-- базовый default `/dev/ttyRS485-1`;
+- default `/dev/ttyRS485-1`;
 - data mode `250000 8N2`;
-- программный BREAK по проверенному WB-подходу:
+- software BREAK по WB-подходу:
   - 38400;
   - write `0x00`;
-  - flush;
+  - wait/drain;
   - возврат 250000 8N2;
 - отправить Start Code `0x00`;
-- отправить небольшой фиксированный набор channels;
+- отправить фиксированный RGBW pattern;
 - корректно закрыть порт.
 
-Для gate разрешён отдельный diagnostic CLI/test mode, если он не смешивается с production runtime logic.
+Отдельный diagnostic CLI/test mode разрешён и не должен смешиваться с production runtime logic.
 
 ## Hardware test
 
 На реальном RGBW fixture с известным стартовым адресом:
 
-- все каналы 0;
+- all-off;
 - R only;
 - G only;
 - B only;
 - W only;
-- все четыре = 255.
+- all-on.
 
-При наличии безопасного измерительного оборудования проверить реальный bit timing/BREAK. Подключение earth-grounded oscilloscope к A/B выполнять только после подтверждения безопасной схемы измерения.
+При наличии безопасного измерительного оборудования можно проверить bit timing/BREAK. Earth-grounded oscilloscope к A/B не подключать без подтверждённой безопасной схемы измерения.
 
 ## STOP CONDITION
 
-Если C++-реализация проверенного WB BREAK/serial метода не даёт стабильный физический DMX:
+Если transport не даёт стабильный физический DMX:
 
 - не переходить к Fixture/MQTT/Art-Net;
 - не маскировать проблему retries/UI;
 - оставаться на DEV-003;
-- измерить и исправить именно transport.
+- исправлять transport/build compatibility в рамках gate.
 
-Возврат к custom kernel/WBEC не является автоматическим решением и требует отдельного изменения ТЗ.
+Возврат к custom kernel/WBEC требует отдельного изменения ТЗ.
 
 ## PASS
 
-- реальный fixture устойчиво реагирует на все фиксированные тестовые patterns;
+- target binary собран на ноутбуке и запускается на тестируемом WB8;
+- fixture устойчиво реагирует на все patterns;
 - процесс не требует patch kernel/WBEC;
-- serial после теста корректно освобождается;
-- команды и фактический hardware result документированы.
+- serial после теста освобождается;
+- model/WB software/build toolchain и hardware result документированы.
 
 ---
 
@@ -266,49 +315,42 @@ C++ foundation
 Отдельный `DmxOutput` worker:
 
 - единственный владелец serial fd;
-- непрерывный BREAK + frame loop;
-- frame start scheduling по абсолютному времени;
-- configurable refresh:
-  - min 10 Hz;
-  - max protocol limit 44 Hz;
-  - default 30 Hz;
-- проверку физически достижимого refresh для текущего `slot_count`;
-- применение нового snapshot только между кадрами;
-- runtime изменение refresh без закрытия serial, если это технически корректно;
+- continuous BREAK + frame loop;
+- frame-start scheduling по абсолютному времени;
+- configurable refresh 10..44 Hz, default 30 Hz;
+- validation физически достижимого refresh;
+- новый snapshot только между кадрами;
+- runtime refresh change без закрытия serial, если корректно;
 - serial error detection;
 - close/reopen/retry;
-- автоматическое восстановление с актуального snapshot;
-- counters/diagnostics:
-  - frames sent;
-  - configured refresh;
-  - measured/actual refresh;
-  - last transport error.
+- recovery с актуального snapshot;
+- diagnostics/counters.
 
 ## Tests
 
 Host/unit:
 
 - scheduler arithmetic;
-- невозможный refresh отклоняется;
-- snapshot switch только на frame boundary;
+- impossible refresh rejected;
+- snapshot switch only at frame boundary;
 - no mixed generation frame;
 - retry-state transitions.
 
-WB hardware:
+WB8 hardware:
 
 - 10 Hz;
 - 30 Hz;
 - 44 Hz, когда длина кадра допускает;
-- изменение частоты на лету;
-- длительный непрерывный fixed-pattern smoke test;
-- временная ошибка/освобождение порта и автоматический recovery, если её можно безопасно воспроизвести.
+- runtime refresh change;
+- continuous fixed-pattern smoke;
+- recoverable serial error/recovery, если безопасно воспроизвести.
 
 ## PASS
 
-- стабильный непрерывный DMX;
-- нет заметного flicker на hardware smoke test;
-- runtime refresh работает в допустимом диапазоне;
-- recoverable serial error не требует restart процесса.
+- stable continuous DMX;
+- no visible flicker;
+- refresh соответствует допустимому диапазону;
+- recoverable serial error не требует process restart.
 
 ---
 
@@ -316,11 +358,11 @@ WB hardware:
 
 ## Цель
 
-Реализовать утверждённую модель RGBW-светильника независимо от MQTT/Web.
+Реализовать утверждённую RGBW Fixture model независимо от MQTT/Web.
 
 ## Реализовать
 
-`Fixture`:
+Fixture:
 
 - stable ID;
 - Name;
@@ -328,60 +370,38 @@ WB hardware:
 - R/G/B/W;
 - Brightness;
 - Temperature;
-- расчёт actual RGBW;
+- actual RGBW;
 - factual Power;
-- RGB/Color rule `W=0`;
-- Temperature rule:
-  - RGB=255;
-  - W=temperature 0..255;
-- Brightness scaling всех четырёх каналов;
-- Power OFF сохраняет внутреннее состояние;
-- Power ON восстанавливает;
+- RGB/Color -> W=0;
+- Temperature -> RGB=255, W=0..255;
+- Brightness scaling всех каналов;
+- Power restore;
 - Reset = ON, Brightness 100, RGBW 255.
 
 Fixture collection/config:
 
-- `Fixture Count`;
-- `Start Address`;
+- Fixture Count;
+- Start Address;
 - 4 channels per Fixture;
 - sequential addressing;
 - validation <=512;
-- `Fixture Count=0`;
-- stable monotonic fixture IDs;
-- ID не переиспользуются;
-- изменение Start Address не меняет logical state;
-- построение целого `mqtt DmxSnapshot`.
+- Count=0;
+- stable monotonic IDs;
+- no ID reuse;
+- Start Address не меняет logical state;
+- один целый mqtt DmxSnapshot.
 
 ## Tests
 
-Все алгоритмы из `TECHNICAL_SPEC.md`, включая:
-
-- individual R/G/B takeover;
-- Color;
-- Temperature 0/50/100;
-- Brightness;
-- Power restore;
-- factual Power при Brightness 0;
-- Reset;
-- address 1;
-- non-1 Start Address;
-- max boundary 512;
-- count decrease/increase без ID reuse;
-- atomic snapshot rebuild.
+Все алгоритмы TECHNICAL_SPEC, включая RGB takeover, Color, Temperature 0/50/100, Brightness, Power restore, factual Power при Brightness=0, Reset, addressing boundaries, ID reuse protection и atomic snapshot rebuild.
 
 ## Hardware smoke
 
-Минимальный test fixture через уже доказанный `DmxOutput`:
-
-- R/G/B;
-- Temperature;
-- Brightness;
-- Power OFF/ON restore;
-- Reset.
+Через доказанный `DmxOutput` проверить R/G/B, Temperature, Brightness, Power OFF/ON restore и Reset.
 
 ## PASS
 
-Модель и физический output совпадают с ТЗ.
+Модель и physical output совпадают с ТЗ.
 
 ---
 
@@ -389,36 +409,28 @@ Fixture collection/config:
 
 ## Цель
 
-Добавить каноническую конфигурацию и runtime state без влияния файлового I/O на DMX timing.
+Добавить каноническую конфигурацию и runtime state без влияния file I/O на DMX timing.
 
 ## Реализовать
 
 - `/etc/dmxwb/config.json`;
 - `/var/lib/dmxwb/state.json`;
-- version;
-- config revision;
-- monotonic counters:
-  - fixture;
-  - group;
-  - scene;
+- version/revision;
+- monotonic fixture/group/scene counters;
 - parse/serialize;
-- полную валидацию до применения;
-- atomic `tmp + fsync + rename`;
+- full validation before apply;
+- atomic tmp + fsync + rename;
 - dirty state;
 - 2 s debounce;
 - max 10 s dirty interval;
-- forced dirty save on graceful shutdown;
+- forced save on graceful shutdown;
 - safe defaults;
-- поведение при corrupt state;
-- поведение при corrupt config;
-- config transaction:
-  - validate;
-  - save;
-  - publish/apply atomically.
+- corrupt state/config behavior;
+- atomic config transaction.
 
 ## Не включать
 
-MQTT transport ещё не нужен: config API тестируется напрямую через C++/test helpers.
+MQTT transport ещё не нужен: API тестируется через C++ helpers.
 
 ## Tests
 
@@ -429,15 +441,14 @@ MQTT transport ещё не нужен: config API тестируется нап�
 - Scene with missing Fixture;
 - revision mismatch;
 - atomic replace failure simulation;
-- corrupt state fallback;
-- corrupt config fallback;
-- dirty debounce logic;
+- corrupt state/config fallback;
+- debounce;
 - stable IDs survive restart.
 
 ## PASS
 
-- persistence не вызывается из DMX output thread;
-- корректный restart восстанавливает state;
+- persistence не вызывается из DMX thread;
+- restart восстанавливает state;
 - повреждённый новый config не заменяет рабочий.
 
 ---
@@ -446,19 +457,18 @@ MQTT transport ещё не нужен: config API тестируется нап�
 
 ## Цель
 
-Подключить libmosquitto и реализовать утверждённый MQTT contract для системного устройства и Fixtures.
+Подключить libmosquitto и реализовать MQTT contract системного устройства и Fixtures.
 
 ## Реализовать
 
 MQTT lifecycle:
 
 - localhost broker;
-- reconnect;
-- subscriptions;
+- reconnect/subscriptions;
 - non-retained commands;
 - retained command rejection;
 - metadata;
-- retained factual state;
+- retained state;
 - full republish after reconnect;
 - LWT/offline behavior.
 
@@ -484,17 +494,12 @@ temperature
 reset
 ```
 
-Web/internal retained snapshots:
+Internal/web snapshots:
 
 ```text
 /dmxwb/config
 /dmxwb/state
 /dmxwb/status
-```
-
-Config transaction:
-
-```text
 /dmxwb/config/set
 /dmxwb/config/result
 ```
@@ -503,19 +508,18 @@ MQTT callback только создаёт Commands и помещает их в C
 
 ## Tests
 
-- `/on -> Controller -> snapshot -> factual state`;
-- `Color R;G;B`;
-- factual RGB after Brightness;
-- factual RGB zero after OFF;
-- saved state retained in `/dmxwb/state`;
+- `/on -> Controller -> snapshot -> state`;
+- Color;
+- RGB after Brightness/OFF;
+- saved state in `/dmxwb/state`;
 - retained `/on` ignored;
-- reconnect full resync;
+- reconnect resync;
 - broker down/up without process restart;
-- Source retained/restored from disk, not broker.
+- Source restored from disk, not broker.
 
 ## Hardware integration
 
-При WB MQTT управлять реальным fixture через MQTT CLI/client и подтвердить физический результат.
+Управлять реальным fixture через WB MQTT и подтвердить physical result.
 
 ## PASS
 
@@ -527,7 +531,7 @@ MQTT loss/recovery не останавливает DMX loop.
 
 ## Цель
 
-Реализовать всю логическую групповую работу и snapshots сцен поверх уже работающих Fixture/MQTT/persistence.
+Реализовать Group/Scene logic поверх Fixture/MQTT/persistence.
 
 ## Реализовать
 
@@ -536,58 +540,44 @@ Groups:
 - stable monotonic ID;
 - Name;
 - members by Fixture ID;
-- Fixture может быть в нескольких groups;
-- Power;
-- R/G/B;
-- Color;
-- Brightness;
-- Temperature;
-- Reset;
-- factual Group Power = OR(member factual Power);
-- group setting state = последняя команда через Group;
-- удаление Fixture очищает memberships;
-- пустая Group допустима.
+- multiple group membership;
+- все согласованные controls;
+- factual Group Power = OR(member Power);
+- last group setting state;
+- Fixture deletion cleans memberships;
+- empty group allowed.
 
 Scenes:
 
 - stable monotonic ID;
 - Name;
-- create from current state;
-- overwrite;
-- apply;
-- delete;
-- snapshot:
-  - Fixture ID;
-  - R/G/B/W;
-  - Brightness;
-  - requested Power;
+- create/overwrite/apply/delete;
+- Fixture snapshots by stable ID;
 - missing Fixture ignored;
-- newly created Fixture untouched;
+- new Fixture untouched;
 - Apply не переключает Source;
-- один atomic MQTT DMX snapshot при Apply.
+- one atomic mqtt DMX snapshot.
 
-MQTT devices для Group/Scene согласно ТЗ.
+MQTT devices согласно ТЗ.
 
 ## Tests
 
-- один Fixture в нескольких Groups;
+- multiple groups;
 - last command wins;
-- group Power restore индивидуальных states;
-- group reset;
-- empty group;
+- group Power restore/reset/empty;
 - factual group Power;
-- scene create/apply/overwrite/delete;
-- scene after Fixture deletion/addition;
+- scene lifecycle;
+- fixture deletion/addition;
 - atomic scene snapshot;
-- retained topic cleanup after delete.
+- retained topic cleanup.
 
 ## Hardware integration
 
-Проверить Group и Scene на нескольких реальных DMX addresses.
+Проверить Group/Scene на нескольких реальных DMX addresses.
 
 ## PASS
 
-Нет последовательного визуального перебора Fixtures при Scene Apply.
+Нет последовательного visual перебора Fixtures при Scene Apply.
 
 ---
 
@@ -595,58 +585,33 @@ MQTT devices для Group/Scene согласно ТЗ.
 
 ## Цель
 
-Реализовать и полностью unit-test Art-Net parser/state machine до подключения реального UDP runtime.
+Реализовать и unit-test Art-Net parser/state machine без реального UDP runtime.
 
 ## Реализовать
 
 - Art-Net 4 constants;
-- UDP packet structures без unsafe cast сетевого payload;
-- `ArtDmx`;
-- `ArtPoll`;
-- `ArtPollReply`;
+- safe packet parsing;
+- ArtDmx/ArtPoll/ArtPollReply;
 - signature/opcode/protocol validation;
-- Port-Address;
-- Universe config 0..32767;
-- ArtDmx Length even 2..512;
-- persistent `artnet_state[512]`;
+- Port-Address/Universe;
+- even Length 2..512;
+- persistent artnet_state[512];
 - short packet Hold Last;
-- long packet truncation to physical slot_count;
-- new channels zero-initialized when slot_count grows;
-- Sequence:
-  - 0 disables ordering;
-  - normal increment;
-  - rollover;
-  - stale packet rejection;
-  - reset after LOST/new source;
-- source state:
-  - WAITING;
-  - ACTIVE;
-  - LOST;
-  - CONFLICT;
+- long packet truncation;
+- new channels zero-init when slot_count grows;
+- Sequence ordering/rollover/reset;
+- WAITING/ACTIVE/LOST/CONFLICT;
 - active-source IP lock;
-- release after timeout;
+- timeout release;
 - no HTP/LTP merge.
 
 ## Tests
 
-Использовать deterministic packet fixtures:
-
-- valid/invalid header;
-- invalid opcode;
-- protocol version;
-- odd Length;
-- too short/too long payload;
-- wrong universe;
-- Length 10 into 40;
-- Length 100 into 40;
-- Sequence rollover;
-- reboot-like sequence reset;
-- second source conflict;
-- lock release after LOST.
+Deterministic packet fixtures для header/opcode/version/length/universe, short/long packets, rollover, source reboot, conflict и lock release.
 
 ## PASS
 
-Art-Net core не требует socket или real time для unit tests.
+Art-Net core не требует socket/real time для tests.
 
 ---
 
@@ -662,62 +627,41 @@ Art-Net worker:
 
 - IPv4 UDP 6454;
 - bind/rebind;
-- ArtPoll receive;
-- ArtPollReply;
-- ArtDmx receive;
+- Poll/PollReply/Dmx;
 - 3 s LOST timeout;
-- socket auto-recovery;
+- socket recovery;
 - diagnostics;
-- active source IP;
-- conflict source IP;
-- `last_packet_age`;
+- active/conflict source IP;
+- last packet age;
 - Hold Last.
 
 Source selector:
 
 - MQTT / ART-NET;
-- switch только между DMX frames;
-- оба inputs работают постоянно;
-- ART-NET без первого valid ArtDmx:
-  - сохранить текущий physical output до появления первого Art-Net snapshot;
-- ART-NET LOST:
-  - Hold Last;
-  - Source остаётся ART-NET;
-- возврат Art-Net:
-  - автоматический;
-  - без restart.
+- switch only between frames;
+- both inputs live;
+- no first ArtDmx -> preserve current physical output until snapshot;
+- LOST -> Hold Last, Source stays ART-NET;
+- return -> automatic without restart.
 
 ## Software test source
 
-На ноутбуке подобрать отдельное Art-Net приложение/контроллер и зафиксировать его название/версию в `PROJECT_STATE.md` перед hardware/network acceptance.
+На ноутбуке выбрать Art-Net приложение/контроллер и зафиксировать название/версию в PROJECT_STATE перед network acceptance.
 
 ## Reliability tests
 
 При активном Art-Net:
 
-- disconnect Ethernet ~0.5 s;
-- 5 s;
-- 30 s;
-- restart Art-Net application;
-- power/off-on source where applicable;
+- Ethernet disconnect ~0.5/5/30 s;
+- restart/power cycle source;
 - IP change;
-- WB network down/up;
-- repeated disconnect/reconnect;
-- second Art-Net source conflict if возможно воспроизвести.
-
-Во всех случаях:
-
-- `dmxwb` process не требует restart;
-- physical DMX продолжает Hold Last при loss;
-- после возврата управление автоматически возобновляется;
-- Source не меняется сам;
-- sequence/source lock не препятствуют recovery.
+- WB8 network down/up;
+- repeated reconnect;
+- second source conflict if reproducible.
 
 ## PASS
 
-Главный критерий:
-
-> после случайного временного обрыва Art-Net оператор не выполняет никаких действий для восстановления DMXWB.
+После временного Art-Net failure оператор не выполняет ручных действий для восстановления DMXWB.
 
 ---
 
@@ -725,7 +669,7 @@ Source selector:
 
 ## Цель
 
-Реализовать полный статический интерфейс настройки/управления поверх уже стабильного MQTT API.
+Реализовать статический интерфейс поверх стабильного MQTT API.
 
 ## Реализовать
 
@@ -738,7 +682,7 @@ www/dmxwb/
     styles.css
 ```
 
-Без Node.js runtime/build step и без внешних интернет-зависимостей.
+Без Node.js runtime/build step и без внешних internet dependencies.
 
 Разделы:
 
@@ -747,75 +691,22 @@ www/dmxwb/
 - Сцены;
 - Настройки.
 
-Fixture UI:
-
-- Name;
-- Power;
-- Color;
-- R/G/B;
-- Brightness;
-- Temperature;
-- Reset.
-
-Constructor:
-
-- Fixture Count;
-- Start Address;
-- Names.
-
-Groups:
-
-- create;
-- rename;
-- members;
-- delete;
-- controls.
-
-Scenes:
-
-- create from current state;
-- apply;
-- overwrite;
-- rename;
-- delete.
-
-Settings:
-
-- DMX port;
-- Refresh Rate;
-- Art-Net Universe;
-- Source;
-- DMX/Art-Net diagnostics.
-
-MQTT:
-
-- WebSocket `/mqtt`;
-- automatic reconnect;
-- retained resync;
-- no command replay;
-- live controls immediate;
-- structural config via Apply;
-- `request_id + expected_revision`;
-- validation errors displayed;
-- 20–30 publishes/s throttle per slider;
-- final slider value always sent.
+Реализовать Fixture controls, constructor, Groups, Scenes, Settings, diagnostics, MQTT reconnect, config revision conflict, slider throttle 20–30/s и final value publish.
 
 ## Tests
 
 - offline/static load;
-- no Node.js runtime;
+- no Node runtime;
 - MQTT reconnect;
-- two browser tabs/revision conflict;
-- invalid config rejection;
-- Fixture controls;
-- Group controls;
-- Scene operations;
+- two-tab revision conflict;
+- invalid config reject;
+- Fixture/Group/Scene;
 - Source switching;
-- diagnostic state updates.
+- diagnostics.
 
 ## PASS
 
-Web не содержит никакого прямого serial/file/systemd API и не является обязательным для продолжения DMX при закрытом браузере.
+Web не имеет прямого serial/file/systemd API и не нужен для продолжения DMX при закрытом browser.
 
 ---
 
@@ -823,7 +714,9 @@ Web не содержит никакого прямого serial/file/systemd AP
 
 ## Цель
 
-Оформить приложение как штатно устанавливаемый и самовосстанавливающийся daemon Wiren Board и доказать, что production bundle устанавливается полностью офлайн.
+Оформить DMXWB как штатно устанавливаемый daemon WB8 и доказать полностью офлайн installation bundle.
+
+К этому gate target build path на ноутбуке уже должен быть подтверждён ранними hardware gates. DEV-012 доводит его до воспроизводимого production artifact/bundle, а не переносит compilation на WB8.
 
 ## Реализовать
 
@@ -832,46 +725,57 @@ Web не содержит никакого прямого serial/file/systemd AP
 - `Restart=on-failure`;
 - `RestartSec=2s`;
 - `deploy/install_wirenboard.sh`;
-- финальный локальный installation bundle: готовый ARM64 `dmxwb`, static web, systemd unit, installer и все требуемые локальные runtime-файлы;
-- installer не выполняет `apt update`, online `apt install`, `git clone`, `curl`, `wget`, `npm` или другие интернет-загрузки;
-- installer не требует C++ compiler, CMake или Node.js на целевом Wiren Board;
-- создание:
-  - `/etc/dmxwb`;
-  - `/var/lib/dmxwb`;
-  - `/var/www/dmxwb`;
+- production binary, собранный на ноутбуке;
+- static web;
+- systemd unit;
+- installer;
+- required local runtime files;
+- `/etc/dmxwb`, `/var/lib/dmxwb`, `/var/www/dmxwb`;
 - permissions;
 - journald logging;
 - graceful SIGTERM;
 - MQTT LWT;
 - startup/reconnect ordering;
-- diagnostics согласно ТЗ;
-- metadata hidden для Fixture/Group/Scene;
-- в штатном WB UI видны только:
-  - DMXWB Status;
-  - Source.
+- diagnostics;
+- hidden Fixture/Group/Scene metadata;
+- standard WB UI: только Status/Source.
+
+Installer не выполняет:
+
+```text
+apt update
+online apt install
+git clone
+curl/wget
+npm
+compiler/CMake install
+source compilation on WB8
+Docker operations
+```
 
 ## Tests
 
+- production build reproduced on laptop/local Linux;
 - fresh install при физически недоступном внешнем интернете;
-- установка только из локального bundle и отсутствие сетевых загрузок;
-- отсутствие requirement на C++/CMake/Node.js toolchain на целевом WB;
-- start;
-- stop;
-- restart;
-- daemon crash -> systemd recovery;
+- no network downloads;
+- no compiler/CMake/Node/Docker requirement on WB8;
+- start/stop/restart;
+- crash -> systemd recovery;
 - MQTT broker restart;
-- serial recoverable error;
-- reboot WB;
-- state/config restored;
-- web доступен после reboot по локальной LAN;
-- backend подключается к локальному Mosquitto;
-- базовый physical DMX output работает после offline install;
-- Art-Net принимается из локальной сети;
-- standard WB UI не засорён скрытыми controls.
+- serial recovery;
+- WB8 reboot;
+- config/state restore;
+- web after reboot;
+- local Mosquitto;
+- physical DMX;
+- Art-Net;
+- standard WB UI not polluted.
+
+Для tested installation зафиксировать модель WB8, WB software version и build artifact/toolchain identity.
 
 ## PASS
 
-Обычные recoverable subsystem errors исправляются самим приложением, systemd restart нужен только при реальном падении процесса, а чистая установка, reboot и базовая работа DMXWB проходят без доступа во внешний интернет.
+Recoverable subsystem errors исправляются приложением, systemd restart нужен только при реальном process failure, а чистая установка/reboot/basic operation проходят без внешнего интернета и без compilation на WB8.
 
 ---
 
@@ -879,183 +783,154 @@ Web не содержит никакого прямого serial/file/systemd AP
 
 ## Цель
 
-Доказать, что реализовано всё `TECHNICAL_SPEC.md` как единая система.
+Доказать выполнение полного `TECHNICAL_SPEC.md` как единой системы на серии WB8.
 
 ## Перед началом
 
-Выполнить requirements traceability review:
+Requirements traceability review:
 
-- каждый MUST/утверждённый пункт ТЗ связан с кодом;
-- каждый критический алгоритм связан с тестом;
-- нет оставшихся временных diagnostic shortcuts в production path.
+- каждый MUST связан с кодом;
+- критический алгоритм связан с test;
+- нет diagnostic shortcuts в production path;
+- target build и deployment воспроизводимы на ноутбуке без Docker.
 
 ## Full functional acceptance
-
-Проверить:
 
 ### DMX
 
 - default `/dev/ttyRS485-1`;
 - dynamic slot_count;
 - Start Address !=1;
-- 10/30/44 Hz в физически допустимых конфигурациях;
+- 10/30/44 Hz when feasible;
 - continuous output;
-- no visible flicker from DMXWB.
+- no visible flicker.
 
 ### Fixture
 
-- R/G/B;
-- Color;
-- Temperature;
-- Brightness;
-- Power restore;
-- Reset;
-- factual MQTT state.
+R/G/B, Color, Temperature, Brightness, Power restore, Reset, MQTT state.
 
 ### Groups
 
-- multiple memberships;
-- all controls;
-- factual Power;
-- reset.
+Multiple memberships, controls, Power, reset.
 
 ### Scenes
 
-- create;
-- apply;
-- overwrite;
-- rename;
-- delete;
-- atomic visual apply.
+Create/apply/overwrite/rename/delete/atomic visual apply.
 
 ### MQTT
 
-- broker restart/reconnect;
-- retained state;
-- retained command rejection;
-- standard WB UI system device.
+Broker restart/reconnect, retained state, retained command rejection, standard WB UI.
 
 ### Art-Net
 
-- raw channel mapping;
-- short/long packets;
-- Source switching;
-- loss/recovery;
-- IP change;
-- conflict;
-- Hold Last.
+Raw mapping, short/long packets, Source switching, loss/recovery, IP change, conflict, Hold Last.
 
 ### Web
 
-- all management functions;
-- reconnect;
-- revision conflict;
-- no external runtime dependencies.
+Management functions, reconnect, revision conflict, no external runtime dependencies.
 
 ### Persistence
 
-- service restart;
-- WB reboot;
-- config corruption test;
-- state corruption test;
-- no damaged atomic file after simulated interrupted update where safely testable.
+Service restart, WB8 reboot, corruption tests, interrupted atomic update where safely testable.
 
-### Offline installation
+### Build/offline installation
 
-На поддерживаемом Wiren Board при физически недоступном внешнем интернете:
+На ноутбуке:
 
-- установить только из финального локального bundle;
-- подтвердить отсутствие online package/download steps;
-- перезагрузить WB;
-- подтвердить запуск `dmxwb` через systemd;
-- открыть Web по локальной LAN;
-- подтвердить локальный MQTT;
-- подтвердить базовый DMX output;
-- подтвердить Art-Net input из локальной сети.
+- clean/reproducible target build;
+- production bundle creation;
+- no Docker.
+
+На WB8 с отключённым внешним интернетом:
+
+- install only from local bundle;
+- no online packages/downloads;
+- no source compilation;
+- reboot;
+- systemd service;
+- local web/MQTT;
+- physical DMX;
+- Art-Net.
+
+### Platform record
+
+Для каждой acceptance configuration записать:
+
+```text
+WB8 model
+WB software/OS version
+DMX port
+binary/build identity
+toolchain/sysroot identity
+```
 
 ## 24-hour test
 
-Не менее 24 часов непрерывной работы.
-
-В ходе теста периодически:
-
-- менять Fixture RGB/Temperature/Brightness;
-- выполнять Group commands;
-- применять Scenes;
-- переключать Source;
-- использовать Art-Net;
-- делать network disconnect/reconnect;
-- перезапускать MQTT broker;
-- контролировать process uptime/restarts;
-- проверять отсутствие видимого flicker.
+Не менее 24 часов работы с Fixture/Group/Scene changes, source switching, Art-Net, network disconnect/reconnect, MQTT broker restart и uptime/restart monitoring.
 
 ## FINAL PASS
 
-Проект считается реализованным по ТЗ, когда:
-
-- все automated tests PASS;
-- все hardware/network acceptance tests PASS;
-- offline installation acceptance PASS;
+- all automated tests PASS;
+- hardware/network acceptance PASS;
+- target build PASS;
+- offline installation PASS;
 - 24-hour test PASS;
-- не требуется ручной restart после recoverable Art-Net/MQTT/serial failure;
-- физический DMX и Art-Net выполняют главную функцию проекта на реальном Wiren Board;
-- документация соответствует реальному приложению;
-- `PROJECT_STATE.md` содержит итоговую проверенную конфигурацию и результаты acceptance.
+- no manual restart after recoverable failures;
+- physical DMX и Art-Net выполняют главную функцию на реальном WB8;
+- документация соответствует приложению;
+- PROJECT_STATE содержит итоговую tested configuration.
 
 ---
 
 ## 3. Документация по этапам
 
-После каждого PASS обновлять минимум:
+После значимого шага обновляется документация, которую реально затронуло изменение.
 
-```text
-docs/PROJECT_STATE.md
-```
+Минимально:
 
-Обновлять `README.md`, если изменились реальные команды сборки/установки/запуска или пользовательская точка входа.
+- `PROJECT_STATE.md` — когда изменилось фактическое состояние, текущий gate, tested environment или ближайший шаг;
+- `README.md` — когда изменились пользовательские build/install/run commands или точка входа;
+- `TECHNICAL_SPEC.md` — только при согласованном изменении требований;
+- `ROADMAP.md` — при изменении порядка/scope/PASS criteria будущих gates;
+- `AGENTS.md` — при изменении процесса взаимодействия.
 
-Обновлять `docs/TECHNICAL_SPEC.md` только при согласованном изменении требований.
-
-Обновлять `docs/ROADMAP.md`, если изменился порядок/границы будущих gates.
-
-Не создавать отдельные конкурирующие архитектурные документы без реальной необходимости.
+Не создавать конкурирующие архитектурные документы без необходимости.
 
 ---
 
 ## 4. Принцип остановки
 
-Если текущий gate выявляет фундаментальную проблему, следующий gate не начинается.
-
-Особенно:
+Если текущий gate выявляет фундаментальную проблему, следующий engineering gate не начинается.
 
 ```text
-DEV-003 physical DMX FAIL
+DEV-003 target build / physical DMX FAIL
 -> не начинать Fixture/MQTT/Art-Net
 
 DEV-004 unstable continuous DMX
 -> не начинать application layers
 
 DEV-010 Art-Net recovery FAIL
--> не считать сетевой режим готовым и не маскировать проблему Web UI
+-> не считать network mode готовым
 ```
 
-Цель roadmap — не скорость прохождения этапов, а сохранение локальности ошибок и доказуемость каждого слоя.
+Документационные/process шаги внутри текущего gate разрешены и не считаются перескакиванием через gate.
 
 ---
 
 ## 5. Как продолжать после каждого SHA
 
-После получения от пользователя нового полного SHA следующая модель действует механически:
+После получения нового полного SHA пользователя:
 
-1. читает `AGENTS.md`;
-2. читает `PROJECT_STATE.md` и новый SHA пользователя;
-3. находит текущий/следующий gate в этом roadmap;
-4. скачивает необходимые файлы с GitHub именно на этом SHA;
-5. выполняет только scope выбранного gate;
-6. обновляет относящуюся к шагу документацию и `PROJECT_STATE.md`;
-7. упаковывает финальные файлы в root-relative ZIP;
-8. передаёт пользователю handoff строго по формату `AGENTS.md`;
-9. при ошибке остаётся на том же gate;
-10. при новом SHA переходит к следующему gate.
+1. считать предыдущий шаг внесённым пользователем в репозиторий;
+2. заново прочитать актуальный `AGENTS.md` и `PROJECT_STATE.md`;
+3. проверить актуальное состояние GitHub, а не полагаться только на branch name или старый локальный snapshot;
+4. определить следующий шаг/текущий engineering gate;
+5. скачать необходимые файлы из актуального репозитория;
+6. выполнить только scope выбранного шага;
+7. обновить относящуюся документацию;
+8. подготовить root-relative ZIP с финальными файлами;
+9. передать handoff по `AGENTS.md`;
+10. при FAIL продолжить тот же шаг/gate;
+11. при следующем commit SHA снова начать с актуального репозитория.
 
-Нельзя перескакивать через hardware gates ради ускорения UI/MQTT/Art-Net разработки. Конечный критерий — полностью рабочее управление реальным DMX-освещением и надёжное внешнее управление по Art-Net на Wiren Board.
+Нельзя перескакивать через hardware gates ради UI/MQTT/Art-Net. Конечный критерий — полностью рабочее управление реальным DMX-освещением и надёжное Art-Net управление на контроллерах серии WB8.

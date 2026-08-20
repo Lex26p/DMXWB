@@ -6,19 +6,15 @@
 
 Источник истины проекта — актуальное состояние репозитория.
 
-На момент подготовки этого документа текущий `master`:
+База текущего документационного шага — commit пользователя:
 
 ```text
-bbf9f0d334564fa8ae006f9ffd3fa756aefe5cc7
+e6b563da756023a3e87afe38fb25e59a98d7d21e
 ```
 
-Commit:
+Commit завершил предыдущий шаг по обновлению workflow и WB8 development context.
 
-```text
-Add DEV-003 physical DMX transport proof
-```
-
-Этот commit содержит текущую реализацию DEV-003, но сам факт наличия кода в `master` **не означает hardware PASS**.
+Текущий пакет синхронизирует `TECHNICAL_SPEC.md` и `ROADMAP.md` с уже принятыми правилами. До пользовательского commit этого пакета базовым состоянием репозитория остаётся SHA выше.
 
 ## Last confirmed engineering PASS
 
@@ -34,27 +30,28 @@ DEV-002 — DMX core types and deterministic frame model
 6b6e5b8329bbf1d9c893205d60427974e8e59bd5
 ```
 
-DEV-003 остаётся текущим gate до реального hardware test.
+DEV-003 остаётся текущим engineering gate до реального hardware PASS.
 
-## Current collaboration workflow
+## Documentation/platform decisions — synchronized
 
-С 2026-08-20 действуют следующие правила:
+Согласованные условия теперь должны быть одинаково отражены в `AGENTS.md`, `README.md`, `TECHNICAL_SPEC.md` и `ROADMAP.md`:
 
 - источник истины — актуальный репозиторий;
-- пользователь самостоятельно вносит изменения в GitHub;
-- ассистент перед каждым шагом скачивает необходимые файлы из актуального репозитория;
-- ассистент передаёт готовые финальные файлы в root-relative ZIP, а не patch;
-- правила конкретного шага могут адаптироваться к задаче;
-- команды сборки/запуска выдаются только если они реально нужны;
-- после PASS пользователь самостоятельно выполняет commit/push;
-- новый полный SHA от пользователя означает завершение шага и разрешает переход к следующему шагу;
-- перед следующим шагом ассистент снова сверяется с актуальным репозиторием.
-
-Полный процесс описан в `AGENTS.md`.
+- пользователь самостоятельно commit/push-ит изменения;
+- новый SHA подтверждает завершение конкретного шага;
+- перед следующим шагом ассистент заново читает актуальный GitHub;
+- target platform = контроллеры серии Wiren Board 8 (WB8), а не одна конкретная версия;
+- конкретная модель WB8 и версия WB software фиксируются в hardware/integration acceptance;
+- DMXWB — расширение возможностей Wiren Board, а не самостоятельная SCADA и не замена контроллера;
+- Windows / Visual Studio 2026 — основная host development/test среда;
+- локальный Linux на ноутбуке — Linux-specific и target build environment;
+- production binary собирается на ноутбуке, не на WB8;
+- Docker не используется для build/runtime/deployment/tests;
+- WB8 является runtime/hardware/integration target.
 
 ## Development environment
 
-Основная среда пользователя:
+Основная пользовательская среда:
 
 ```text
 Windows
@@ -62,58 +59,72 @@ Visual Studio 2026
 Project: C:\Projects\DMXWB
 ```
 
-На том же ноутбуке доступна локальная Linux-среда.
+На ноутбуке доступна локальная Linux-среда.
 
-Принято:
-
-- Windows / Visual Studio 2026 — основная host development/test среда;
-- локальный Linux — Linux-specific build/tests и подготовка целевой сборки для WB8;
-- контроллеры серии WB8 — runtime/hardware/integration target;
-- production-сборка не должна требовать компиляции исходников непосредственно на WB8;
-- Docker не используется.
+Требуется практически определить non-Docker target build path из локального Linux в бинарник, совместимый с тестируемым WB8. Конкретный compiler/cross compiler, sysroot и ABI пока не считаются Confirmed, пока не проверены на реальном контроллере.
 
 ## Target platform
 
-DMXWB разрабатывается как расширение возможностей контроллеров **серии Wiren Board 8 (WB8)**, а не под одну конкретную ревизию контроллера.
+DMXWB разрабатывается для **серии Wiren Board 8 (WB8)**.
 
-Конкретная модель WB8 и версия установленного ПО должны фиксироваться в результатах hardware/integration acceptance, когда это важно для воспроизводимости теста.
+Проект не должен намеренно зависеть от одной тестовой модели или одной версии ПО, если это не реальное системное ограничение.
 
-DMXWB не заменяет Wiren Board и использует его штатную инфраструктуру согласно `TECHNICAL_SPEC.md`.
+При hardware acceptance фиксируются минимум:
+
+```text
+WB8 model
+WB software / OS version
+DMX port
+binary/build identity
+toolchain/sysroot identity, когда применимо
+```
 
 ## Current phase
 
-**DEV-003 — physical DMX transport proof on `/dev/ttyRS485-1`.**
+**DEV-003 — physical DMX transport proof.**
 
-Цель gate — доказать на реальном контроллере серии WB8 и реальном RGBW-светильнике, что минимальный C++ transport физически формирует рабочий DMX512 через встроенный RS-485.
+Цель engineering gate — доказать на реальном WB8 и реальном RGBW fixture, что C++ transport физически формирует рабочий DMX512 через встроенный RS-485.
 
-Это первый обязательный hardware gate. До его фактического PASS не переходить к continuous DMX engine, Fixture model, MQTT или Art-Net.
+Текущий документационный шаг не является PASS DEV-003 и не меняет функциональную реализацию transport.
 
-Текущий документационный шаг не меняет scope DEV-003 и не считается его PASS.
+После синхронизации документации DEV-003 выполняется в двух последовательных подшагах одного gate:
 
-## Implemented in current DEV-003 package
+```text
+DEV-003A — laptop -> WB8 target build enablement
+DEV-003B — physical DMX transport proof
+```
+
+Это разделение не создаёт нового продуктового gate; оно только отражает реальный workflow, в котором исходники компилируются на ноутбуке.
+
+## Implemented in current DEV-003 code
+
+В `master` уже присутствует пакет physical transport proof, ранее добавленный commit:
+
+```text
+bbf9f0d334564fa8ae006f9ffd3fa756aefe5cc7
+Add DEV-003 physical DMX transport proof
+```
 
 Минимальный `DmxTransport`:
 
 - default port `/dev/ttyRS485-1`;
 - Linux-only real serial backend;
-- корректное освобождение file descriptor в destructor/`close()`;
+- корректное освобождение file descriptor;
 - data mode `250000 8N2`;
-- software BREAK по утверждённому WB-подходу:
+- software BREAK:
   - line rate `38400`;
   - write `0x00`;
-  - дождаться физического завершения передачи;
-  - вернуть line rate `250000 8N2`;
-- Start Code `0x00` передаётся отдельно от channel payload;
-- frame payload берётся из существующего immutable `DmxSnapshot`/`DmxFrameView`;
-- полная запись обрабатывает short writes и `EINTR`;
-- ошибки открытия/config/write/drain возвращаются через `last_error()`;
-- Windows/non-Linux build использует unsupported backend и не обращается к hardware.
+  - wait/drain;
+  - возврат `250000 8N2`;
+- Start Code `0x00` отдельно от channel payload;
+- immutable `DmxSnapshot` / `DmxFrameView`;
+- short writes и `EINTR` обработаны;
+- ошибки возвращаются через `last_error()`;
+- Windows/non-Linux build использует unsupported backend без hardware side effects.
 
-Для точной установки нестандартной скорости `250000` Linux backend использует `termios2` + `BOTHER` и числовую скорость, а не зависит от наличия libc-константы `B250000`.
+Для `250000` Linux backend использует `termios2 + BOTHER`.
 
 ## DEV-003 diagnostic mode
-
-В `dmxwb` добавлен отдельный diagnostic CLI:
 
 ```text
 --dmx-test PATTERN
@@ -133,8 +144,6 @@ white
 all-on
 ```
 
-Для одного RGBW fixture diagnostic mode формирует ровно четыре активных channel values начиная с `--start-channel`; предыдущие slots внутри физического frame остаются нулевыми.
-
 Default:
 
 ```text
@@ -143,58 +152,55 @@ start-channel = 1
 frames        = 120
 ```
 
-Diagnostic mode повторяет один и тот же frame с приблизительной паузой 25 ms, только чтобы реальный fixture устойчиво показал фиксированный test pattern. Это не production scheduler и не реализация `DEV-004`.
+Diagnostic повторяет фиксированный frame с приблизительной паузой 25 ms. Это не production scheduler и не DEV-004.
 
-## Host tests added in DEV-003
-
-Дополнительно deterministic tests проверяют:
-
-- parser diagnostic patterns;
-- `red` mapping = `255,0,0,0`;
-- `white` mapping = `0,0,0,255`;
-- non-1 start channel;
-- zero-filled slots перед RGBW fixture;
-- generation сохранён в diagnostic snapshot;
-- invalid start channel 0;
-- RGBW range за channel 512 отклоняется.
-
-Предыдущие DEV-002 tests остаются обязательными.
-
-## Existing software verification
+## Existing host verification
 
 Для текущего DEV-003 package ранее были зафиксированы:
 
-- clean CMake configure;
-- clean build;
-- `DMXWB_WARNINGS_AS_ERRORS=ON`;
-- GCC 14.2.0;
-- CTest `1/1 PASS`;
-- полный `dmxwb_tests` -> `All tests passed`;
-- `dmxwb --version` -> `dmxwb 0.1.0`;
-- `dmxwb --help` показывает DEV-003 diagnostic mode;
-- попытка открыть заведомо отсутствующий serial path корректно завершается ошибкой без crash;
-- non-Linux transport source отдельно проверен компилятором с warnings-as-errors.
+- clean CMake configure/build;
+- warnings-as-errors;
+- GCC host verification;
+- CTest PASS;
+- `dmxwb_tests` PASS;
+- `dmxwb --version`;
+- `dmxwb --help`;
+- error handling для отсутствующего serial path;
+- non-Linux source compile check.
 
-Это подтверждает только software/build часть gate и **не заменяет hardware test на WB8**.
+Эти проверки подтверждают software часть, но не target compatibility и не physical DMX.
 
-Будущие локальные проверки должны выполняться в согласованной пользовательской среде Windows / Visual Studio 2026 и локальном Linux, когда это применимо к шагу.
+## DEV-003A — next concrete step after documentation commit
 
-## External basis rechecked for DEV-003
+После того как текущая документационная синхронизация будет внесена пользователем в GitHub и будет получен новый SHA:
 
-Перед реализацией была проверена страница Wiren Board «Прямое управление DMX-512 через встроенный RS-485 на Wiren Board».
+1. определить модель/архитектуру фактического WB8, используемого для ближайшего hardware test;
+2. определить установленную версию WB software/OS;
+3. выбрать non-Docker target build method в локальном Linux на ноутбуке;
+4. собрать `dmxwb` на ноутбуке;
+5. перенести готовый binary на WB8;
+6. подтвердить запуск `dmxwb --version` и `dmxwb --help` на WB8;
+7. зафиксировать toolchain/ABI/build commands в документации.
 
-Используемый proof method:
+Если target binary не запускается или требует несовместимые runtime libraries, остаёмся в DEV-003A и исправляем build compatibility.
 
-```text
-250000 baud
-2 stop bits
-BREAK: 38400 baud + 0x00 + wait for transmission completion
-continuous repeated frames
-```
+## DEV-003B — physical hardware PASS criteria
 
-Перед hardware test выбранный `/dev/ttyRS485-*` должен быть освобождён от штатного serial driver через настройки Serial-устройств Wiren Board.
+После успешного DEV-003A на реальном WB8 и RGBW fixture подтвердить:
 
-Опубликованное решение Wiren Board не считается доказательством стабильности нашей C++-реализации: реальный hardware PASS обязателен.
+- `/dev/ttyRS485-1` открывается после освобождения порта;
+- `all-off` выключает RGBW;
+- `red` включает только R;
+- `green` включает только G;
+- `blue` включает только B;
+- `white` включает только W;
+- `all-on` устанавливает R/G/B/W = 255;
+- pattern устойчив без заметного flicker;
+- diagnostic run корректно закрывает serial;
+- порт доступен после процесса;
+- kernel/WBEC patch не требуется.
+
+Если transport FAIL — остаёмся в DEV-003.
 
 ## Intentionally not implemented in DEV-003
 
@@ -204,61 +210,22 @@ continuous repeated frames
 - refresh feasibility calculation;
 - serial reopen/retry state machine;
 - runtime error recovery;
-- Fixture model и RGBW application algorithms;
+- Fixture algorithms;
 - configuration/persistence;
 - MQTT;
 - Art-Net;
-- systemd;
+- systemd production service;
 - web.
 
-Эти задачи принадлежат следующим gates дорожной карты.
+## Completed engineering gates
 
-## DEV-003 PASS criteria
-
-Gate получает PASS только если пользователь на реальном контроллере серии WB8 и RGBW fixture подтвердил:
-
-- `/dev/ttyRS485-1` успешно открывается после освобождения порта;
-- `all-off` физически выключает все четыре RGBW channel;
-- `red` включает только R;
-- `green` включает только G;
-- `blue` включает только B;
-- `white` включает только W;
-- `all-on` устанавливает все R/G/B/W в 255;
-- каждый pattern устойчиво виден без заметного flicker во время diagnostic burst;
-- каждый diagnostic run завершается сообщением о корректном закрытии serial;
-- после завершения процесса serial port снова доступен;
-- patch kernel/WBEC не требуется.
-
-Если любой pattern не соответствует физическому результату, есть flicker/нестабильность, port не открывается или transport выдаёт ошибку — остаёмся на `DEV-003` и исправляем transport.
-
-При hardware acceptance дополнительно зафиксировать конкретную модель WB8 и версию установленного ПО, на которых выполнен тест.
-
-## Completed gates
-
-- Repository reset / specification cleanup.
-- Workflow + development roadmap.
 - `DEV-001 — C++ foundation, build and test harness` — confirmed SHA `6704b01ac25a44b5174178f52bdc7158d0295ef3`.
 - `DEV-002 — DMX core types and deterministic frame model` — confirmed SHA `6b6e5b8329bbf1d9c893205d60427974e8e59bd5`.
 
-## Documentation follow-up
-
-После commit текущего документационного шага требуется отдельным шагом синхронизировать:
-
-- `docs/TECHNICAL_SPEC.md`;
-- `docs/ROADMAP.md`;
-
-с новыми согласованными условиями:
-
-- target = серия WB8, а не одна версия;
-- DMXWB = расширение Wiren Board, а не самостоятельная платформа;
-- Windows / Visual Studio 2026 + локальный Linux как development/build environment;
-- production compile на ноутбуке, не на WB8;
-- Docker не используется.
-
-Этот follow-up не должен менять функциональный scope DEV-003.
-
 ## Next engineering gate after DEV-003 hardware PASS
 
-**DEV-004 — continuous DMX engine, timing and serial recovery.**
+```text
+DEV-004 — continuous DMX engine, timing and serial recovery
+```
 
-Переход к DEV-004 разрешён только после фактического hardware PASS DEV-003 и commit SHA пользователя, подтверждающего соответствующий шаг.
+Переход к DEV-004 разрешён только после target build proof + фактического physical DMX PASS DEV-003 и соответствующего пользовательского commit SHA.
