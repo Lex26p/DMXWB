@@ -1,21 +1,38 @@
 # DMXWB
 
-DMXWB — специализированная программная подсистема Wiren Board 8.5.1 на C++20, которая формирует одну физическую линию DMX512 через встроенный RS-485 и поддерживает два независимых источника управления:
+DMXWB — специализированное C++20-приложение, расширяющее возможности контроллеров **серии Wiren Board 8 (WB8)** поддержкой физического DMX512 через встроенный RS-485.
 
-- **WB MQTT** — управление RGBW-светильниками, группами и сценами;
+Приложение поддерживает два независимых источника управления:
+
+- **WB MQTT** — управление RGBW-светильниками, группами и сценами как часть экосистемы Wiren Board;
 - **Art-Net** — прямое управление DMX-каналами по Ethernet.
 
 Источник выбирается явно через MQTT. Автоматического переключения между WB MQTT и Art-Net нет. Главная задача DMXWB — стабильное управление реальным DMX-освещением и приём внешнего управления по Art-Net.
 
-DMXWB является частью программной среды контроллера, а не отдельной универсальной платформой. Эксплуатация предполагается в доверенной локальной LAN; собственная authentication/authorization/ACL-модель не входит в scope приложения. Финальная установка на Wiren Board должна выполняться полностью офлайн, без интернет-загрузок.
+DMXWB **не заменяет Wiren Board и не является самостоятельной SCADA или универсальной платформой автоматизации**. Приложение использует штатную инфраструктуру WB согласно архитектуре проекта. Эксплуатация предполагается в доверенной локальной LAN; собственная authentication/authorization/ACL-модель не входит в scope приложения.
+
+Финальная установка на WB8 должна выполняться полностью офлайн, без интернет-загрузок.
 
 ## Текущий статус
 
-`DEV-002` подтверждён commit SHA `6b6e5b8329bbf1d9c893205d60427974e8e59bd5`.
+Текущий `master` на момент последней актуализации документации:
 
-Выполняется первый hardware gate: **`DEV-003 — physical DMX transport proof`**.
+```text
+bbf9f0d334564fa8ae006f9ffd3fa756aefe5cc7
+```
 
-Добавлены:
+Он содержит реализацию пакета **`DEV-003 — physical DMX transport proof`**.
+
+Последний завершённый engineering gate:
+
+```text
+DEV-002 — DMX core types and deterministic frame model
+6b6e5b8329bbf1d9c893205d60427974e8e59bd5
+```
+
+DEV-003 не считается завершённым до проверки на реальном контроллере серии WB8 и реальном RGBW-светильнике.
+
+В DEV-003 добавлены:
 
 - Linux `DmxTransport` для встроенного RS-485;
 - default `/dev/ttyRS485-1`;
@@ -26,37 +43,55 @@ DMXWB является частью программной среды контр
 - выбор start channel для реального RGBW fixture;
 - host tests diagnostic snapshot mapping.
 
-`DEV-003` не считается завершённым до проверки на реальном Wiren Board и реальном RGBW-светильнике.
-
 Continuous scheduler, refresh control, serial auto-recovery, Fixture model, MQTT и Art-Net пока намеренно отсутствуют.
 
 ## Текущая целевая архитектура
 
 ```text
-Static Web
-    |
-MQTT WebSocket
-    |
-Mosquitto
-    |
-DMXWB C++20
-  |        |
- MQTT   Art-Net
-   \      /
-   snapshots
-      |
- DMX output
-      |
-/dev/ttyRS485-1
+          Wiren Board ecosystem
+                 |
+             Mosquitto
+                 |
+             DMXWB C++20
+             /         \
+        WB MQTT       Art-Net
+             \         /
+              snapshots
+                  |
+              DMX output
+                  |
+          built-in RS-485
+                  |
+                DMX512
 ```
 
 Порт по умолчанию: `/dev/ttyRS485-1`.
 
-## Host build / tests
+## Среда разработки
 
-Требуется CMake 3.20+ и C++20 compiler. Внешние библиотеки на текущем этапе не используются.
+Основная пользовательская среда:
 
-Windows / Visual Studio:
+```text
+Windows
+Visual Studio 2026
+C:\Projects\DMXWB
+```
+
+На ноутбуке также установлена локальная Linux-среда.
+
+Принятое разделение:
+
+- **Windows / Visual Studio 2026** — основная host development/test среда;
+- **локальный Linux** — Linux-specific build/tests и подготовка целевой сборки для WB8;
+- **контроллер WB8** — runtime/hardware/integration target.
+
+Production binary должен собираться на ноутбуке с использованием подходящей Linux/cross-build среды, а не требовать компиляции исходников на WB8.
+
+**Docker не используется** ни как build, ни как runtime, ни как deployment dependency.
+
+### Windows / Visual Studio 2026 — host build / tests
+
+Требуется CMake 3.20+ и C++20 compiler.
 
 ```powershell
 cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
@@ -66,9 +101,9 @@ ctest --test-dir build -C Debug --output-on-failure
 .\build\Debug\dmxwb_tests.exe
 ```
 
-На Windows hardware serial backend намеренно недоступен; физический тест выполняется только на Linux/Wiren Board.
+На Windows hardware serial backend намеренно недоступен.
 
-Linux / Wiren Board development build:
+### Local Linux — Linux-specific build / tests
 
 ```sh
 cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
@@ -76,33 +111,51 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Diagnostic example для RGBW fixture со стартовым DMX-адресом 1:
+Конкретный production cross-build/toolchain для WB8 должен быть зафиксирован отдельным этапом до финального deployment bundle.
+
+### Hardware diagnostic on WB8
+
+После подготовки подходящего бинарника diagnostic example для RGBW fixture со стартовым DMX-адресом 1:
 
 ```sh
-./build/dmxwb --dmx-test red --port /dev/ttyRS485-1 --start-channel 1 --frames 120
+./dmxwb --dmx-test red --port /dev/ttyRS485-1 --start-channel 1 --frames 120
 ```
 
 Перед hardware test `/dev/ttyRS485-1` должен быть освобождён от штатного serial driver Wiren Board.
 
-## Источники истины
+## Источник истины и порядок работы
 
-Перед началом любой работы необходимо читать документы в таком порядке:
+**Источник истины — актуальный репозиторий DMXWB.**
+
+Перед началом любой работы ассистент читает текущее состояние репозитория и необходимые файлы.
+
+Документы внутри репозитория читать в таком порядке:
 
 1. [`AGENTS.md`](AGENTS.md) — правила совместной разработки и передачи изменений.
 2. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — текущее состояние и ближайший шаг.
-3. [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) — утверждённые требования к конечному приложению.
+3. [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) — требования к конечному приложению.
 4. [`docs/ROADMAP.md`](docs/ROADMAP.md) — последовательность gates и критерии PASS.
 
-Если требования меняются в обсуждении, соответствующие документы должны быть обновлены вместе с кодом в том же шаге.
+Если требования или процесс меняются, соответствующая документация обновляется отдельным проверяемым шагом.
 
 ## Разработка
 
-Проект разрабатывается небольшими проверяемыми этапами. Каждый значимый этап должен иметь:
+Проект разрабатывается небольшими шагами.
 
-- точную базовую Git SHA;
-- код и документацию в одном изменении;
-- конкретные команды проверки;
-- явный результат PASS/FAIL;
-- новый commit SHA от пользователя перед продолжением следующего этапа.
+Обычный handoff:
 
-Исторические исследования MOD1/WBEC/Linux kernel не являются источником истины текущего проекта и намеренно удалены из рабочего дерева.
+1. краткое описание шага;
+2. получение необходимых файлов из актуального GitHub и выполнение работы;
+3. ZIP с финальными изменёнными/новыми файлами;
+4. команда PowerShell для распаковки поверх `C:\Projects\DMXWB`;
+5. команды сборки/запуска, только если они нужны;
+6. конкретная пользовательская проверка, если она нужна;
+7. Git-команды.
+
+Пользователь самостоятельно выполняет commit/push и присылает новый полный SHA.
+
+Новый SHA означает завершение текущего шага и разрешает переход к следующему, если он предусмотрен.
+
+Полные правила находятся в [`AGENTS.md`](AGENTS.md).
+
+Исторические исследования MOD1/WBEC/custom kernel не являются источником истины текущего проекта.
