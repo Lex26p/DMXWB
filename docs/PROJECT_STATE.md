@@ -7,150 +7,167 @@
 Последний полный SHA, явно присланный пользователем и являющийся базой текущего gate:
 
 ```text
-6704b01ac25a44b5174178f52bdc7158d0295ef3
+6b6e5b8329bbf1d9c893205d60427974e8e59bd5
 ```
 
-Этот SHA подтверждает PASS и commit `DEV-001 — C++ foundation, build and test harness`.
+Этот SHA подтверждает PASS и commit `DEV-002 — DMX core types and deterministic frame model`, включая исправление MSVC warnings-as-errors.
 
 ## Current phase
 
-**DEV-002 — DMX core types and deterministic frame model.**
+**DEV-003 — physical DMX transport proof on `/dev/ttyRS485-1`.**
 
-Цель gate — создать hardware-independent ядро данных, которое будущий физический DMX thread сможет получать только целым immutable snapshot.
+Цель gate — доказать на реальном Wiren Board 8.5.1 и реальном RGBW-светильнике, что минимальный C++ transport физически формирует рабочий DMX512 через встроенный RS-485.
 
-## Implemented in current DEV-002 package
+Это первый обязательный hardware gate. До его фактического PASS не переходить к continuous DMX engine, Fixture model, MQTT или Art-Net.
 
-- `DmxSnapshot`:
-  - фиксированное хранилище максимум 512 channels;
-  - `slot_count` в диапазоне `0..512`;
-  - monotonic generation/revision value;
-  - one-based channel API `1..512`;
-  - immutable состояние после построения;
-- `DmxSnapshotBuilder` как отдельный mutable construction object;
-- helper `calculate_slot_count(start, count, width)` без Fixture model;
-- физический payload model:
-  - Start Code `0x00` отдельно;
-  - active channels `1..slot_count` отдельно;
-  - channel 1 соответствует payload index 0;
-- `DmxSnapshotPublisher`:
-  - C++20 atomic `shared_ptr<const DmxSnapshot>`;
-  - reader получает один целый snapshot;
-  - уже загруженный snapshot не изменяется после последующей публикации;
-  - null publication отклоняется;
-- `MonotonicClock` interface и `SteadyMonotonicClock` implementation без serial/scheduling loop;
-- deterministic unit tests всех требований `DEV-002`;
-- CLI/README обновлены текущим gate.
+## Implemented in current DEV-003 package
 
-## Intentionally not implemented in DEV-002
+Минимальный `DmxTransport`:
 
-- `termios` и открытие `/dev/ttyRS485-*`;
-- BREAK generation;
-- физическая передача Start Code/channels;
-- continuous DMX worker и refresh scheduling;
-- Fixture/RGBW color algorithms;
-- configuration/persistence;
-- MQTT;
-- Art-Net;
-- systemd;
-- web.
+- default port `/dev/ttyRS485-1`;
+- Linux-only real serial backend;
+- корректное освобождение file descriptor в destructor/`close()`;
+- data mode `250000 8N2`;
+- software BREAK по утверждённому WB-подходу:
+  - line rate `38400`;
+  - write `0x00`;
+  - дождаться физического завершения передачи;
+  - вернуть line rate `250000 8N2`;
+- Start Code `0x00` передаётся отдельно от channel payload;
+- frame payload берётся из существующего immutable `DmxSnapshot`/`DmxFrameView`;
+- полная запись обрабатывает short writes и `EINTR`;
+- ошибки открытия/config/write/drain возвращаются через `last_error()`;
+- Windows/non-Linux build использует unsupported backend и не обращается к hardware.
 
-Эти функции принадлежат следующим gates дорожной карты и не должны переноситься в `DEV-002`.
+Для точной установки нестандартной скорости `250000` Linux backend использует `termios2` + `BOTHER` и числовую скорость, а не зависит от наличия libc-константы `B250000`.
 
-## DEV-002 verification commands
+## DEV-003 diagnostic mode
 
-Windows / Visual Studio:
-
-```powershell
-Set-Location C:\Projects\DMXWB
-
-Remove-Item -Recurse -Force .\build -ErrorAction SilentlyContinue
-cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-.\build\Debug\dmxwb.exe --version
-.\build\Debug\dmxwb_tests.exe
-```
-
-Expected CTest result:
+В `dmxwb` добавлен отдельный diagnostic CLI:
 
 ```text
-100% tests passed, 0 tests failed
+--dmx-test PATTERN
+--port PATH
+--start-channel N
+--frames N
 ```
 
-Expected version output:
+Patterns:
 
 ```text
-dmxwb 0.1.0
+all-off
+red
+green
+blue
+white
+all-on
 ```
 
-`dmxwb_tests.exe` должен завершиться строкой:
+Для одного RGBW fixture diagnostic mode формирует ровно четыре активных channel values начиная с `--start-channel`; предыдущие slots внутри физического frame остаются нулевыми.
+
+Default:
 
 ```text
-All tests passed
+port          = /dev/ttyRS485-1
+start-channel = 1
+frames        = 120
 ```
 
-## DEV-002 deterministic test coverage
+Diagnostic mode повторяет один и тот же frame с приблизительной паузой 25 ms, только чтобы реальный fixture устойчиво показал фиксированный test pattern. Это не production scheduler и не реализация `DEV-004`.
 
-Проверяются как минимум:
+## Host tests added in DEV-003
 
-- channel 1;
-- channel 512;
-- rejection channel 0 / 513;
-- rejection `slot_count > 512`;
-- `slot_count = 40` для start 1 / 10 items / width 4;
-- `slot_count = 60` для start 21 / 10 items / width 4;
-- выход за channel 512 отклоняется;
-- `Fixture Count = 0`-эквивалент helper даёт `slot_count = 0`;
-- Start Code остаётся отдельным `0x00`;
-- payload index 0 соответствует DMX channel 1;
-- generation и data публикуются целиком;
-- удерживаемый reader-ом старый snapshot остаётся неизменным после публикации нового;
-- deterministic fake monotonic clock может использовать будущий scheduler без real time.
+Дополнительно deterministic tests проверяют:
+
+- parser diagnostic patterns;
+- `red` mapping = `255,0,0,0`;
+- `white` mapping = `0,0,0,255`;
+- non-1 start channel;
+- zero-filled slots перед RGBW fixture;
+- generation сохранён в diagnostic snapshot;
+- invalid start channel 0;
+- RGBW range за channel 512 отклоняется.
+
+Предыдущие DEV-002 tests остаются обязательными.
 
 ## Local assistant verification
 
-Подготовленный source tree проверен ассистентом на Linux host:
+На Linux development host выполнены:
 
 - clean CMake configure;
 - clean build;
 - `DMXWB_WARNINGS_AS_ERRORS=ON`;
 - GCC 14.2.0;
 - CTest `1/1 PASS`;
+- полный `dmxwb_tests` -> `All tests passed`;
 - `dmxwb --version` -> `dmxwb 0.1.0`;
-- полный `dmxwb_tests` -> `All tests passed`.
+- `dmxwb --help` показывает DEV-003 diagnostic mode;
+- попытка открыть заведомо отсутствующий serial path корректно завершается ошибкой без crash;
+- non-Linux transport source отдельно проверен компилятором с warnings-as-errors.
 
-Это не заменяет пользовательский PASS на локальном Windows/dev host.
+Это подтверждает только software/build часть gate и **не заменяет hardware test на Wiren Board**.
 
-## PASS criteria for DEV-002
+## External basis rechecked for DEV-003
 
-Gate получает PASS только если пользователь подтвердил:
+Перед реализацией повторно проверена актуальная страница Wiren Board «Прямое управление DMX-512 через встроенный RS-485 на Wiren Board».
 
-- clean configure/build завершены успешно;
-- warnings-as-errors build не дал ошибок;
-- CTest показывает `100% tests passed, 0 tests failed`;
-- `dmxwb_tests.exe` показывает PASS всех deterministic core tests;
-- executable не обращается к hardware;
-- для проверки не требуются Wiren Board, serial, MQTT или Art-Net.
+Она подтверждает используемый proof method:
 
-При FAIL остаёмся на `DEV-002` и исправляем только причину ошибки.
+```text
+250000 baud
+2 stop bits
+BREAK: 38400 baud + 0x00 + wait for transmission completion
+continuous repeated frames
+```
+
+Также перед hardware test порт должен быть освобождён от штатного serial driver через настройки Serial-устройств Wiren Board.
+
+Опубликованное Wiren Board решение является community solution и не считается доказательством стабильности нашей C++-реализации: именно поэтому реальный hardware PASS обязателен.
+
+## Intentionally not implemented in DEV-003
+
+- production `DmxOutput` worker;
+- absolute frame-start scheduler;
+- configurable 10/30/44 Hz refresh;
+- refresh feasibility calculation;
+- serial reopen/retry state machine;
+- runtime error recovery;
+- Fixture model и RGBW application algorithms;
+- configuration/persistence;
+- MQTT;
+- Art-Net;
+- systemd;
+- web.
+
+Эти задачи принадлежат следующим gates дорожной карты.
+
+## DEV-003 PASS criteria
+
+Gate получает PASS только если пользователь на реальном Wiren Board и RGBW fixture подтвердил:
+
+- `/dev/ttyRS485-1` успешно открывается после освобождения порта;
+- `all-off` физически выключает все четыре RGBW channel;
+- `red` включает только R;
+- `green` включает только G;
+- `blue` включает только B;
+- `white` включает только W;
+- `all-on` устанавливает все R/G/B/W в 255;
+- каждый pattern устойчиво виден без заметного flicker во время diagnostic burst;
+- каждый diagnostic run завершается сообщением о корректном закрытии serial;
+- после завершения процесса serial port снова доступен;
+- patch kernel/WBEC не требуется.
+
+Если любой pattern не соответствует физическому результату, есть flicker/нестабильность, port не открывается или transport выдаёт ошибку — остаёмся на `DEV-003` и исправляем transport.
 
 ## Completed gates
 
 - Repository reset / specification cleanup.
 - Workflow + development roadmap.
 - `DEV-001 — C++ foundation, build and test harness` — confirmed SHA `6704b01ac25a44b5174178f52bdc7158d0295ef3`.
+- `DEV-002 — DMX core types and deterministic frame model` — confirmed SHA `6b6e5b8329bbf1d9c893205d60427974e8e59bd5`.
 
-## Next gate after PASS SHA
+## Next gate after hardware PASS SHA
 
-**DEV-003 — physical DMX transport proof on `/dev/ttyRS485-1`.**
+**DEV-004 — continuous DMX engine, timing and serial recovery.**
 
-После нового полного SHA от пользователя выполнить только scope `DEV-003` из `docs/ROADMAP.md`:
-
-- минимальный serial transport;
-- default `/dev/ttyRS485-1`;
-- `250000 8N2`;
-- проверенный WB BREAK method;
-- Start Code + небольшой фиксированный channel payload;
-- hardware test на реальном Wiren Board и RGBW fixture.
-
-Если физический DMX не проходит hardware gate, не переходить к continuous engine, Fixture, MQTT или Art-Net.
+Переход разрешён только после фактического hardware PASS DEV-003 и нового полного SHA от пользователя.

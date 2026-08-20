@@ -11,20 +11,24 @@ DMXWB является частью программной среды контр
 
 ## Текущий статус
 
-`DEV-001` подтверждён commit SHA `6704b01ac25a44b5174178f52bdc7158d0295ef3`.
+`DEV-002` подтверждён commit SHA `6b6e5b8329bbf1d9c893205d60427974e8e59bd5`.
 
-Выполняется `DEV-002 — DMX core types and deterministic frame model`. На этом этапе добавлены hardware-independent типы, которые позднее будут передаваться физическому DMX worker целым immutable snapshot:
+Выполняется первый hardware gate: **`DEV-003 — physical DMX transport proof`**.
 
-- `DmxSnapshot` с максимум 512 DMX channels;
-- `slot_count` и generation;
-- безопасная one-based индексация channel `1..512`;
-- helper расчёта последнего физического slot;
-- отдельная модель Start Code `0x00` и channel payload;
-- atomic publication `shared_ptr<const DmxSnapshot>` без частично обновлённого snapshot;
-- abstraction монотонных часов для будущего deterministic scheduler;
-- deterministic host unit tests.
+Добавлены:
 
-Serial/termios/BREAK, непрерывный DMX worker, Fixture color algorithms, MQTT и Art-Net в `DEV-002` намеренно отсутствуют.
+- Linux `DmxTransport` для встроенного RS-485;
+- default `/dev/ttyRS485-1`;
+- data mode `250000 8N2`;
+- WB BREAK proof method `38400 + 0x00 + drain -> 250000 8N2`;
+- Start Code `0x00` + immutable DMX payload;
+- diagnostic patterns `all-off/red/green/blue/white/all-on`;
+- выбор start channel для реального RGBW fixture;
+- host tests diagnostic snapshot mapping.
+
+`DEV-003` не считается завершённым до проверки на реальном Wiren Board и реальном RGBW-светильнике.
+
+Continuous scheduler, refresh control, serial auto-recovery, Fixture model, MQTT и Art-Net пока намеренно отсутствуют.
 
 ## Текущая целевая архитектура
 
@@ -48,9 +52,9 @@ DMXWB C++20
 
 Порт по умолчанию: `/dev/ttyRS485-1`.
 
-## Сборка DEV-002
+## Host build / tests
 
-Требуется CMake 3.20+ и C++20 compiler. Внешние библиотеки на этом этапе не используются.
+Требуется CMake 3.20+ и C++20 compiler. Внешние библиотеки на текущем этапе не используются.
 
 Windows / Visual Studio:
 
@@ -62,7 +66,23 @@ ctest --test-dir build -C Debug --output-on-failure
 .\build\Debug\dmxwb_tests.exe
 ```
 
-Для single-config генератора (например Ninja) executable обычно находится непосредственно в `build/`.
+На Windows hardware serial backend намеренно недоступен; физический тест выполняется только на Linux/Wiren Board.
+
+Linux / Wiren Board development build:
+
+```sh
+cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+Diagnostic example для RGBW fixture со стартовым DMX-адресом 1:
+
+```sh
+./build/dmxwb --dmx-test red --port /dev/ttyRS485-1 --start-channel 1 --frames 120
+```
+
+Перед hardware test `/dev/ttyRS485-1` должен быть освобождён от штатного serial driver Wiren Board.
 
 ## Источники истины
 

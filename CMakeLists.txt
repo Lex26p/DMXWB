@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(DMXWB VERSION 0.1.0 LANGUAGES CXX)
 
 option(DMXWB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+
 function(dmxwb_enable_warnings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus)
@@ -23,11 +24,21 @@ function(dmxwb_enable_warnings target)
         endif()
     endif()
 endfunction()
+
 add_library(dmxwb_core STATIC
     src/app_info.cpp
     src/dmx_snapshot.cpp
+    src/dmx_test_pattern.cpp
     src/monotonic_clock.cpp
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(dmxwb_core PRIVATE src/dmx_transport_linux.cpp)
+    target_compile_definitions(dmxwb_core PUBLIC DMXWB_HAS_LINUX_SERIAL=1)
+else()
+    target_sources(dmxwb_core PRIVATE src/dmx_transport_unsupported.cpp)
+    target_compile_definitions(dmxwb_core PUBLIC DMXWB_HAS_LINUX_SERIAL=0)
+endif()
 
 target_include_directories(dmxwb_core
     PUBLIC

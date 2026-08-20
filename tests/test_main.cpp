@@ -1,5 +1,6 @@
 #include "dmxwb/app_info.hpp"
 #include "dmxwb/dmx_snapshot.hpp"
+#include "dmxwb/dmx_test_pattern.hpp"
 #include "dmxwb/monotonic_clock.hpp"
 
 #include <chrono>
@@ -147,6 +148,45 @@ void test_immutable_publication() {
     expect_true(publisher.load()->generation() == 2, "rejected publication does not replace current snapshot");
 }
 
+void test_dmx_diagnostic_patterns() {
+    expect_true(
+        dmxwb::parse_dmx_test_pattern("red") == std::optional<dmxwb::DmxTestPattern>{dmxwb::DmxTestPattern::red},
+        "diagnostic pattern parser accepts red");
+    expect_true(
+        dmxwb::parse_dmx_test_pattern("all-on") == std::optional<dmxwb::DmxTestPattern>{dmxwb::DmxTestPattern::all_on},
+        "diagnostic pattern parser accepts all-on");
+    expect_true(!dmxwb::parse_dmx_test_pattern("invalid").has_value(), "diagnostic pattern parser rejects invalid value");
+
+    const auto red = dmxwb::make_dmx_test_snapshot(dmxwb::DmxTestPattern::red, 1, 10);
+    expect_true(red != nullptr, "red diagnostic snapshot created at channel 1");
+    if (red) {
+        expect_true(red->slot_count() == 4, "channel-1 RGBW diagnostic uses four slots");
+        expect_true(red->channel(1) == std::optional<std::uint8_t>{std::uint8_t{255}}, "red diagnostic sets R");
+        expect_true(red->channel(2) == std::optional<std::uint8_t>{std::uint8_t{0}}, "red diagnostic clears G");
+        expect_true(red->channel(3) == std::optional<std::uint8_t>{std::uint8_t{0}}, "red diagnostic clears B");
+        expect_true(red->channel(4) == std::optional<std::uint8_t>{std::uint8_t{0}}, "red diagnostic clears W");
+        expect_true(red->generation() == 10, "diagnostic snapshot preserves generation");
+    }
+
+    const auto white_at_21 = dmxwb::make_dmx_test_snapshot(dmxwb::DmxTestPattern::white, 21);
+    expect_true(white_at_21 != nullptr, "white diagnostic snapshot created at channel 21");
+    if (white_at_21) {
+        expect_true(white_at_21->slot_count() == 24, "start channel 21 produces physical slot 24");
+        expect_true(white_at_21->channel(20) == std::optional<std::uint8_t>{std::uint8_t{0}}, "preceding slot remains zero");
+        expect_true(white_at_21->channel(21) == std::optional<std::uint8_t>{std::uint8_t{0}}, "white diagnostic clears R");
+        expect_true(white_at_21->channel(22) == std::optional<std::uint8_t>{std::uint8_t{0}}, "white diagnostic clears G");
+        expect_true(white_at_21->channel(23) == std::optional<std::uint8_t>{std::uint8_t{0}}, "white diagnostic clears B");
+        expect_true(white_at_21->channel(24) == std::optional<std::uint8_t>{std::uint8_t{255}}, "white diagnostic sets W");
+    }
+
+    expect_true(
+        !dmxwb::make_dmx_test_snapshot(dmxwb::DmxTestPattern::all_off, 0),
+        "diagnostic rejects start channel 0");
+    expect_true(
+        !dmxwb::make_dmx_test_snapshot(dmxwb::DmxTestPattern::all_off, 510),
+        "diagnostic rejects RGBW range beyond channel 512");
+}
+
 void test_clock_abstraction() {
     const auto expected = dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{1234}};
     const FakeMonotonicClock clock{expected};
@@ -163,6 +203,7 @@ int main() {
     test_slot_count_helpers();
     test_start_code_and_payload_indexing();
     test_immutable_publication();
+    test_dmx_diagnostic_patterns();
     test_clock_abstraction();
 
     if (failures != 0) {
