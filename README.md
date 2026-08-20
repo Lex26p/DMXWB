@@ -2,52 +2,109 @@
 
 DMXWB — специализированное C++20-приложение, расширяющее возможности контроллеров **серии Wiren Board 8 (WB8)** поддержкой физического DMX512 через встроенный RS-485.
 
-Приложение поддерживает два независимых источника управления:
+Приложение проектируется с двумя независимыми источниками управления:
 
 - **WB MQTT** — управление RGBW-светильниками, группами и сценами как часть экосистемы Wiren Board;
 - **Art-Net** — прямое управление DMX-каналами по Ethernet.
 
-Источник выбирается явно через MQTT. Автоматического переключения между WB MQTT и Art-Net нет. Главная задача DMXWB — стабильное управление реальным DMX-освещением и приём внешнего управления по Art-Net.
+Источник выбирается явно. Автоматического переключения между WB MQTT и Art-Net нет.
 
-DMXWB **не заменяет Wiren Board и не является самостоятельной SCADA или универсальной платформой автоматизации**. Приложение использует штатную инфраструктуру WB согласно архитектуре проекта. Эксплуатация предполагается в доверенной локальной LAN; собственная authentication/authorization/ACL-модель не входит в scope приложения.
+DMXWB **не заменяет Wiren Board**. Приложение использует штатную инфраструктуру WB согласно `docs/TECHNICAL_SPEC.md`.
 
-Финальная установка на WB8 должна выполняться полностью офлайн, без интернет-загрузок. Интернет может использоваться на development-ноутбуке для подготовки build environment; это не является runtime/deployment dependency контроллера.
+Финальная установка на WB8 должна выполняться полностью офлайн. Интернет может использоваться на development-ноутбуке для подготовки build environment; контроллеру интернет для build/deployment/runtime не требуется.
 
 ## Текущий статус
 
-Последний завершённый engineering gate:
-
-```text
-DEV-002 — DMX core types and deterministic frame model
-6b6e5b8329bbf1d9c893205d60427974e8e59bd5
-```
-
-Текущий engineering gate:
+Последний фактически завершённый engineering gate:
 
 ```text
 DEV-003 — physical DMX transport proof
 ```
 
-Он состоит из двух последовательных подшагов:
+DEV-003 состоит из:
 
 ```text
 DEV-003A — laptop -> WB8 target build enablement
 DEV-003B — physical DMX transport proof
 ```
 
-В коде DEV-003 уже присутствуют:
+Оба подшага получили PASS на реальном WB8.
 
-- Linux `DmxTransport` для встроенного RS-485;
-- default `/dev/ttyRS485-1`;
-- data mode `250000 8N2`;
-- BREAK proof method `38400 + 0x00 + drain -> 250000 8N2`;
-- Start Code `0x00` + immutable DMX payload;
-- diagnostic patterns `all-off/red/green/blue/white/all-on`;
-- host tests diagnostic snapshot mapping.
+База hardware-test шага:
 
-DEV-003 не считается завершённым до target-build proof и физического теста на реальном WB8 с RGBW fixture.
+```text
+bc359169e95a118f3f999854a9cd9511258dd76c
+Enable verified WB8 ARM64 cross build
+```
 
-## Текущая целевая архитектура
+Репозиторное закрытие DEV-003 выполняется commit-ом, содержащим:
+
+```text
+docs/DEV003A_TARGET_REPORT.txt
+docs/DEV003B_HARDWARE_REPORT.txt
+tools/wb8/run_dev003b_physical_test.sh
+README.md
+docs/PROJECT_STATE.md
+```
+
+Следующий engineering gate после этого closure commit:
+
+```text
+DEV-004 — continuous DMX engine, timing and serial recovery
+```
+
+## Подтверждённый DEV-003 target
+
+Фактическая hardware acceptance конфигурация DEV-003:
+
+```text
+Controller:       Wiren Board rev. 8.5.1 (T507)
+Architecture:     aarch64 / arm64
+OS:               Debian 11 Bullseye
+WB release:       wb-2606 stable
+Kernel:           6.8.0-wb160
+glibc:            2.31
+DMX port:         /dev/ttyRS485-1 -> ttyS2
+Build compiler:   Bullseye aarch64-linux-gnu-g++ 10.2.1
+Artifact glibc:   maximum required symbol GLIBC_2.17
+GNU C++ runtime:  statically linked
+Docker:           not used
+```
+
+Конкретная тестовая модель не становится единственной поддерживаемой моделью: target проекта остаётся **серия WB8**.
+
+## Подтверждённый физический DMX transport
+
+DEV-003B подтвердил на реальном RGBW fixture со стартовым DMX-адресом `1`:
+
+```text
+all-off  -> PASS
+red      -> PASS
+green    -> PASS
+blue     -> PASS
+white    -> PASS
+all-on   -> PASS
+```
+
+Для всех patterns подтверждено:
+
+- правильное соответствие RGBW каналов;
+- отсутствие заметного flicker во время diagnostic burst;
+- `250000 8N2`;
+- BREAK proof `38400 + 0x00 + drain -> 250000 8N2`;
+- Start Code `0x00`;
+- serial закрывается после каждого запуска;
+- порт повторно открывается между независимыми процессами;
+- финальный safe `all-off` проходит;
+- kernel/WBEC patch не требуется.
+
+Фактический отчёт хранится в:
+
+```text
+docs/DEV003B_HARDWARE_REPORT.txt
+```
+
+## Текущая архитектура
 
 ```text
           Wiren Board ecosystem
@@ -60,18 +117,18 @@ DEV-003 не считается завершённым до target-build proof �
              \         /
               snapshots
                   |
-              DMX output
+              DmxOutput
                   |
           built-in RS-485
                   |
                 DMX512
 ```
 
-Порт по умолчанию: `/dev/ttyRS485-1`.
+На текущем состоянии `DmxOutput` production worker ещё не реализован. Это задача DEV-004.
 
 ## Среда разработки
 
-Основная пользовательская среда:
+Основная среда:
 
 ```text
 Windows
@@ -79,19 +136,18 @@ Visual Studio 2026
 C:\Projects\DMXWB
 ```
 
-На ноутбуке также используется локальная Linux-среда.
+На том же ноутбуке используется локальный Linux.
 
-Принятое разделение:
+Разделение:
 
-- **Windows / Visual Studio 2026** — основная host development/test среда;
-- **локальный Linux** — Linux-specific tests и сборка WB8 target artifact;
-- **контроллер WB8** — runtime/hardware/integration target.
+- **Windows / Visual Studio 2026** — host development/tests;
+- **локальный Linux** — Linux-specific tests и target build;
+- **WB8** — runtime/hardware/integration target;
+- **Docker не используется**.
 
-**Docker не используется** ни для build, ни для runtime, ни для deployment, ни для tests.
+Минимальная версия CMake: `3.18`. Проект использует C++20.
 
-### Windows / Visual Studio 2026 — host build / tests
-
-Минимальная версия CMake: **3.18**. Проект по-прежнему собирается как C++20.
+### Windows / Visual Studio 2026
 
 ```powershell
 cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
@@ -103,7 +159,7 @@ ctest --test-dir build -C Debug --output-on-failure
 
 На Windows hardware serial backend намеренно недоступен.
 
-### Local Linux — обычные host tests
+### Local Linux host verification
 
 ```sh
 cmake -S . -B build -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
@@ -111,73 +167,32 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-## DEV-003A — WB8 target build без Docker
+## WB8 target build
 
-### Compatibility baseline
-
-Для DEV-003A используется Debian 11 Bullseye `arm64` как минимальный userspace build baseline для серии WB8.
-
-Причина выбора: `wb-2606` является последним WB release на Debian 11, а более новые WB8 могут работать на Debian 13. Бинарник, собранный против более старого glibc baseline, проверяется на фактическом контроллере перед hardware test.
-
-GNU C++ runtime (`libstdc++` и `libgcc`) для target artifact линкуется статически; системная `glibc` остаётся динамической. Build script проверяет, что бинарник не требует glibc новее `2.31`.
-
-### Подготовка Bullseye ARM64 cross-build environment
-
-Build environment создаётся локально на Linux без Docker и без QEMU:
+DEV-003A установил воспроизводимый non-Docker build path:
 
 ```text
-local Ubuntu/Linux amd64
-    -> native Debian 11 Bullseye amd64 rootfs (debootstrap)
-    -> Bullseye crossbuild-essential-arm64
+local Linux laptop (amd64)
+    -> Debian 11 Bullseye amd64 build rootfs
+    -> crossbuild-essential-arm64
     -> aarch64-linux-gnu-g++ 10
     -> ARM64 target ELF
+    -> direct SSH/SCP transfer to WB8
 ```
 
-Такой подход не зависит от механизма `binfmt` хостовой Ubuntu и при этом использует Bullseye ARM64 cross libc/toolchain как compatibility baseline.
-
-Host prerequisites для Debian/Ubuntu:
+Подготовка rootfs:
 
 ```sh
 sudo apt update
 sudo apt install -y debootstrap binutils file openssh-client
-```
-
-Создание build rootfs выполняется один раз:
-
-```sh
 bash tools/wb8/setup_bullseye_arm64_rootfs.sh
 ```
 
-Несмотря на историческое имя script, rootfs сам является `amd64`; ARM64 получается штатным Bullseye cross compiler.
-
-Default rootfs:
-
-```text
-/opt/dmxwb/wb8-bullseye-cross-arm64
-```
-
-Можно изменить через:
-
-```sh
-DMXWB_WB8_ROOTFS=/custom/path bash tools/wb8/setup_bullseye_arm64_rootfs.sh
-```
-
-### Сборка target artifact
+Сборка:
 
 ```sh
 bash tools/wb8/build_bullseye_arm64.sh
 ```
-
-Скрипт:
-
-1. выполняет обычный Linux host build + CTest;
-2. копирует текущие исходники в Bullseye build rootfs, исключая `.git`, `.vs`, build trees и `artifacts`;
-3. cross-компилирует Release target через `aarch64-linux-gnu-g++`;
-4. включает warnings-as-errors;
-5. собирает target binary со статическим GNU C++ runtime;
-6. проверяет AArch64 ELF и glibc symbol baseline.
-
-Cross-built unit-test executable на ноутбуке не запускается: deterministic tests выполняются нативно на Windows/Linux, а сам ARM64 binary проверяется запуском на реальном WB8.
 
 Результат:
 
@@ -185,54 +200,76 @@ Cross-built unit-test executable на ноутбуке не запускаетс
 artifacts/wb8-bullseye-arm64/dmxwb
 ```
 
-`artifacts/` не предназначен для commit в Git.
+`artifacts/` — локальный build output и не предназначен для commit.
 
-### Target probe и CLI smoke test
-
-После сборки:
+Target smoke test:
 
 ```sh
-bash tools/wb8/verify_on_target.sh root@192.168.1.50
+bash tools/wb8/verify_on_target.sh root@REAL_WB_IP
 ```
 
-IP в примере нужно заменить на фактический адрес контроллера. Скрипт копирует `dmxwb` и target probe во временный каталог WB8, проверяет target environment, запускает:
-
-```text
-dmxwb --version
-dmxwb --help
-```
-
-и сохраняет воспроизводимый отчёт:
+Он сохраняет:
 
 ```text
 docs/DEV003A_TARGET_REPORT.txt
 ```
 
-Этот отчёт является частью результата DEV-003A и должен быть закоммичен после PASS.
+## DEV-003 diagnostic mode
 
-Физические DMX patterns относятся уже к DEV-003B и не запускаются автоматически этим скриптом.
-
-## Hardware diagnostic DEV-003B
-
-После PASS DEV-003A diagnostic example для RGBW fixture со стартовым DMX-адресом 1:
+Diagnostic CLI остаётся полезным инструментом hardware regression:
 
 ```sh
 ./dmxwb --dmx-test red --port /dev/ttyRS485-1 --start-channel 1 --frames 120
 ```
 
-Перед hardware test `/dev/ttyRS485-1` должен быть освобождён от штатного serial driver Wiren Board.
+Patterns:
+
+```text
+all-off
+red
+green
+blue
+white
+all-on
+```
+
+Перед прямой работой выбранный RS-485 порт должен быть освобождён от штатного serial driver Wiren Board.
+
+Automation helper для полного физического smoke test:
+
+```sh
+bash tools/wb8/run_dev003b_physical_test.sh root@REAL_WB_IP 1
+```
+
+Этот diagnostic не является production scheduler.
+
+## Следующий gate — DEV-004
+
+DEV-004 должен превратить доказанный transport в независимый непрерывный DMX output engine:
+
+- один `DmxOutput` worker — единственный владелец serial fd;
+- continuous BREAK + frame loop;
+- absolute frame-start scheduling;
+- configurable refresh `10..44 Hz`, default `30 Hz`;
+- validation физически достижимого refresh;
+- принятие нового whole snapshot только между кадрами;
+- runtime refresh change без закрытия serial, когда это возможно;
+- serial error detection;
+- close/reopen/retry;
+- recovery с актуального snapshot;
+- timing/recovery diagnostics and counters.
+
+MQTT, Fixture и Art-Net по-прежнему не должны опережать этот gate.
 
 ## Источник истины и порядок работы
 
 **Источник истины — актуальный репозиторий DMXWB.**
 
-Документы читать в таком порядке:
+Документы читать в порядке:
 
-1. [`AGENTS.md`](AGENTS.md) — правила совместной разработки и передачи изменений.
-2. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — текущее состояние и ближайший шаг.
-3. [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) — требования к конечному приложению.
-4. [`docs/ROADMAP.md`](docs/ROADMAP.md) — последовательность gates и критерии PASS.
+1. [`AGENTS.md`](AGENTS.md)
+2. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)
+3. [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md)
+4. [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
-Пользователь самостоятельно выполняет commit/push и присылает новый полный SHA после успешной проверки шага.
-
-Исторические исследования MOD1/WBEC/custom kernel не являются источником истины текущего проекта.
+Пользователь самостоятельно выполняет commit/push и присылает новый полный SHA после завершения шага.
