@@ -82,6 +82,15 @@ Custom kernel patch на acceptance WB8 не требуется.
 - ArtPollReply продолжает рекламировать настроенный output universe даже при Source=MQTT, чтобы Art-Net subscription оставалась активной;
 - production release требует зарегистрированный Art-Net OEM Code и обязательный Art-Net credit в user documentation.
 
+## Инженерные reference-документы
+
+Отдельные reusable-документы сохраняют технические знания проекта и могут использоваться как база для других разработок:
+
+- [`docs/reference/WB8_RS485_DMX.md`](docs/reference/WB8_RS485_DMX.md) — как был исследован и реализован физический DMX512 через встроенный RS-485 WB8: transport, DE/BREAK/TEMT, timing, failure cases и hardware acceptance;
+- [`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md) — актуальный Art-Net 4 integration contract: ArtDmx, discovery/subscription, ArtSync, Sequence, conflict, Hold Last и связь network cadence с physical DMX.
+
+`docs/reference/` не заменяет `TECHNICAL_SPEC.md`: reference объясняет инженерные решения и исследования, а нормативные требования конкретно к DMXWB остаются в проектных документах.
+
 ## Hardware acceptance target
 
 ```text
