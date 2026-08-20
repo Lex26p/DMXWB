@@ -35,8 +35,11 @@ function(dmxwb_enable_portable_gnu_runtime target)
     endif()
 endfunction()
 
+find_package(Threads REQUIRED)
+
 add_library(dmxwb_core STATIC
     src/app_info.cpp
+    src/dmx_output.cpp
     src/dmx_snapshot.cpp
     src/dmx_test_pattern.cpp
     src/monotonic_clock.cpp
@@ -55,6 +58,7 @@ target_include_directories(dmxwb_core
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_link_libraries(dmxwb_core PUBLIC Threads::Threads)
 target_compile_features(dmxwb_core PUBLIC cxx_std_20)
 target_compile_definitions(dmxwb_core PRIVATE DMXWB_VERSION="${PROJECT_VERSION}")
 dmxwb_enable_warnings(dmxwb_core)

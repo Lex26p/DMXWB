@@ -1,14 +1,22 @@
 #include "dmxwb/app_info.hpp"
+#include "dmxwb/dmx_output.hpp"
 #include "dmxwb/dmx_snapshot.hpp"
 #include "dmxwb/dmx_test_pattern.hpp"
+#include "dmxwb/dmx_transport.hpp"
 #include "dmxwb/monotonic_clock.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -30,14 +38,144 @@ void expect_equal(std::string_view actual, std::string_view expected, std::strin
 
 class FakeMonotonicClock final : public dmxwb::MonotonicClock {
 public:
-    explicit FakeMonotonicClock(time_point value) noexcept : value_(value) {}
+    explicit FakeMonotonicClock(time_point value = {}) noexcept : value_(value) {}
 
     [[nodiscard]] time_point now() const noexcept override {
         return value_;
     }
 
+    void sleep_until(time_point deadline) override {
+        sleep_deadlines_.push_back(deadline);
+        if (deadline > value_) {
+            value_ = deadline;
+        }
+    }
+
+    void advance(duration amount) noexcept {
+        value_ += amount;
+    }
+
+    [[nodiscard]] const std::vector<time_point>& sleep_deadlines() const noexcept {
+        return sleep_deadlines_;
+    }
+
 private:
-    time_point value_;
+    time_point value_{};
+    std::vector<time_point> sleep_deadlines_;
+};
+
+class FakeDmxTransport final : public dmxwb::DmxTransportInterface {
+public:
+    explicit FakeDmxTransport(FakeMonotonicClock& clock) : clock_(clock) {}
+
+    [[nodiscard]] bool open() override {
+        ++open_calls_;
+        bool result = true;
+        if (open_result_index_ < open_results_.size()) {
+            result = open_results_[open_result_index_];
+            ++open_result_index_;
+        }
+        open_ = result;
+        if (!result) {
+            last_error_ = "simulated open failure";
+        }
+        return result;
+    }
+
+    void close() noexcept override {
+        ++close_calls_;
+        open_ = false;
+    }
+
+    [[nodiscard]] bool is_open() const noexcept override {
+        return open_;
+    }
+
+    [[nodiscard]] std::string_view port() const noexcept override {
+        return "/dev/fake-dmx";
+    }
+
+    [[nodiscard]] std::string_view last_error() const noexcept override {
+        return last_error_;
+    }
+
+    [[nodiscard]] bool send_frame(const dmxwb::DmxFrameView& frame) override {
+        send_start_times_.push_back(clock_.now());
+        generations_.push_back(frame.generation);
+        first_channels_.push_back(frame.channels.empty() ? std::uint8_t{0} : frame.channels.front());
+
+        const auto call_index = send_calls_;
+        ++send_calls_;
+        if (on_send_) {
+            on_send_(call_index);
+        }
+        clock_.advance(send_duration_);
+
+        bool result = true;
+        if (send_result_index_ < send_results_.size()) {
+            result = send_results_[send_result_index_];
+            ++send_result_index_;
+        }
+        if (!result) {
+            last_error_ = "simulated send failure";
+        }
+        return result;
+    }
+
+    void set_open_results(std::vector<bool> results) {
+        open_results_ = std::move(results);
+        open_result_index_ = 0;
+    }
+
+    void set_send_results(std::vector<bool> results) {
+        send_results_ = std::move(results);
+        send_result_index_ = 0;
+    }
+
+    void set_send_duration(dmxwb::MonotonicClock::duration duration) noexcept {
+        send_duration_ = duration;
+    }
+
+    void set_on_send(std::function<void(std::size_t)> callback) {
+        on_send_ = std::move(callback);
+    }
+
+    [[nodiscard]] std::size_t open_calls() const noexcept {
+        return open_calls_;
+    }
+
+    [[nodiscard]] std::size_t close_calls() const noexcept {
+        return close_calls_;
+    }
+
+    [[nodiscard]] const std::vector<dmxwb::MonotonicClock::time_point>& send_start_times() const noexcept {
+        return send_start_times_;
+    }
+
+    [[nodiscard]] const std::vector<dmxwb::DmxSnapshot::Generation>& generations() const noexcept {
+        return generations_;
+    }
+
+    [[nodiscard]] const std::vector<std::uint8_t>& first_channels() const noexcept {
+        return first_channels_;
+    }
+
+private:
+    FakeMonotonicClock& clock_;
+    bool open_{false};
+    std::string last_error_;
+    std::vector<bool> open_results_;
+    std::vector<bool> send_results_;
+    std::size_t open_result_index_{0};
+    std::size_t send_result_index_{0};
+    std::size_t open_calls_{0};
+    std::size_t close_calls_{0};
+    std::size_t send_calls_{0};
+    dmxwb::MonotonicClock::duration send_duration_{};
+    std::function<void(std::size_t)> on_send_;
+    std::vector<dmxwb::MonotonicClock::time_point> send_start_times_;
+    std::vector<dmxwb::DmxSnapshot::Generation> generations_;
+    std::vector<std::uint8_t> first_channels_;
 };
 
 std::shared_ptr<const dmxwb::DmxSnapshot> make_filled_snapshot(
@@ -56,6 +194,23 @@ std::shared_ptr<const dmxwb::DmxSnapshot> make_filled_snapshot(
         }
     }
     return builder.build(generation);
+}
+
+bool drive_until_frames(
+    dmxwb::DmxOutputLoop& loop,
+    FakeMonotonicClock& clock,
+    std::uint64_t frame_count,
+    std::size_t max_steps = 1000) {
+    for (std::size_t step_number = 0; step_number < max_steps; ++step_number) {
+        if (loop.diagnostics().frames_sent >= frame_count) {
+            return true;
+        }
+        const auto result = loop.step();
+        if (result.kind == dmxwb::DmxOutputStepKind::wait_until) {
+            clock.sleep_until(result.wake_at);
+        }
+    }
+    return loop.diagnostics().frames_sent >= frame_count;
 }
 
 void test_channel_boundaries() {
@@ -189,8 +344,242 @@ void test_dmx_diagnostic_patterns() {
 
 void test_clock_abstraction() {
     const auto expected = dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{1234}};
-    const FakeMonotonicClock clock{expected};
+    FakeMonotonicClock clock{expected};
     expect_true(clock.now() == expected, "monotonic clock interface supports deterministic fake time");
+
+    const auto deadline = expected + std::chrono::milliseconds{50};
+    clock.sleep_until(deadline);
+    expect_true(clock.now() == deadline, "fake monotonic clock advances to absolute deadline");
+}
+
+void test_refresh_validation() {
+    const auto short_frame_44 = dmxwb::check_dmx_refresh_rate(4, 44);
+    expect_true(short_frame_44.valid, "44 Hz accepted for short four-slot frame");
+
+    const auto full_frame_44 = dmxwb::check_dmx_refresh_rate(512, 44);
+    expect_true(!full_frame_44.valid, "44 Hz rejected for full 512-slot frame by wire-time limit");
+    expect_true(full_frame_44.max_supported_hz == 43, "full 512-slot theoretical maximum is 43 Hz");
+
+    expect_true(!dmxwb::check_dmx_refresh_rate(4, 9).valid, "refresh below 10 Hz rejected");
+    expect_true(!dmxwb::check_dmx_refresh_rate(4, 45).valid, "refresh above 44 Hz rejected");
+
+    const auto with_overhead = dmxwb::check_dmx_refresh_rate(4, 10, std::chrono::milliseconds{100});
+    expect_true(!with_overhead.valid, "measured transport overhead participates in refresh feasibility");
+}
+
+void test_preallocated_mailbox_frame_boundary() {
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto generation_one = make_filled_snapshot(4, 0x11, 1);
+    const auto generation_two = make_filled_snapshot(4, 0x22, 2);
+    expect_true(generation_one != nullptr && generation_two != nullptr, "mailbox snapshots built");
+    if (!generation_one || !generation_two) {
+        return;
+    }
+
+    expect_true(mailbox.publish(*generation_one), "mailbox publishes generation 1");
+    const auto held = mailbox.acquire();
+    expect_true(held.generation == 1, "mailbox front frame holds generation 1");
+    expect_true(held.channels[0] == 0x11, "mailbox front frame holds generation 1 data");
+
+    expect_true(mailbox.publish(*generation_two), "mailbox publishes generation 2 while generation 1 is active");
+    expect_true(held.generation == 1, "active frame view cannot change mid-frame before next acquire");
+    expect_true(held.channels[0] == 0x11, "active frame data cannot change mid-frame before next acquire");
+
+    const auto latest = mailbox.acquire();
+    expect_true(latest.generation == 2, "next frame acquire sees generation 2");
+    expect_true(latest.channels[0] == 0x22, "next frame acquire sees generation 2 data");
+}
+
+void test_mailbox_concurrent_whole_frames() {
+    dmxwb::DmxOutputMailbox mailbox;
+    std::atomic<bool> writer_done{false};
+    std::atomic<bool> torn_frame{false};
+
+    std::thread writer{[&] {
+        for (std::uint64_t generation = 1; generation <= 5000; ++generation) {
+            const auto value = static_cast<std::uint8_t>(generation % 251U);
+            const auto snapshot = make_filled_snapshot(8, value, generation);
+            if (!snapshot || !mailbox.publish(*snapshot)) {
+                torn_frame.store(true, std::memory_order_release);
+                break;
+            }
+        }
+        writer_done.store(true, std::memory_order_release);
+    }};
+
+    while (!writer_done.load(std::memory_order_acquire)) {
+        const auto frame = mailbox.acquire();
+        if (frame.generation == 0) {
+            continue;
+        }
+        const auto expected = static_cast<std::uint8_t>(frame.generation % 251U);
+        for (const auto value : frame.channels) {
+            if (value != expected) {
+                torn_frame.store(true, std::memory_order_release);
+                break;
+            }
+        }
+    }
+
+    writer.join();
+    const auto final_frame = mailbox.acquire();
+    expect_true(!torn_frame.load(std::memory_order_acquire), "concurrent mailbox reader never observes torn frame data");
+    expect_true(final_frame.generation == 5000, "concurrent mailbox reader can acquire final published generation");
+}
+
+void test_absolute_frame_schedule_no_drift() {
+    FakeMonotonicClock clock;
+    FakeDmxTransport transport{clock};
+    transport.set_send_duration(std::chrono::milliseconds{2});
+
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto snapshot = make_filled_snapshot(4, 0x33, 7);
+    expect_true(snapshot != nullptr, "absolute schedule snapshot built");
+    if (!snapshot) {
+        return;
+    }
+    expect_true(mailbox.publish(*snapshot), "absolute schedule snapshot published");
+
+    std::atomic<std::uint32_t> refresh_hz{10};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    expect_true(drive_until_frames(loop, clock, 3), "absolute scheduler produced three frames");
+
+    const auto& starts = transport.send_start_times();
+    expect_true(starts.size() >= 3, "absolute scheduler recorded three frame starts");
+    if (starts.size() >= 3) {
+        expect_true(starts[0] == dmxwb::MonotonicClock::time_point{}, "first frame starts at T0");
+        expect_true(starts[1] == dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{100}}, "second frame starts at T0 + period");
+        expect_true(starts[2] == dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{200}}, "third frame starts at T0 + 2*period without drift");
+    }
+    expect_true(loop.diagnostics().missed_deadlines == 0, "normal send duration does not miss deadlines");
+    loop.shutdown();
+}
+
+void test_snapshot_switch_only_between_frames() {
+    FakeMonotonicClock clock;
+    FakeDmxTransport transport{clock};
+    transport.set_send_duration(std::chrono::milliseconds{1});
+
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto generation_one = make_filled_snapshot(4, 0x11, 1);
+    const auto generation_two = make_filled_snapshot(4, 0x22, 2);
+    expect_true(generation_one != nullptr && generation_two != nullptr, "frame-boundary snapshots built");
+    if (!generation_one || !generation_two) {
+        return;
+    }
+    expect_true(mailbox.publish(*generation_one), "frame-boundary generation 1 published");
+
+    transport.set_on_send([&](std::size_t call_index) {
+        if (call_index == 0) {
+            (void)mailbox.publish(*generation_two);
+        }
+    });
+
+    std::atomic<std::uint32_t> refresh_hz{30};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    expect_true(drive_until_frames(loop, clock, 2), "frame-boundary scheduler produced two frames");
+
+    const auto& generations = transport.generations();
+    const auto& values = transport.first_channels();
+    expect_true(generations.size() >= 2 && values.size() >= 2, "frame-boundary transport recorded two frames");
+    if (generations.size() >= 2 && values.size() >= 2) {
+        expect_true(generations[0] == 1 && values[0] == 0x11, "first frame remains entirely generation 1");
+        expect_true(generations[1] == 2 && values[1] == 0x22, "next frame switches entirely to generation 2");
+    }
+    loop.shutdown();
+}
+
+void test_serial_failure_reopen_recovery() {
+    FakeMonotonicClock clock;
+    FakeDmxTransport transport{clock};
+    transport.set_open_results({true, true});
+    transport.set_send_results({true, false, true});
+    transport.set_send_duration(std::chrono::milliseconds{1});
+
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto snapshot = make_filled_snapshot(4, 0x44, 9);
+    expect_true(snapshot != nullptr, "recovery snapshot built");
+    if (!snapshot) {
+        return;
+    }
+    expect_true(mailbox.publish(*snapshot), "recovery snapshot published");
+
+    std::atomic<std::uint32_t> refresh_hz{30};
+    dmxwb::DmxOutputLoop loop{
+        transport,
+        mailbox,
+        clock,
+        refresh_hz,
+        std::chrono::milliseconds{250}};
+
+    expect_true(drive_until_frames(loop, clock, 2), "output resumes after simulated serial send failure");
+    const auto diagnostics = loop.diagnostics();
+    expect_true(diagnostics.send_failures == 1, "serial send failure counted");
+    expect_true(diagnostics.reopen_attempts == 1, "serial reopen attempted after failure");
+    expect_true(diagnostics.recoveries == 1, "serial recovery counted after successful reopen");
+    expect_true(diagnostics.frames_sent == 2, "frames continue after recovery");
+    expect_true(transport.open_calls() == 2, "transport opened initially and once after failure");
+    expect_true(transport.close_calls() >= 1, "failed transport is closed before reopen");
+    loop.shutdown();
+}
+
+void test_runtime_refresh_change_keeps_absolute_schedule() {
+    FakeMonotonicClock clock;
+    FakeDmxTransport transport{clock};
+    transport.set_send_duration(std::chrono::milliseconds{1});
+
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto snapshot = make_filled_snapshot(4, 0x55, 12);
+    expect_true(snapshot != nullptr, "refresh-change snapshot built");
+    if (!snapshot) {
+        return;
+    }
+    expect_true(mailbox.publish(*snapshot), "refresh-change snapshot published");
+
+    std::atomic<std::uint32_t> refresh_hz{30};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    expect_true(drive_until_frames(loop, clock, 1), "refresh-change first frame sent");
+
+    refresh_hz.store(20, std::memory_order_release);
+    expect_true(drive_until_frames(loop, clock, 3), "refresh-change produced frames at new rate");
+
+    const auto& starts = transport.send_start_times();
+    expect_true(starts.size() >= 3, "refresh-change transport recorded three frames");
+    if (starts.size() >= 3) {
+        const auto first_30hz_deadline = dmxwb::MonotonicClock::time_point{std::chrono::nanoseconds{33'333'333}};
+        const auto next_20hz_deadline = dmxwb::MonotonicClock::time_point{std::chrono::nanoseconds{83'333'333}};
+        expect_true(starts[1] == first_30hz_deadline, "refresh change applies at next frame boundary without closing serial");
+        expect_true(starts[2] == next_20hz_deadline, "new 20 Hz period advances from absolute boundary");
+    }
+    expect_true(loop.diagnostics().active_refresh_hz == 20, "active refresh diagnostics report runtime change");
+    expect_true(transport.open_calls() == 1, "runtime refresh change does not reopen serial");
+    loop.shutdown();
+}
+
+void test_missed_deadline_is_counted_and_grid_recovers() {
+    FakeMonotonicClock clock;
+    FakeDmxTransport transport{clock};
+    transport.set_send_duration(std::chrono::milliseconds{120});
+
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto snapshot = make_filled_snapshot(4, 0x66, 13);
+    expect_true(snapshot != nullptr, "deadline snapshot built");
+    if (!snapshot) {
+        return;
+    }
+    expect_true(mailbox.publish(*snapshot), "deadline snapshot published");
+
+    std::atomic<std::uint32_t> refresh_hz{10};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    expect_true(drive_until_frames(loop, clock, 2), "deadline test produced two frames");
+    expect_true(loop.diagnostics().missed_deadlines >= 1, "frame longer than period increments missed deadline counter");
+
+    const auto& starts = transport.send_start_times();
+    expect_true(starts.size() >= 2, "deadline test recorded two starts");
+    if (starts.size() >= 2) {
+        expect_true(starts[1] == dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{200}}, "scheduler skips missed 100 ms boundary and returns to absolute grid");
+    }
+    loop.shutdown();
 }
 
 }  // namespace
@@ -205,6 +594,14 @@ int main() {
     test_immutable_publication();
     test_dmx_diagnostic_patterns();
     test_clock_abstraction();
+    test_refresh_validation();
+    test_preallocated_mailbox_frame_boundary();
+    test_mailbox_concurrent_whole_frames();
+    test_absolute_frame_schedule_no_drift();
+    test_snapshot_switch_only_between_frames();
+    test_serial_failure_reopen_recovery();
+    test_runtime_refresh_change_keeps_absolute_schedule();
+    test_missed_deadline_is_counted_and_grid_recovers();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";

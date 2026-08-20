@@ -9,24 +9,38 @@ namespace dmxwb {
 
 inline constexpr std::string_view kDefaultDmxPort = "/dev/ttyRS485-1";
 
-class DmxTransport final {
+class DmxTransportInterface {
+public:
+    virtual ~DmxTransportInterface() = default;
+
+    [[nodiscard]] virtual bool open() = 0;
+    virtual void close() noexcept = 0;
+
+    [[nodiscard]] virtual bool is_open() const noexcept = 0;
+    [[nodiscard]] virtual std::string_view port() const noexcept = 0;
+    [[nodiscard]] virtual std::string_view last_error() const noexcept = 0;
+
+    [[nodiscard]] virtual bool send_frame(const DmxFrameView& frame) = 0;
+};
+
+class DmxTransport final : public DmxTransportInterface {
 public:
     explicit DmxTransport(std::string port = std::string{kDefaultDmxPort});
-    ~DmxTransport();
+    ~DmxTransport() override;
 
     DmxTransport(const DmxTransport&) = delete;
     DmxTransport& operator=(const DmxTransport&) = delete;
     DmxTransport(DmxTransport&&) = delete;
     DmxTransport& operator=(DmxTransport&&) = delete;
 
-    [[nodiscard]] bool open();
-    void close() noexcept;
+    [[nodiscard]] bool open() override;
+    void close() noexcept override;
 
-    [[nodiscard]] bool is_open() const noexcept;
-    [[nodiscard]] std::string_view port() const noexcept;
-    [[nodiscard]] std::string_view last_error() const noexcept;
+    [[nodiscard]] bool is_open() const noexcept override;
+    [[nodiscard]] std::string_view port() const noexcept override;
+    [[nodiscard]] std::string_view last_error() const noexcept override;
 
-    [[nodiscard]] bool send_frame(const DmxFrameView& frame);
+    [[nodiscard]] bool send_frame(const DmxFrameView& frame) override;
 
 private:
     [[nodiscard]] bool configure_data_mode();

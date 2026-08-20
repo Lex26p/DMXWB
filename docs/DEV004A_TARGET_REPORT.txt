@@ -1,0 +1,56 @@
+=== DMXWB DEV-004A target report ===
+generated_utc: 2026-08-20T12:46:22Z
+source_head: 0b8c9a3ff6f327b09181770e8f51513af122142c
+source_worktree: modified
+artifact_sha256: 851dda41ad56f4c42a30279cd9cdcf578570539168cc08e4b9bd61045121be6f
+target: root@10.200.200.1
+
+=== DMXWB WB8 target probe ===
+date: 2026-08-17T21:32:39+00:00
+device_model: Wiren Board rev. 8.5.1 (T507)
+uname_machine: aarch64
+kernel: 6.8.0-wb160
+dpkg_architecture: arm64
+glibc: glibc 2.31
+--- os-release ---
+PRETTY_NAME="Debian GNU/Linux 11 (bullseye)"
+NAME="Debian GNU/Linux"
+VERSION_ID="11"
+VERSION="11 (bullseye)"
+VERSION_CODENAME=bullseye
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+--- wb-release ---
+Wirenboard release wb-2606 (as stable), target wb8/bullseye
+
+You can get this info in scripts from /usr/lib/wb-release.
+--- RS-485 ports ---
+lrwxrwxrwx 1 root root 5 Aug 17 16:13 /dev/ttyRS485-1 -> ttyS2
+lrwxrwxrwx 1 root root 5 Aug 17 16:13 /dev/ttyRS485-2 -> ttyS1
+=== end probe ===
+--- target binary ---
+/tmp/dmxwb-target-verify/dmxwb: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (GNU/Linux), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=bfefcd47520ead96b4f8baddd105b36a94d9cf62, for GNU/Linux 3.7.0, not stripped
+	linux-vdso.so.1 (0x0000ffff9123e000)
+	libpthread.so.0 => /lib/aarch64-linux-gnu/libpthread.so.0 (0x0000ffff910dd000)
+	libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ffff90f69000)
+	/lib/ld-linux-aarch64.so.1 (0x0000ffff9120e000)
+--- dmxwb --version ---
+dmxwb 0.1.0
+--- dmxwb --help ---
+Usage:
+  dmxwb --help
+  dmxwb --version
+  dmxwb --dmx-test PATTERN [--port PATH] [--start-channel N] [--frames N]
+  dmxwb --dmx-continuous-test PATTERN [--port PATH] [--start-channel N] [--refresh HZ] [--seconds N]
+
+PATTERN: all-off | red | green | blue | white | all-on
+
+DEV-003 one-shot hardware diagnostic defaults:
+  --port /dev/ttyRS485-1 --start-channel 1 --frames 120
+
+DEV-004 continuous-output diagnostic defaults:
+  --port /dev/ttyRS485-1 --start-channel 1 --refresh 30 --seconds 10
+  refresh range: 10..44 Hz, additionally limited by physical frame length
+=== DEV-004A target execution PASS ===

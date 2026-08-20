@@ -9,7 +9,7 @@ MARKER="${ROOTFS}/.dmxwb-bullseye-cross-arm64-ready"
 CHROOT_SOURCE="${ROOTFS}/work/dmxwb"
 OUTPUT_DIR="${REPO_ROOT}/artifacts/wb8-bullseye-arm64"
 OUTPUT_BIN="${OUTPUT_DIR}/dmxwb"
-HOST_BUILD="${REPO_ROOT}/build-linux-dev003a"
+HOST_BUILD="${REPO_ROOT}/build-linux-wb8"
 
 if [[ ! -f "${MARKER}" ]]; then
     echo "WB8 Bullseye cross-build rootfs is not ready: ${ROOTFS}" >&2
@@ -99,4 +99,5 @@ echo "Maximum required glibc symbol version: ${MAX_GLIBC}"
 echo "Dynamic dependencies:"
 readelf -d "${OUTPUT_BIN}" | grep NEEDED || true
 sha256sum "${OUTPUT_BIN}"
-echo "DEV-003A laptop cross build completed. Target execution on a real WB8 is still required for PASS."
+echo "WB8 laptop cross build completed."
+echo "Run tools/wb8/verify_on_target.sh for target CLI verification when required by the current gate."

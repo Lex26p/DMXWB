@@ -18,8 +18,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 BINARY="${REPO_ROOT}/artifacts/wb8-bullseye-arm64/dmxwb"
 PROBE="${SCRIPT_DIR}/probe_target.sh"
-REPORT="${REPO_ROOT}/docs/DEV003A_TARGET_REPORT.txt"
-REMOTE_DIR="/tmp/dmxwb-dev003a"
+REPORT="${DMXWB_TARGET_REPORT:-${REPO_ROOT}/docs/DEV003A_TARGET_REPORT.txt}"
+REPORT_LABEL="${DMXWB_TARGET_REPORT_LABEL:-DEV-003A}"
+REMOTE_DIR="${DMXWB_TARGET_REMOTE_DIR:-/tmp/dmxwb-target-verify}"
 CONTROL_DIR="${TMPDIR:-/tmp}/dmxwb-ssh-${USER:-user}"
 CONTROL_PATH="${CONTROL_DIR}/control-%C"
 
@@ -36,6 +37,7 @@ if [[ ! -x "${BINARY}" ]]; then
     exit 1
 fi
 
+mkdir -p "$(dirname -- "${REPORT}")"
 mkdir -p "${CONTROL_DIR}"
 chmod 0700 "${CONTROL_DIR}"
 
@@ -67,12 +69,12 @@ scp "${SCP_OPTS[@]}" "${BINARY}" "${PROBE}" "${TARGET}:${REMOTE_DIR}/"
 ssh "${SSH_OPTS[@]}" "${TARGET}" "chmod 0755 '${REMOTE_DIR}/dmxwb' '${REMOTE_DIR}/probe_target.sh'"
 
 {
-    echo "=== DMXWB DEV-003A target report ==="
+    echo "=== DMXWB ${REPORT_LABEL} target report ==="
     echo "generated_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     if command -v git >/dev/null 2>&1 && git -C "${REPO_ROOT}" rev-parse HEAD >/dev/null 2>&1; then
         echo "source_head: $(git -C "${REPO_ROOT}" rev-parse HEAD)"
         if [[ -n "$(git -C "${REPO_ROOT}" status --short)" ]]; then
-            echo "source_worktree: modified (DEV-003A package applied, not committed yet)"
+            echo "source_worktree: modified"
         else
             echo "source_worktree: clean"
         fi
@@ -91,9 +93,8 @@ ssh "${SSH_OPTS[@]}" "${TARGET}" "chmod 0755 '${REMOTE_DIR}/dmxwb' '${REMOTE_DIR
         echo '--- dmxwb --help ---'
         '${REMOTE_DIR}/dmxwb' --help
     "
-    echo "=== DEV-003A target execution PASS ==="
+    echo "=== ${REPORT_LABEL} target execution PASS ==="
 } | tee "${REPORT}"
 
 echo
 echo "Report saved to: ${REPORT}"
-echo "Do not proceed to physical DMX patterns until this report ends with DEV-003A target execution PASS."
