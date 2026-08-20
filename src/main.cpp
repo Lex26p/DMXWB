@@ -21,6 +21,7 @@ struct DmxTestOptions final {
     std::string port{dmxwb::kDefaultDmxPort};
     std::size_t start_channel{1};
     std::size_t frames{120};
+    std::size_t slots{0};
 };
 
 struct DmxContinuousTestOptions final {
@@ -29,6 +30,7 @@ struct DmxContinuousTestOptions final {
     std::size_t start_channel{1};
     std::uint32_t refresh_hz{dmxwb::kDmxDefaultRefreshHz};
     std::size_t seconds{10};
+    std::size_t slots{0};
 };
 
 void print_help() {
@@ -36,8 +38,8 @@ void print_help() {
         << "Usage:\n"
         << "  dmxwb --help\n"
         << "  dmxwb --version\n"
-        << "  dmxwb --dmx-test PATTERN [--port PATH] [--start-channel N] [--frames N]\n"
-        << "  dmxwb --dmx-continuous-test PATTERN [--port PATH] [--start-channel N] [--refresh HZ] [--seconds N]\n"
+        << "  dmxwb --dmx-test PATTERN [--port PATH] [--start-channel N] [--frames N] [--slots N]\n"
+        << "  dmxwb --dmx-continuous-test PATTERN [--port PATH] [--start-channel N] [--refresh HZ] [--seconds N] [--slots N]\n"
         << "\n"
         << "PATTERN: all-off | red | green | blue | white | all-on\n"
         << "\n"
@@ -46,7 +48,8 @@ void print_help() {
         << "\n"
         << "DEV-004 continuous-output diagnostic defaults:\n"
         << "  --port /dev/ttyRS485-1 --start-channel 1 --refresh 30 --seconds 10\n"
-        << "  refresh range: 10..44 Hz, additionally limited by physical frame length\n";
+        << "  --slots N pads the diagnostic frame with zero channels up to N (1..512)\n"
+        << "  refresh range: 10..44 Hz, additionally limited by measured physical frame time\n";
 }
 
 [[nodiscard]] std::optional<std::size_t> parse_size(std::string_view value) noexcept {
@@ -103,6 +106,13 @@ void print_help() {
                 return std::nullopt;
             }
             options.frames = *parsed;
+        } else if (argument == "--slots") {
+            const auto parsed = parse_size(value);
+            if (!parsed.has_value() || *parsed < 1 || *parsed > dmxwb::kDmxMaxChannels) {
+                std::cerr << "--slots must be in range 1..512\n";
+                return std::nullopt;
+            }
+            options.slots = *parsed;
         } else {
             std::cerr << "Unknown DMX test option: " << argument << '\n';
             return std::nullopt;
@@ -163,6 +173,13 @@ void print_help() {
                 return std::nullopt;
             }
             options.seconds = *parsed;
+        } else if (argument == "--slots") {
+            const auto parsed = parse_size(value);
+            if (!parsed.has_value() || *parsed < 1 || *parsed > dmxwb::kDmxMaxChannels) {
+                std::cerr << "--slots must be in range 1..512\n";
+                return std::nullopt;
+            }
+            options.slots = *parsed;
         } else {
             std::cerr << "Unknown DMX continuous test option: " << argument << '\n';
             return std::nullopt;
@@ -173,10 +190,40 @@ void print_help() {
     return options;
 }
 
+[[nodiscard]] std::shared_ptr<const dmxwb::DmxSnapshot> make_padded_test_snapshot(
+    dmxwb::DmxTestPattern pattern,
+    std::size_t start_channel,
+    std::size_t requested_slots) {
+    const auto base = dmxwb::make_dmx_test_snapshot(pattern, start_channel);
+    if (!base) {
+        return {};
+    }
+    if (requested_slots == 0 || requested_slots == base->slot_count()) {
+        return base;
+    }
+    if (requested_slots < base->slot_count() || requested_slots > dmxwb::kDmxMaxChannels) {
+        return {};
+    }
+
+    const auto maybe_builder = dmxwb::DmxSnapshotBuilder::create(requested_slots);
+    if (!maybe_builder.has_value()) {
+        return {};
+    }
+    auto builder = *maybe_builder;
+    for (std::size_t channel = 1; channel <= base->slot_count(); ++channel) {
+        const auto value = base->channel(channel);
+        if (!value.has_value() || !builder.set_channel(channel, *value)) {
+            return {};
+        }
+    }
+    return builder.build(base->generation());
+}
+
 int run_dmx_test(const DmxTestOptions& options) {
-    const auto snapshot = dmxwb::make_dmx_test_snapshot(options.pattern, options.start_channel);
+    const auto snapshot = make_padded_test_snapshot(options.pattern, options.start_channel, options.slots);
     if (!snapshot) {
-        std::cerr << "Cannot create DMX test snapshot for start channel " << options.start_channel << '\n';
+        std::cerr << "Cannot create DMX test snapshot for start channel " << options.start_channel
+                  << " and requested slots " << options.slots << '\n';
         return 2;
     }
 
@@ -214,9 +261,10 @@ int run_dmx_test(const DmxTestOptions& options) {
 }
 
 int run_dmx_continuous_test(const DmxContinuousTestOptions& options) {
-    const auto snapshot = dmxwb::make_dmx_test_snapshot(options.pattern, options.start_channel);
+    const auto snapshot = make_padded_test_snapshot(options.pattern, options.start_channel, options.slots);
     if (!snapshot) {
-        std::cerr << "Cannot create DMX test snapshot for start channel " << options.start_channel << '\n';
+        std::cerr << "Cannot create DMX test snapshot for start channel " << options.start_channel
+                  << " and requested slots " << options.slots << '\n';
         return 2;
     }
 
@@ -262,6 +310,7 @@ int run_dmx_continuous_test(const DmxContinuousTestOptions& options) {
               << "  send_failures: " << diagnostics.send_failures << '\n'
               << "  recoveries: " << diagnostics.recoveries << '\n'
               << "  missed_deadlines: " << diagnostics.missed_deadlines << '\n'
+              << "  refresh_rejections: " << diagnostics.refresh_rejections << '\n'
               << "  active_generation: " << diagnostics.active_generation << '\n'
               << "  active_refresh_hz: " << diagnostics.active_refresh_hz << '\n'
               << "  max_send_us: "
@@ -273,7 +322,12 @@ int run_dmx_continuous_test(const DmxContinuousTestOptions& options) {
         std::cout << "  last_error: " << diagnostics.last_error << '\n';
     }
 
-    if (diagnostics.frames_sent == 0 || diagnostics.open_failures != 0 || diagnostics.send_failures != 0) {
+    if (diagnostics.frames_sent == 0 ||
+        diagnostics.open_failures != 0 ||
+        diagnostics.send_failures != 0 ||
+        diagnostics.missed_deadlines != 0 ||
+        diagnostics.refresh_rejections != 0 ||
+        diagnostics.active_refresh_hz != options.refresh_hz) {
         std::cerr << "DEV-004 continuous DMX diagnostic failed\n";
         return 1;
     }

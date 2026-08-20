@@ -2,16 +2,17 @@ cmake_minimum_required(VERSION 3.18)
 
 project(DMXWB VERSION 0.1.0 LANGUAGES CXX)
 
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR
+        "DMXWB supports Linux builds only. "
+        "Use the local Linux/WSL environment for host tests and the Bullseye ARM64 cross-build for WB8.")
+endif()
+
 option(DMXWB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(DMXWB_STATIC_GNU_RUNTIME "Statically link libstdc++ and libgcc for portable GNU/Linux deployment" OFF)
 
 function(dmxwb_enable_warnings target)
-    if(MSVC)
-        target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus)
-        if(DMXWB_WARNINGS_AS_ERRORS)
-            target_compile_options(${target} PRIVATE /WX)
-        endif()
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(${target} PRIVATE
             -Wall
             -Wextra
@@ -43,15 +44,10 @@ add_library(dmxwb_core STATIC
     src/dmx_snapshot.cpp
     src/dmx_test_pattern.cpp
     src/monotonic_clock.cpp
+    src/dmx_transport_linux.cpp
 )
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_sources(dmxwb_core PRIVATE src/dmx_transport_linux.cpp)
-    target_compile_definitions(dmxwb_core PUBLIC DMXWB_HAS_LINUX_SERIAL=1)
-else()
-    target_sources(dmxwb_core PRIVATE src/dmx_transport_unsupported.cpp)
-    target_compile_definitions(dmxwb_core PUBLIC DMXWB_HAS_LINUX_SERIAL=0)
-endif()
+target_compile_definitions(dmxwb_core PUBLIC DMXWB_HAS_LINUX_SERIAL=1)
 
 target_include_directories(dmxwb_core
     PUBLIC

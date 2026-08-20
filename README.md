@@ -2,7 +2,7 @@
 
 DMXWB — C++20-приложение, расширяющее контроллеры **серии Wiren Board 8 (WB8)** физическим DMX512 и будущим Art-Net/WB MQTT управлением.
 
-DMXWB не заменяет Wiren Board и использует его штатную Linux/MQTT/systemd/web инфраструктуру согласно `docs/TECHNICAL_SPEC.md`.
+DMXWB не заменяет Wiren Board и использует штатную Linux/MQTT/systemd/web инфраструктуру согласно `docs/TECHNICAL_SPEC.md`.
 
 Контроллеру не требуется интернет для build, deployment или runtime. Production artifacts собираются на ноутбуке. Docker не используется.
 
@@ -11,159 +11,82 @@ DMXWB не заменяет Wiren Board и использует его штат�
 Последний завершённый engineering gate:
 
 ```text
-DEV-003 — physical DMX transport proof
-0b8c9a3ff6f327b09181770e8f51513af122142c
-```
-
-На реальном WB8 подтверждены:
-
-- ARM64/Bullseye target build с ноутбука;
-- `/dev/ttyRS485-1`;
-- `250000 8N2`;
-- BREAK через `38400 + 0x00 + drain`;
-- Start Code `0x00`;
-- RGBW patterns `all-off/red/green/blue/white/all-on`;
-- отсутствие заметного flicker в DEV-003 diagnostic burst;
-- clean close/reopen;
-- отсутствие необходимости kernel/WBEC patch.
-
-Текущий gate:
-
-```text
 DEV-004 — continuous DMX engine, timing and serial recovery
 ```
 
-Текущий implementation step:
+База, от которой выполнен DEV-004 closure:
 
 ```text
-DEV-004A — deterministic continuous-output core + host/target build proof
+22d4befec0884366132355a390879bf89e8255b4
+Add DEV-004 continuous DMX output core
 ```
 
-DEV-004 ещё не считается PASS до continuous hardware smoke на WB8.
+DEV-004A target proof хранится в:
+
+```text
+docs/DEV004A_TARGET_REPORT.txt
+```
+
+DEV-004B production hardware acceptance хранится в:
+
+```text
+docs/DEV004B_FAST_TRANSPORT_REPORT.txt
+```
+
+Следующий gate:
+
+```text
+DEV-005 — Fixture RGBW model and addressing
+```
 
 ## DEV-004 continuous engine
 
-В текущем package добавлены:
+Реализованы:
 
 - отдельный `DmxOutput` worker thread;
 - continuous frame transmission;
-- absolute frame-start cadence без накопления send-time drift;
+- absolute frame-start cadence без cumulative send-time drift;
 - refresh `10..44 Hz`, default `30 Hz`;
-- physical refresh feasibility validation по `slot_count` и observed transport overhead;
+- measured physical refresh feasibility;
+- безопасный startup: high refresh применяется только после измерения реального transport;
 - runtime refresh change на frame boundary без serial reopen;
 - preallocated triple-buffer snapshot mailbox;
 - whole-snapshot switch только между кадрами;
 - serial open/write error handling;
 - close/reopen/retry и recovery с актуального snapshot;
-- timing/recovery counters;
-- deterministic fake-clock/fake-transport tests.
+- timing/recovery diagnostics.
 
-Проверенная Linux transport последовательность DEV-003 не менялась.
+## Production DMX transport
 
-### Snapshot path
-
-```text
-publisher
-   |
-   v
-preallocated triple buffer
-   |
-   | frame boundary only
-   v
-DmxOutput worker
-   |
-   v
-DmxTransport
-   |
-   v
-WB8 RS-485 -> DMX512
-```
-
-Output timing path не делает heap allocation/deallocation для получения очередного snapshot.
-
-## Continuous diagnostic
-
-Для DEV-004 hardware acceptance добавлен CLI:
-
-```sh
-./dmxwb --dmx-continuous-test red \
-    --port /dev/ttyRS485-1 \
-    --start-channel 1 \
-    --refresh 30 \
-    --seconds 30
-```
-
-Он печатает:
+Предпочтительный WB8 fast path:
 
 ```text
-frames_sent
-open_failures
-send_failures
-recoveries
-missed_deadlines
-active_generation
-active_refresh_hz
-max_send_us
-max_transport_overhead_us
+250000 8N2 постоянно
+-> сохранить serial_rs485
+-> temporary kernel automatic RS-485 OFF
+-> RTS/DE ON
+-> TIOCSBRK, BREAK >= 120 us
+-> TIOCCBRK
+-> MAB >= 20 us
+-> Start Code 0x00 + active slots
+-> wait physical TEMT via TIOCSERGETLSR
+-> RTS/DE OFF
 ```
 
-Это hardware diagnostic нового production-style output engine, а не будущий MQTT/Art-Net application runtime.
+При `close()`, normal stop и error/recovery исходная `serial_rs485` конфигурация восстанавливается.
 
-Старый DEV-003 regression diagnostic остаётся доступен:
-
-```sh
-./dmxwb --dmx-test red --port /dev/ttyRS485-1 --start-channel 1 --frames 120
-```
-
-## Среда разработки
+Если требуемые standard Linux ioctl недоступны, transport автоматически использует compatibility fallback, доказанный DEV-003:
 
 ```text
-Windows / Visual Studio 2026 -> host development/tests
-Local Linux on laptop        -> Linux tests + WB8 target build
-WB8                          -> runtime/hardware/integration target
-Docker                       -> not used
+38400 8N2 -> 0x00 -> drain
+250000 8N2 -> Start Code + slots -> drain
 ```
 
-Минимальный CMake: `3.18`.
+Custom kernel patch на подтверждённой WB8 acceptance-конфигурации **не требуется**.
 
-### Windows / Visual Studio 2026
+## DEV-004B hardware acceptance
 
-```powershell
-cmake -S . -B build-dev004 -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
-cmake --build build-dev004 --config Debug
-ctest --test-dir build-dev004 -C Debug --output-on-failure
-.\build-dev004\Debug\dmxwb.exe --version
-.\build-dev004\Debug\dmxwb.exe --help
-.\build-dev004\Debug\dmxwb_tests.exe
-```
-
-Windows использует unsupported hardware backend, поэтому physical serial test выполняется только на WB8.
-
-### Local Linux / WB8 target build
-
-Подготовленный в DEV-003A Bullseye build rootfs используется повторно:
-
-```sh
-bash tools/wb8/build_bullseye_arm64.sh
-```
-
-Target artifact:
-
-```text
-artifacts/wb8-bullseye-arm64/dmxwb
-```
-
-Для current-step CLI smoke без доступа к serial:
-
-```sh
-DMXWB_TARGET_REPORT="$PWD/docs/DEV004A_TARGET_REPORT.txt" \
-DMXWB_TARGET_REPORT_LABEL="DEV-004A" \
-bash tools/wb8/verify_on_target.sh root@10.200.200.1
-```
-
-Контроллер ничего не скачивает из интернета: binary и probe передаются напрямую с ноутбука через SSH/SCP.
-
-## Подтверждённый DEV-003 target
+Подтверждено production binary на:
 
 ```text
 Controller:       Wiren Board rev. 8.5.1 (T507)
@@ -176,7 +99,86 @@ DMX port:         /dev/ttyRS485-1 -> ttyS2
 Build compiler:   Bullseye aarch64-linux-gnu-g++ 10.2.1
 ```
 
-Это acceptance-конфигурация, а не ограничение проекта одной моделью WB8.
+Ключевые результаты:
+
+| Case | Frames | Missed deadlines | Max send | Physical result |
+|---|---:|---:|---:|---|
+| 512 slots / 30 Hz / RED / 60 s | 1800 | 0 | 24.004 ms | PASS, no flicker |
+| 512 slots / 30 Hz / GREEN / 10 s | 300 | 0 | 24.870 ms | PASS, no flicker |
+| 512 slots / 30 Hz / BLUE / 10 s | 300 | 0 | 23.284 ms | PASS, no flicker |
+| 512 slots / 30 Hz / WHITE / 10 s | 300 | 0 | 23.188 ms | PASS, no flicker |
+| 240 slots / 44 Hz / BLUE / 30 s | 1320 | 0 | 12.658 ms | PASS, no flicker |
+
+Дополнительно `512 slots / requested 44 Hz` корректно отклонён после первого измерения:
+
+```text
+refresh_rejections: 1
+active_refresh_hz: 30
+missed_deadlines: 0
+```
+
+То есть физически невозможный high refresh не вызывает missed-deadline storm.
+
+## Continuous diagnostic
+
+Diagnostic CLI поддерживает принудительную длину кадра через `--slots`:
+
+```sh
+./dmxwb --dmx-continuous-test blue \
+    --port /dev/ttyRS485-1 \
+    --start-channel 1 \
+    --slots 240 \
+    --refresh 44 \
+    --seconds 30
+```
+
+Основные diagnostics:
+
+```text
+frames_sent
+open_failures
+send_failures
+recoveries
+missed_deadlines
+refresh_rejections
+active_generation
+active_refresh_hz
+max_send_us
+max_transport_overhead_us
+```
+
+## Поддерживаемая build/test среда
+
+**C++ build/test поддерживается только на Linux. Windows/MSVC не входит в build/test matrix проекта.**
+
+```text
+Windows host                 -> project files, editor, ZIP, Git, WSL launch
+Local Linux / WSL on laptop -> native C++ build/tests + WB8 target build
+WB8                          -> runtime/hardware/integration acceptance
+Docker                       -> not used
+```
+
+Native Linux tests:
+
+```sh
+cd /mnt/c/Projects/DMXWB
+cmake -S . -B build-linux -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
+cmake --build build-linux -j2
+ctest --test-dir build-linux --output-on-failure
+./build-linux/dmxwb_tests
+```
+
+WB8 target build:
+
+```sh
+bash tools/wb8/build_bullseye_arm64.sh
+```
+
+Target artifact:
+
+```text
+artifacts/wb8-bullseye-arm64/dmxwb
+```
 
 ## Что ещё не реализовано
 
@@ -198,5 +200,3 @@ Build compiler:   Bullseye aarch64-linux-gnu-g++ 10.2.1
 2. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)
 3. [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md)
 4. [`docs/ROADMAP.md`](docs/ROADMAP.md)
-
-Источник истины — актуальный репозиторий. Пользователь самостоятельно выполняет commit/push и присылает новый полный SHA после завершения шага.

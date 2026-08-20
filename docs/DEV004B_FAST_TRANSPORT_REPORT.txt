@@ -1,0 +1,191 @@
+=== DMXWB DEV-004B production fast transport report ===
+generated_utc: 2026-08-20T14:34:35Z
+source_head: 22d4befec0884366132355a390879bf89e8255b4
+source_worktree: modified
+artifact_sha256: b8d6ab3331a5324e81b8acccd4658d50a4d7536c5ad04bdb5ab989992c1c3c21
+target: root@10.200.200.1
+port: /dev/ttyRS485-1
+start_channel: 1
+wb_mqtt_serial_initial_state: active
+port_declared_free_in_driver_config: 1
+
+--- target identity ---
+model: Wiren Board rev. 8.5.1 (T507)
+Linux wirenboard-A35WDYWM 6.8.0-wb160 #1 SMP Wed Jul  8 12:40:57 UTC 2026 aarch64 GNU/Linux
+RELEASE_NAME=wb-2606
+SUITE=stable
+TARGET=wb8/bullseye
+REPO_PREFIX=
+--- ТЕСТ 1/5 — 512 slots / default 30 Hz ---
+pattern: red
+slots: 512
+refresh_hz: 30
+duration_seconds: 60
+DEV-004 continuous DMX diagnostic
+  port: /dev/ttyRS485-1
+  pattern: red
+  RGBW start channel: 1
+  physical slots: 512
+  refresh: 30 Hz
+  duration: 60 s
+DmxOutput diagnostics
+  frames_sent: 1800
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  refresh_rejections: 0
+  active_generation: 1
+  active_refresh_hz: 30
+  max_send_us: 24004
+  max_transport_overhead_us: 1292
+DEV-004 continuous DMX diagnostic completed; serial port closed cleanly.
+software_result: PASS
+user_observation: PASS
+
+--- ТЕСТ 2/5 — 512 slots / 30 Hz ---
+pattern: green
+slots: 512
+refresh_hz: 30
+duration_seconds: 10
+DEV-004 continuous DMX diagnostic
+  port: /dev/ttyRS485-1
+  pattern: green
+  RGBW start channel: 1
+  physical slots: 512
+  refresh: 30 Hz
+  duration: 10 s
+DmxOutput diagnostics
+  frames_sent: 300
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  refresh_rejections: 0
+  active_generation: 1
+  active_refresh_hz: 30
+  max_send_us: 24870
+  max_transport_overhead_us: 2158
+DEV-004 continuous DMX diagnostic completed; serial port closed cleanly.
+software_result: PASS
+user_observation: PASS
+
+--- ТЕСТ 3/5 — 512 slots / 30 Hz ---
+pattern: blue
+slots: 512
+refresh_hz: 30
+duration_seconds: 10
+DEV-004 continuous DMX diagnostic
+  port: /dev/ttyRS485-1
+  pattern: blue
+  RGBW start channel: 1
+  physical slots: 512
+  refresh: 30 Hz
+  duration: 10 s
+DmxOutput diagnostics
+  frames_sent: 300
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  refresh_rejections: 0
+  active_generation: 1
+  active_refresh_hz: 30
+  max_send_us: 23284
+  max_transport_overhead_us: 572
+DEV-004 continuous DMX diagnostic completed; serial port closed cleanly.
+software_result: PASS
+user_observation: PASS
+
+--- ТЕСТ 4/5 — 512 slots / 30 Hz ---
+pattern: white
+slots: 512
+refresh_hz: 30
+duration_seconds: 10
+DEV-004 continuous DMX diagnostic
+  port: /dev/ttyRS485-1
+  pattern: white
+  RGBW start channel: 1
+  physical slots: 512
+  refresh: 30 Hz
+  duration: 10 s
+DmxOutput diagnostics
+  frames_sent: 300
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  refresh_rejections: 0
+  active_generation: 1
+  active_refresh_hz: 30
+  max_send_us: 23188
+  max_transport_overhead_us: 476
+DEV-004 continuous DMX diagnostic completed; serial port closed cleanly.
+software_result: PASS
+user_observation: PASS
+
+--- ТЕСТ 5/5 — 240 slots / 44 Hz / 60 RGBW ---
+pattern: blue
+slots: 240
+refresh_hz: 44
+duration_seconds: 30
+DEV-004 continuous DMX diagnostic
+  port: /dev/ttyRS485-1
+  pattern: blue
+  RGBW start channel: 1
+  physical slots: 240
+  refresh: 44 Hz
+  duration: 30 s
+DmxOutput diagnostics
+  frames_sent: 1320
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  refresh_rejections: 0
+  active_generation: 1
+  active_refresh_hz: 44
+  max_send_us: 12658
+  max_transport_overhead_us: 1914
+DEV-004 continuous DMX diagnostic completed; serial port closed cleanly.
+software_result: PASS
+user_observation: PASS
+
+--- expected measured rejection: 512 slots / requested 44 Hz ---
+DEV-004 continuous DMX diagnostic
+  port: /dev/ttyRS485-1
+  pattern: all-off
+  RGBW start channel: 1
+  physical slots: 512
+  refresh: 44 Hz
+  duration: 3 s
+DmxOutput diagnostics
+  frames_sent: 91
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  refresh_rejections: 1
+  active_generation: 1
+  active_refresh_hz: 30
+  max_send_us: 23153
+  max_transport_overhead_us: 441
+DEV-004 continuous DMX diagnostic failed
+expected_rejection_result: PASS
+expected_behavior: requested 44 Hz rejected after measurement; active refresh remains 30 Hz
+
+--- final all-off / reopen check / 512 slots ---
+DEV-003 DMX hardware test
+  port: /dev/ttyRS485-1
+  pattern: all-off
+  RGBW start channel: 1
+  physical slots: 512
+  frames: 20
+DMX test completed; serial port closed cleanly.
+final_all_off_reopen_check: PASS
+serial_reopen_across_separate_runs: PASS
+wb_mqtt_serial_restore: PASS
+kernel_patch_required: NO
+legacy_transport_fallback_retained: YES
+overall_result: PASS
+=== DEV-004B PRODUCTION FAST TRANSPORT PASS ===

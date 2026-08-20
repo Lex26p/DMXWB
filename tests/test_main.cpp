@@ -357,14 +357,56 @@ void test_refresh_validation() {
     expect_true(short_frame_44.valid, "44 Hz accepted for short four-slot frame");
 
     const auto full_frame_44 = dmxwb::check_dmx_refresh_rate(512, 44);
-    expect_true(!full_frame_44.valid, "44 Hz rejected for full 512-slot frame by wire-time limit");
-    expect_true(full_frame_44.max_supported_hz == 43, "full 512-slot theoretical maximum is 43 Hz");
+    expect_true(full_frame_44.valid, "44 Hz is theoretically possible for full 512-slot hardware-BREAK frame");
+    expect_true(full_frame_44.max_supported_hz == 44, "full 512-slot theoretical maximum reaches interface cap 44 Hz");
+
+    const auto full_frame_with_measured_overhead =
+        dmxwb::check_dmx_refresh_rate(512, 44, std::chrono::milliseconds{1});
+    expect_true(
+        !full_frame_with_measured_overhead.valid,
+        "measured 512-slot transport overhead rejects 44 Hz when real frame exceeds period");
 
     expect_true(!dmxwb::check_dmx_refresh_rate(4, 9).valid, "refresh below 10 Hz rejected");
     expect_true(!dmxwb::check_dmx_refresh_rate(4, 45).valid, "refresh above 44 Hz rejected");
 
     const auto with_overhead = dmxwb::check_dmx_refresh_rate(4, 10, std::chrono::milliseconds{100});
     expect_true(!with_overhead.valid, "measured transport overhead participates in refresh feasibility");
+}
+
+void test_high_startup_refresh_waits_for_transport_measurement() {
+    FakeMonotonicClock clock;
+    FakeDmxTransport transport{clock};
+    transport.set_send_duration(std::chrono::milliseconds{24});
+
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto snapshot = make_filled_snapshot(512, 0x22, 21);
+    expect_true(snapshot != nullptr, "high-startup snapshot built");
+    if (!snapshot) {
+        return;
+    }
+    expect_true(mailbox.publish(*snapshot), "high-startup snapshot published");
+
+    std::atomic<std::uint32_t> refresh_hz{44};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    expect_true(
+        loop.diagnostics().active_refresh_hz == dmxwb::kDmxDefaultRefreshHz,
+        "high startup request begins at safe default refresh before measurement");
+
+    expect_true(drive_until_frames(loop, clock, 1), "high-startup first measurement frame sent");
+    expect_true(
+        loop.diagnostics().active_refresh_hz == dmxwb::kDmxDefaultRefreshHz,
+        "first measurement frame remains on safe default refresh");
+
+    expect_true(drive_until_frames(loop, clock, 2), "high-startup second frame sent after feasibility decision");
+    const auto diagnostics = loop.diagnostics();
+    expect_true(diagnostics.refresh_rejections == 1, "measured impossible high startup refresh rejected once");
+    expect_true(
+        diagnostics.active_refresh_hz == dmxwb::kDmxDefaultRefreshHz,
+        "rejected high startup refresh stays at safe default");
+    expect_true(
+        refresh_hz.load(std::memory_order_acquire) == dmxwb::kDmxDefaultRefreshHz,
+        "rejected requested refresh is normalized to active refresh");
+    loop.shutdown();
 }
 
 void test_preallocated_mailbox_frame_boundary() {
@@ -595,6 +637,7 @@ int main() {
     test_dmx_diagnostic_patterns();
     test_clock_abstraction();
     test_refresh_validation();
+    test_high_startup_refresh_waits_for_transport_measurement();
     test_preallocated_mailbox_frame_boundary();
     test_mailbox_concurrent_whole_frames();
     test_absolute_frame_schedule_no_drift();

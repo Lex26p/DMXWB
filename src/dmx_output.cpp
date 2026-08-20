@@ -9,17 +9,13 @@ namespace dmxwb {
 namespace {
 
 constexpr std::int64_t kNanosecondsPerSecond = 1'000'000'000LL;
-constexpr std::int64_t kBreakBaud = 38'400;
+constexpr std::int64_t kDmxBreakHoldNs = 120'000;
+constexpr std::int64_t kDmxMarkAfterBreakNs = 20'000;
 constexpr std::int64_t kDataBaud = 250'000;
 constexpr std::int64_t kSerialBitsPerByte8N2 = 11;
 
 [[nodiscard]] constexpr std::int64_t ceil_div(std::int64_t numerator, std::int64_t denominator) noexcept {
     return (numerator + denominator - 1) / denominator;
-}
-
-[[nodiscard]] constexpr std::chrono::nanoseconds break_wire_time() noexcept {
-    return std::chrono::nanoseconds{
-        ceil_div(kSerialBitsPerByte8N2 * kNanosecondsPerSecond, kBreakBaud)};
 }
 
 [[nodiscard]] constexpr std::chrono::nanoseconds data_byte_wire_time() noexcept {
@@ -52,7 +48,8 @@ std::chrono::nanoseconds minimum_dmx_frame_time(
 
     const auto data_bytes = slot_count + 1;  // Start Code + active slots.
     const auto data_time = data_byte_wire_time() * static_cast<std::int64_t>(data_bytes);
-    return break_wire_time() + data_time + measured_transport_overhead;
+    return std::chrono::nanoseconds{kDmxBreakHoldNs + kDmxMarkAfterBreakNs}
+        + data_time + measured_transport_overhead;
 }
 
 DmxRefreshCheck check_dmx_refresh_rate(
@@ -136,7 +133,12 @@ DmxOutputLoop::DmxOutputLoop(
       reopen_interval_(reopen_interval) {
     const auto requested = requested_refresh_hz_.load(std::memory_order_acquire);
     if (requested >= kDmxMinRefreshHz && requested <= kDmxMaxRefreshHz) {
-        active_refresh_hz_.store(requested, std::memory_order_release);
+        // High refresh rates are promoted only after at least one real frame has
+        // measured the current transport. This prevents an impossible startup
+        // request from missing deadlines before feasibility is known.
+        active_refresh_hz_.store(
+            std::min(requested, kDmxDefaultRefreshHz),
+            std::memory_order_release);
     }
 }
 
@@ -184,16 +186,22 @@ DmxOutputStep DmxOutputLoop::step() {
     const auto frame = mailbox_.acquire();
     const auto slot_count = frame.channels.size();
     const auto requested_refresh = requested_refresh_hz_.load(std::memory_order_acquire);
-    const auto refresh_check = check_dmx_refresh_rate(
-        slot_count,
-        requested_refresh,
-        max_observed_transport_overhead());
+    const auto active_refresh = active_refresh_hz_.load(std::memory_order_acquire);
+    const bool promotion_needs_measurement =
+        requested_refresh > active_refresh && frames_sent_.load(std::memory_order_acquire) == 0;
 
-    if (!refresh_check.valid) {
-        refresh_rejections_.fetch_add(1, std::memory_order_relaxed);
-        requested_refresh_hz_.store(active_refresh_hz_.load(std::memory_order_acquire), std::memory_order_release);
-    } else {
-        active_refresh_hz_.store(requested_refresh, std::memory_order_release);
+    if (!promotion_needs_measurement) {
+        const auto refresh_check = check_dmx_refresh_rate(
+            slot_count,
+            requested_refresh,
+            max_observed_transport_overhead());
+
+        if (!refresh_check.valid) {
+            refresh_rejections_.fetch_add(1, std::memory_order_relaxed);
+            requested_refresh_hz_.store(active_refresh, std::memory_order_release);
+        } else {
+            active_refresh_hz_.store(requested_refresh, std::memory_order_release);
+        }
     }
 
     const auto scheduled_start = next_frame_start_.value_or(now);

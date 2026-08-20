@@ -1,7 +1,7 @@
 # DMXWB DEVELOPMENT ROADMAP
 
 **Статус:** рабочая дорожная карта реализации утверждённого `TECHNICAL_SPEC.md`  
-**База актуализации дорожной карты:** `e6b563da756023a3e87afe38fb25e59a98d7d21e`  
+**База актуализации дорожной карты:** `22d4befec0884366132355a390879bf89e8255b4`  
 **Дата актуализации:** 2026-08-20  
 **Цель:** последовательно реализовать полное приложение DMXWB с проверяемым PASS/FAIL после каждого значимого engineering gate.
 
@@ -16,11 +16,13 @@
 Development/build environment:
 
 ```text
-Windows + Visual Studio 2026 -> host development/tests
-Local Linux on laptop        -> Linux/target build and production artifacts
+Windows host                 -> project files / editor / ZIP / Git / WSL launch
+Local Linux / WSL on laptop -> all C++ host build/tests + target build
 WB8                          -> runtime/hardware/integration acceptance
 Docker                       -> не используется
 ```
+
+Windows compiler/MSVC не входит в поддерживаемую build/test matrix. C++ build и tests выполняются только в Linux/WSL; target artifact собирается Bullseye ARM64 cross-toolchain.
 
 ---
 
@@ -56,9 +58,10 @@ Docker                       -> не используется
 
 - target = серия WB8, а не одна фиксированная версия контроллера;
 - конкретная модель WB8 и версия WB software фиксируются в hardware acceptance;
-- host build/tests выполняются на ноутбуке пользователя;
-- Windows / Visual Studio 2026 используется для host development/tests;
-- локальный Linux используется для Linux-specific и target build;
+- host build/tests выполняются на ноутбуке пользователя в Linux/WSL;
+- Windows используется для project files/editor/ZIP/Git и запуска WSL, но Windows compiler/MSVC не поддерживается;
+- GNU C++ и Clang на Linux являются поддерживаемыми host compilers;
+- локальный Linux/WSL используется для всех C++ host tests и target build;
 - production binary не компилируется на WB8 как обязательная часть workflow;
 - конкретный non-Docker target toolchain должен быть практически подтверждён до production deployment;
 - Docker не используется для build, cross-build, runtime, deployment или обязательных tests.
@@ -340,7 +343,10 @@ WB8 hardware:
 
 - 10 Hz;
 - 30 Hz;
-- 44 Hz, когда длина кадра допускает;
+- 44 Hz, когда длина кадра и measured transport overhead допускают;
+- full 512-slot continuous smoke минимум на default 30 Hz;
+- representative 240-slot load (60 RGBW) на верхней границе 44 Hz, если hardware допускает;
+- невозможный high refresh должен быть измеренно отклонён без missed-deadline storm;
 - runtime refresh change;
 - continuous fixed-pattern smoke;
 - recoverable serial error/recovery, если безопасно воспроизвести.
@@ -349,7 +355,10 @@ WB8 hardware:
 
 - stable continuous DMX;
 - no visible flicker;
-- refresh соответствует допустимому диапазону;
+- full 512-slot frame стабилен на default 30 Hz на acceptance WB8;
+- 44 Hz работает для фактической длины кадра, когда измеренный transport это допускает;
+- невозможный refresh корректно отклоняется;
+- fast UART path не требует custom kernel patch на доказанной acceptance-конфигурации и имеет compatibility fallback;
 - recoverable serial error не требует process restart.
 
 ---
