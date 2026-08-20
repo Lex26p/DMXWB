@@ -17,11 +17,11 @@ std::optional<std::size_t> calculate_slot_count(
         return std::size_t{0};
     }
 
-    if (!is_valid_dmx_channel(start_channel)) {
+    if (!is_valid_physical_dmx_slot(start_channel)) {
         return std::nullopt;
     }
 
-    const auto available_channels = kDmxMaxChannels - (start_channel - 1);
+    const auto available_channels = kDmxPhysicalMaxSlots - (start_channel - 1);
     if (item_count > available_channels / channels_per_item) {
         return std::nullopt;
     }

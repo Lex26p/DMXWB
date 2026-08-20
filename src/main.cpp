@@ -28,7 +28,7 @@ struct DmxContinuousTestOptions final {
     dmxwb::DmxTestPattern pattern{dmxwb::DmxTestPattern::all_off};
     std::string port{dmxwb::kDefaultDmxPort};
     std::size_t start_channel{1};
-    std::uint32_t refresh_hz{dmxwb::kDmxDefaultRefreshHz};
+    std::uint32_t refresh_hz{dmxwb::kDmxOutputRefreshHz};
     std::size_t seconds{10};
     std::size_t slots{0};
 };
@@ -47,9 +47,9 @@ void print_help() {
         << "  --port /dev/ttyRS485-1 --start-channel 1 --frames 120\n"
         << "\n"
         << "DEV-004 continuous-output diagnostic defaults:\n"
-        << "  --port /dev/ttyRS485-1 --start-channel 1 --refresh 30 --seconds 10\n"
-        << "  --slots N pads the diagnostic frame with zero channels up to N (1..512)\n"
-        << "  refresh range: 10..44 Hz, additionally limited by measured physical frame time\n";
+        << "  --port /dev/ttyRS485-1 --start-channel 1 --refresh 44 --seconds 10\n"
+        << "  --slots N pads the diagnostic frame with zero channels up to N (1..300)\n"
+        << "  production DMX profile is fixed at 44 Hz; --refresh accepts only 44\n";
 }
 
 [[nodiscard]] std::optional<std::size_t> parse_size(std::string_view value) noexcept {
@@ -108,8 +108,8 @@ void print_help() {
             options.frames = *parsed;
         } else if (argument == "--slots") {
             const auto parsed = parse_size(value);
-            if (!parsed.has_value() || *parsed < 1 || *parsed > dmxwb::kDmxMaxChannels) {
-                std::cerr << "--slots must be in range 1..512\n";
+            if (!parsed.has_value() || *parsed < 1 || *parsed > dmxwb::kDmxPhysicalMaxSlots) {
+                std::cerr << "--slots must be in range 1..300\n";
                 return std::nullopt;
             }
             options.slots = *parsed;
@@ -161,11 +161,11 @@ void print_help() {
             options.start_channel = *parsed;
         } else if (argument == "--refresh") {
             const auto parsed = parse_size(value);
-            if (!parsed.has_value() || *parsed < dmxwb::kDmxMinRefreshHz || *parsed > dmxwb::kDmxMaxRefreshHz) {
-                std::cerr << "--refresh must be in range 10..44 Hz\n";
+            if (!parsed.has_value() || *parsed != dmxwb::kDmxOutputRefreshHz) {
+                std::cerr << "--refresh is fixed at 44 Hz for the production DMX profile\n";
                 return std::nullopt;
             }
-            options.refresh_hz = static_cast<std::uint32_t>(*parsed);
+            options.refresh_hz = dmxwb::kDmxOutputRefreshHz;
         } else if (argument == "--seconds") {
             const auto parsed = parse_size(value);
             if (!parsed.has_value() || *parsed < 1 || *parsed > 3600) {
@@ -175,8 +175,8 @@ void print_help() {
             options.seconds = *parsed;
         } else if (argument == "--slots") {
             const auto parsed = parse_size(value);
-            if (!parsed.has_value() || *parsed < 1 || *parsed > dmxwb::kDmxMaxChannels) {
-                std::cerr << "--slots must be in range 1..512\n";
+            if (!parsed.has_value() || *parsed < 1 || *parsed > dmxwb::kDmxPhysicalMaxSlots) {
+                std::cerr << "--slots must be in range 1..300\n";
                 return std::nullopt;
             }
             options.slots = *parsed;
@@ -201,7 +201,7 @@ void print_help() {
     if (requested_slots == 0 || requested_slots == base->slot_count()) {
         return base;
     }
-    if (requested_slots < base->slot_count() || requested_slots > dmxwb::kDmxMaxChannels) {
+    if (requested_slots < base->slot_count() || requested_slots > dmxwb::kDmxPhysicalMaxSlots) {
         return {};
     }
 
@@ -268,22 +268,12 @@ int run_dmx_continuous_test(const DmxContinuousTestOptions& options) {
         return 2;
     }
 
-    const auto refresh_check = dmxwb::check_dmx_refresh_rate(snapshot->slot_count(), options.refresh_hz);
-    if (!refresh_check.valid) {
-        std::cerr << "Requested refresh " << options.refresh_hz
-                  << " Hz is not physically valid for " << snapshot->slot_count()
-                  << " slots; maximum without measured transport overhead is "
-                  << refresh_check.max_supported_hz << " Hz\n";
-        return 2;
-    }
-
     dmxwb::DmxOutput output{dmxwb::DmxOutputConfig{
         options.port,
-        options.refresh_hz,
         std::chrono::milliseconds{250}}};
 
     if (!output.publish_snapshot(*snapshot)) {
-        std::cerr << "Cannot publish initial DMX snapshot for requested refresh\n";
+        std::cerr << "Cannot publish initial DMX snapshot within the 300-slot physical limit\n";
         return 2;
     }
     if (!output.start()) {
@@ -310,7 +300,6 @@ int run_dmx_continuous_test(const DmxContinuousTestOptions& options) {
               << "  send_failures: " << diagnostics.send_failures << '\n'
               << "  recoveries: " << diagnostics.recoveries << '\n'
               << "  missed_deadlines: " << diagnostics.missed_deadlines << '\n'
-              << "  refresh_rejections: " << diagnostics.refresh_rejections << '\n'
               << "  active_generation: " << diagnostics.active_generation << '\n'
               << "  active_refresh_hz: " << diagnostics.active_refresh_hz << '\n'
               << "  max_send_us: "
@@ -326,8 +315,7 @@ int run_dmx_continuous_test(const DmxContinuousTestOptions& options) {
         diagnostics.open_failures != 0 ||
         diagnostics.send_failures != 0 ||
         diagnostics.missed_deadlines != 0 ||
-        diagnostics.refresh_rejections != 0 ||
-        diagnostics.active_refresh_hz != options.refresh_hz) {
+        diagnostics.active_refresh_hz != dmxwb::kDmxOutputRefreshHz) {
         std::cerr << "DEV-004 continuous DMX diagnostic failed\n";
         return 1;
     }

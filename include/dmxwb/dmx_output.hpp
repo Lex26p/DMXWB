@@ -17,30 +17,18 @@
 
 namespace dmxwb {
 
-inline constexpr std::uint32_t kDmxMinRefreshHz = 10;
-inline constexpr std::uint32_t kDmxMaxRefreshHz = 44;
-inline constexpr std::uint32_t kDmxDefaultRefreshHz = 30;
+// Fixed production profile proven on the WB8 acceptance target. The Art-Net
+// side may retain 512 channels internally, but physical RS-485 output accepts
+// at most kDmxPhysicalMaxSlots and always runs on this cadence.
+inline constexpr std::uint32_t kDmxOutputRefreshHz = 44;
 
-struct DmxRefreshCheck final {
-    bool valid{false};
-    std::uint32_t requested_hz{0};
-    std::uint32_t max_supported_hz{0};
-    std::chrono::nanoseconds minimum_frame_time{};
-};
-
-[[nodiscard]] std::chrono::nanoseconds minimum_dmx_frame_time(
-    std::size_t slot_count,
-    std::chrono::nanoseconds measured_transport_overhead = {}) noexcept;
-
-[[nodiscard]] DmxRefreshCheck check_dmx_refresh_rate(
-    std::size_t slot_count,
-    std::uint32_t requested_hz,
-    std::chrono::nanoseconds measured_transport_overhead = {}) noexcept;
+[[nodiscard]] std::chrono::nanoseconds minimum_dmx_frame_time(std::size_t slot_count) noexcept;
 
 class DmxOutputMailbox final {
 public:
     DmxOutputMailbox();
 
+    // Physical output accepts snapshots up to the DMXWB 300-slot product limit.
     [[nodiscard]] bool publish(const DmxSnapshot& snapshot);
 
     // Single-reader API for the DmxOutput thread. The returned view stays valid
@@ -79,9 +67,8 @@ struct DmxOutputDiagnostics final {
     std::uint64_t send_failures{0};
     std::uint64_t recoveries{0};
     std::uint64_t missed_deadlines{0};
-    std::uint64_t refresh_rejections{0};
     DmxSnapshot::Generation active_generation{0};
-    std::uint32_t active_refresh_hz{kDmxDefaultRefreshHz};
+    std::uint32_t active_refresh_hz{kDmxOutputRefreshHz};
     bool serial_open{false};
     std::chrono::nanoseconds max_send_duration{};
     std::chrono::nanoseconds max_transport_overhead{};
@@ -105,25 +92,22 @@ public:
         DmxTransportInterface& transport,
         DmxOutputMailbox& mailbox,
         MonotonicClock& clock,
-        std::atomic<std::uint32_t>& requested_refresh_hz,
         std::chrono::milliseconds reopen_interval = std::chrono::milliseconds{250});
 
     [[nodiscard]] DmxOutputStep step();
     void shutdown() noexcept;
 
     [[nodiscard]] DmxOutputDiagnostics diagnostics() const;
-    [[nodiscard]] std::chrono::nanoseconds max_observed_transport_overhead() const noexcept;
 
 private:
     void set_error(std::string message);
     void update_max_send_duration(std::chrono::nanoseconds value) noexcept;
     void update_max_transport_overhead(std::chrono::nanoseconds value) noexcept;
-    [[nodiscard]] MonotonicClock::duration active_period() const noexcept;
+    [[nodiscard]] static MonotonicClock::duration active_period() noexcept;
 
     DmxTransportInterface& transport_;
     DmxOutputMailbox& mailbox_;
     MonotonicClock& clock_;
-    std::atomic<std::uint32_t>& requested_refresh_hz_;
     std::chrono::milliseconds reopen_interval_;
 
     std::optional<MonotonicClock::time_point> next_open_attempt_;
@@ -138,9 +122,7 @@ private:
     std::atomic<std::uint64_t> send_failures_{0};
     std::atomic<std::uint64_t> recoveries_{0};
     std::atomic<std::uint64_t> missed_deadlines_{0};
-    std::atomic<std::uint64_t> refresh_rejections_{0};
     std::atomic<DmxSnapshot::Generation> active_generation_{0};
-    std::atomic<std::uint32_t> active_refresh_hz_{kDmxDefaultRefreshHz};
     std::atomic<bool> serial_open_{false};
     std::atomic<std::int64_t> max_send_duration_ns_{0};
     std::atomic<std::int64_t> max_transport_overhead_ns_{0};
@@ -151,7 +133,6 @@ private:
 
 struct DmxOutputConfig final {
     std::string port{std::string{kDefaultDmxPort}};
-    std::uint32_t refresh_hz{kDmxDefaultRefreshHz};
     std::chrono::milliseconds reopen_interval{250};
 };
 
@@ -174,9 +155,6 @@ public:
     [[nodiscard]] bool running() const noexcept;
 
     [[nodiscard]] bool publish_snapshot(const DmxSnapshot& snapshot);
-    [[nodiscard]] bool set_refresh_rate(std::uint32_t refresh_hz) noexcept;
-    [[nodiscard]] std::uint32_t requested_refresh_rate() const noexcept;
-
     [[nodiscard]] DmxOutputDiagnostics diagnostics() const;
 
 private:
@@ -184,7 +162,6 @@ private:
 
     DmxOutputConfig config_;
     DmxOutputMailbox mailbox_;
-    std::atomic<std::uint32_t> requested_refresh_hz_;
     std::unique_ptr<DmxTransportInterface> transport_;
     std::unique_ptr<MonotonicClock> clock_;
     std::unique_ptr<DmxOutputLoop> loop_;

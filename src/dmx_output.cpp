@@ -1,7 +1,6 @@
 #include "dmxwb/dmx_output.hpp"
 
 #include <algorithm>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -36,46 +35,20 @@ void update_atomic_max(std::atomic<std::int64_t>& target, std::int64_t value) no
 
 }  // namespace
 
-std::chrono::nanoseconds minimum_dmx_frame_time(
-    std::size_t slot_count,
-    std::chrono::nanoseconds measured_transport_overhead) noexcept {
-    if (slot_count > kDmxMaxChannels) {
-        slot_count = kDmxMaxChannels;
-    }
-    if (measured_transport_overhead.count() < 0) {
-        measured_transport_overhead = std::chrono::nanoseconds{0};
-    }
-
+std::chrono::nanoseconds minimum_dmx_frame_time(std::size_t slot_count) noexcept {
+    slot_count = std::min(slot_count, kDmxPhysicalMaxSlots);
     const auto data_bytes = slot_count + 1;  // Start Code + active slots.
     const auto data_time = data_byte_wire_time() * static_cast<std::int64_t>(data_bytes);
-    return std::chrono::nanoseconds{kDmxBreakHoldNs + kDmxMarkAfterBreakNs}
-        + data_time + measured_transport_overhead;
-}
-
-DmxRefreshCheck check_dmx_refresh_rate(
-    std::size_t slot_count,
-    std::uint32_t requested_hz,
-    std::chrono::nanoseconds measured_transport_overhead) noexcept {
-    const auto minimum_frame = minimum_dmx_frame_time(slot_count, measured_transport_overhead);
-    const auto minimum_ns = std::max<std::int64_t>(minimum_frame.count(), 1);
-    const auto physical_hz = static_cast<std::uint64_t>(kNanosecondsPerSecond / minimum_ns);
-    const auto capped_hz = std::min<std::uint64_t>(physical_hz, kDmxMaxRefreshHz);
-    const auto max_supported = static_cast<std::uint32_t>(capped_hz);
-
-    const bool in_interface_range =
-        requested_hz >= kDmxMinRefreshHz && requested_hz <= kDmxMaxRefreshHz;
-    const bool physically_possible = requested_hz <= max_supported;
-
-    return DmxRefreshCheck{
-        in_interface_range && physically_possible,
-        requested_hz,
-        max_supported,
-        minimum_frame};
+    return std::chrono::nanoseconds{kDmxBreakHoldNs + kDmxMarkAfterBreakNs} + data_time;
 }
 
 DmxOutputMailbox::DmxOutputMailbox() = default;
 
 bool DmxOutputMailbox::publish(const DmxSnapshot& snapshot) {
+    if (!is_valid_physical_dmx_slot_count(snapshot.slot_count())) {
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock{publish_mutex_};
 
     auto& target = slots_[back_index_];
@@ -124,23 +97,11 @@ DmxOutputLoop::DmxOutputLoop(
     DmxTransportInterface& transport,
     DmxOutputMailbox& mailbox,
     MonotonicClock& clock,
-    std::atomic<std::uint32_t>& requested_refresh_hz,
     std::chrono::milliseconds reopen_interval)
     : transport_(transport),
       mailbox_(mailbox),
       clock_(clock),
-      requested_refresh_hz_(requested_refresh_hz),
-      reopen_interval_(reopen_interval) {
-    const auto requested = requested_refresh_hz_.load(std::memory_order_acquire);
-    if (requested >= kDmxMinRefreshHz && requested <= kDmxMaxRefreshHz) {
-        // High refresh rates are promoted only after at least one real frame has
-        // measured the current transport. This prevents an impossible startup
-        // request from missing deadlines before feasibility is known.
-        active_refresh_hz_.store(
-            std::min(requested, kDmxDefaultRefreshHz),
-            std::memory_order_release);
-    }
-}
+      reopen_interval_(reopen_interval) {}
 
 DmxOutputStep DmxOutputLoop::step() {
     auto now = clock_.now();
@@ -184,26 +145,6 @@ DmxOutputStep DmxOutputLoop::step() {
     }
 
     const auto frame = mailbox_.acquire();
-    const auto slot_count = frame.channels.size();
-    const auto requested_refresh = requested_refresh_hz_.load(std::memory_order_acquire);
-    const auto active_refresh = active_refresh_hz_.load(std::memory_order_acquire);
-    const bool promotion_needs_measurement =
-        requested_refresh > active_refresh && frames_sent_.load(std::memory_order_acquire) == 0;
-
-    if (!promotion_needs_measurement) {
-        const auto refresh_check = check_dmx_refresh_rate(
-            slot_count,
-            requested_refresh,
-            max_observed_transport_overhead());
-
-        if (!refresh_check.valid) {
-            refresh_rejections_.fetch_add(1, std::memory_order_relaxed);
-            requested_refresh_hz_.store(active_refresh, std::memory_order_release);
-        } else {
-            active_refresh_hz_.store(requested_refresh, std::memory_order_release);
-        }
-    }
-
     const auto scheduled_start = next_frame_start_.value_or(now);
     const auto send_started = clock_.now();
 
@@ -224,7 +165,7 @@ DmxOutputStep DmxOutputLoop::step() {
         std::chrono::duration_cast<std::chrono::nanoseconds>(send_finished - send_started);
     update_max_send_duration(send_duration);
 
-    const auto wire_time = minimum_dmx_frame_time(slot_count);
+    const auto wire_time = minimum_dmx_frame_time(frame.channels.size());
     if (send_duration > wire_time) {
         update_max_transport_overhead(send_duration - wire_time);
     }
@@ -262,11 +203,11 @@ DmxOutputDiagnostics DmxOutputLoop::diagnostics() const {
     result.send_failures = send_failures_.load(std::memory_order_acquire);
     result.recoveries = recoveries_.load(std::memory_order_acquire);
     result.missed_deadlines = missed_deadlines_.load(std::memory_order_acquire);
-    result.refresh_rejections = refresh_rejections_.load(std::memory_order_acquire);
     result.active_generation = active_generation_.load(std::memory_order_acquire);
-    result.active_refresh_hz = active_refresh_hz_.load(std::memory_order_acquire);
+    result.active_refresh_hz = kDmxOutputRefreshHz;
     result.serial_open = serial_open_.load(std::memory_order_acquire);
-    result.max_send_duration = std::chrono::nanoseconds{max_send_duration_ns_.load(std::memory_order_acquire)};
+    result.max_send_duration =
+        std::chrono::nanoseconds{max_send_duration_ns_.load(std::memory_order_acquire)};
     result.max_transport_overhead =
         std::chrono::nanoseconds{max_transport_overhead_ns_.load(std::memory_order_acquire)};
     {
@@ -274,10 +215,6 @@ DmxOutputDiagnostics DmxOutputLoop::diagnostics() const {
         result.last_error = last_error_;
     }
     return result;
-}
-
-std::chrono::nanoseconds DmxOutputLoop::max_observed_transport_overhead() const noexcept {
-    return std::chrono::nanoseconds{max_transport_overhead_ns_.load(std::memory_order_acquire)};
 }
 
 void DmxOutputLoop::set_error(std::string message) {
@@ -293,9 +230,8 @@ void DmxOutputLoop::update_max_transport_overhead(std::chrono::nanoseconds value
     update_atomic_max(max_transport_overhead_ns_, value.count());
 }
 
-MonotonicClock::duration DmxOutputLoop::active_period() const noexcept {
-    const auto refresh = std::max<std::uint32_t>(active_refresh_hz_.load(std::memory_order_acquire), 1U);
-    const auto period_ns = kNanosecondsPerSecond / static_cast<std::int64_t>(refresh);
+MonotonicClock::duration DmxOutputLoop::active_period() noexcept {
+    constexpr auto period_ns = kNanosecondsPerSecond / static_cast<std::int64_t>(kDmxOutputRefreshHz);
     return std::chrono::duration_cast<MonotonicClock::duration>(std::chrono::nanoseconds{period_ns});
 }
 
@@ -310,14 +246,10 @@ DmxOutput::DmxOutput(
     std::unique_ptr<DmxTransportInterface> transport,
     std::unique_ptr<MonotonicClock> clock)
     : config_(std::move(config)),
-      requested_refresh_hz_(config_.refresh_hz),
       transport_(std::move(transport)),
       clock_(std::move(clock)) {
     if (!transport_ || !clock_) {
         throw std::invalid_argument("DmxOutput requires transport and monotonic clock");
-    }
-    if (config_.refresh_hz < kDmxMinRefreshHz || config_.refresh_hz > kDmxMaxRefreshHz) {
-        throw std::invalid_argument("DmxOutput refresh must be in range 10..44 Hz");
     }
     if (config_.reopen_interval.count() < 1) {
         throw std::invalid_argument("DmxOutput reopen interval must be positive");
@@ -327,7 +259,6 @@ DmxOutput::DmxOutput(
         *transport_,
         mailbox_,
         *clock_,
-        requested_refresh_hz_,
         config_.reopen_interval);
 }
 
@@ -364,30 +295,7 @@ bool DmxOutput::running() const noexcept {
 }
 
 bool DmxOutput::publish_snapshot(const DmxSnapshot& snapshot) {
-    const auto refresh_check = check_dmx_refresh_rate(
-        snapshot.slot_count(),
-        requested_refresh_hz_.load(std::memory_order_acquire),
-        loop_->max_observed_transport_overhead());
-    if (!refresh_check.valid) {
-        return false;
-    }
     return mailbox_.publish(snapshot);
-}
-
-bool DmxOutput::set_refresh_rate(std::uint32_t refresh_hz) noexcept {
-    const auto refresh_check = check_dmx_refresh_rate(
-        mailbox_.published_slot_count(),
-        refresh_hz,
-        loop_->max_observed_transport_overhead());
-    if (!refresh_check.valid) {
-        return false;
-    }
-    requested_refresh_hz_.store(refresh_hz, std::memory_order_release);
-    return true;
-}
-
-std::uint32_t DmxOutput::requested_refresh_rate() const noexcept {
-    return requested_refresh_hz_.load(std::memory_order_acquire);
 }
 
 DmxOutputDiagnostics DmxOutput::diagnostics() const {

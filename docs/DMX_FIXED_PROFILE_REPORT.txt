@@ -1,0 +1,56 @@
+=== DMXWB fixed physical profile acceptance ===
+generated_utc: 2026-08-20T15:48:04Z
+source_head: b6038b87257d50428de4875308ee3025fcf9ab57
+source_worktree: modified
+artifact_sha256: 670036f59558ad0a745c7d1f99764cb9257e08c71f42aa2f7853efc6ea83c1e0
+target: root@10.200.200.1
+port: /dev/ttyRS485-1
+port_release_mode: permanently_disabled_in_wb_serial_driver_config
+physical_slot_limit: 300
+fixed_refresh_hz: 44
+duration_seconds: 60
+expected_frames: 2640
+
+--- target identity ---
+model: Wiren Board rev. 8.5.1 (T507)
+Linux wirenboard-A35WDYWM 6.8.0-wb160 #1 SMP Wed Jul  8 12:40:57 UTC 2026 aarch64 GNU/Linux
+RELEASE_NAME=wb-2606
+SUITE=stable
+TARGET=wb8/bullseye
+REPO_PREFIX=wb_mqtt_serial_state: active
+binary_profile_check: PASS
+
+--- production fixed-profile continuous test ---
+DEV-004 continuous DMX diagnostic
+  port: /dev/ttyRS485-1
+  pattern: blue
+  RGBW start channel: 1
+  physical slots: 300
+  refresh: 44 Hz
+  duration: 60 s
+DmxOutput diagnostics
+  frames_sent: 2640
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 1
+  active_refresh_hz: 44
+  max_send_us: 16407
+  max_transport_overhead_us: 3023
+DEV-004 continuous DMX diagnostic completed; serial port closed cleanly.
+software_result: PASS
+software_acceptance_expected: frames>=2638, active=44, missed=0, open/send/recoveries=0, max_send_us<22727
+user_observation: PASS
+
+--- final all-off / reopen check / 300 slots ---
+DEV-003 DMX hardware test
+  port: /dev/ttyRS485-1
+  pattern: all-off
+  RGBW start channel: 1
+  physical slots: 300
+  frames: 20
+DMX test completed; serial port closed cleanly.
+final_all_off_reopen_check: PASS
+fixed_profile_result: PASS
+=== DMXWB FIXED 300-SLOT / 44 HZ PROFILE PASS ===

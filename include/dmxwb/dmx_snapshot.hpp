@@ -11,7 +11,18 @@
 namespace dmxwb {
 
 inline constexpr std::size_t kDmxMaxChannels = 512;
+// DMX512/Art-Net data structures retain all 512 channels, while the physical
+// DMXWB RS-485 output profile is intentionally limited to the first 300 slots.
+inline constexpr std::size_t kDmxPhysicalMaxSlots = 300;
 inline constexpr std::uint8_t kDmxStartCode = 0x00;
+
+[[nodiscard]] constexpr bool is_valid_physical_dmx_slot(std::size_t channel) noexcept {
+    return channel >= 1 && channel <= kDmxPhysicalMaxSlots;
+}
+
+[[nodiscard]] constexpr bool is_valid_physical_dmx_slot_count(std::size_t slot_count) noexcept {
+    return slot_count <= kDmxPhysicalMaxSlots;
+}
 
 [[nodiscard]] constexpr bool is_valid_dmx_channel(std::size_t channel) noexcept {
     return channel >= 1 && channel <= kDmxMaxChannels;

@@ -2,9 +2,7 @@
 
 DMXWB — C++20-приложение, расширяющее контроллеры **серии Wiren Board 8 (WB8)** физическим DMX512 и будущим Art-Net/WB MQTT управлением.
 
-DMXWB не заменяет Wiren Board и использует штатную Linux/MQTT/systemd/web инфраструктуру согласно `docs/TECHNICAL_SPEC.md`.
-
-Контроллеру не требуется интернет для build, deployment или runtime. Production artifacts собираются на ноутбуке. Docker не используется.
+DMXWB не заменяет Wiren Board и использует штатную Linux/MQTT/systemd/web инфраструктуру согласно `docs/TECHNICAL_SPEC.md`. Production artifacts собираются на ноутбуке; Docker не используется.
 
 ## Статус
 
@@ -12,49 +10,39 @@ DMXWB не заменяет Wiren Board и использует штатную L
 
 ```text
 DEV-004 — continuous DMX engine, timing and serial recovery
+b6038b87257d50428de4875308ee3025fcf9ab57
 ```
 
-База, от которой выполнен DEV-004 closure:
+Перед DEV-005 зафиксирован подтверждённый hardware follow-up для упрощённого production profile:
 
 ```text
-22d4befec0884366132355a390879bf89e8255b4
-Add DEV-004 continuous DMX output core
+physical DMX slots: 1..300 maximum
+physical DMX refresh: fixed 44 Hz
 ```
 
-DEV-004A target proof хранится в:
+До изменения core два последовательных production hardware run подтвердили `300 slots / 44 Hz / 60 s`: оба раза `2640/2640`, `missed_deadlines=0`, без видимого flicker; worst observed send time был `17.689 ms` при периоде `22.727 ms`.
 
-```text
-docs/DEV004A_TARGET_REPORT.txt
-```
+После фиксации profile новый ARM64 artifact `670036f5...` прошёл отдельный 60-секундный production acceptance: `2640/2640`, `missed_deadlines=0`, `open/send/recoveries=0`, `active_refresh_hz=44`, `max_send_us=16.407 ms`, visual PASS и final all-off/reopen PASS.
 
-DEV-004B production hardware acceptance хранится в:
-
-```text
-docs/DEV004B_FAST_TRANSPORT_REPORT.txt
-```
-
-Следующий gate:
+Следующий gate после фиксации этого profile:
 
 ```text
 DEV-005 — Fixture RGBW model and addressing
 ```
 
-## DEV-004 continuous engine
+## Физический DMX profile
 
-Реализованы:
+Протокол на проводе остаётся стандартным **DMX512**. Число `300` — продуктовый лимит DMXWB, а не новый протокол.
 
-- отдельный `DmxOutput` worker thread;
-- continuous frame transmission;
-- absolute frame-start cadence без cumulative send-time drift;
-- refresh `10..44 Hz`, default `30 Hz`;
-- measured physical refresh feasibility;
-- безопасный startup: high refresh применяется только после измерения реального transport;
-- runtime refresh change на frame boundary без serial reopen;
-- preallocated triple-buffer snapshot mailbox;
-- whole-snapshot switch только между кадрами;
-- serial open/write error handling;
-- close/reopen/retry и recovery с актуального snapshot;
-- timing/recovery diagnostics.
+- внутренние DMX/Art-Net структуры сохраняют ёмкость 512 каналов;
+- физический RS-485 output принимает максимум 300 slots;
+- production cadence фиксирован на 44 Hz;
+- отдельной пользовательской настройки Refresh Rate больше нет;
+- абсолютный scheduler остаётся `T0`, `T0+period`, ...;
+- whole snapshot меняется только на границе кадров;
+- `missed_deadlines` остаётся диагностикой фактической способности target выдерживать profile.
+
+Для RGBW при Start Address = 1 максимум физического profile — 75 приборов; требуемые 60 RGBW занимают 240 slots.
 
 ## Production DMX transport
 
@@ -73,20 +61,28 @@ DEV-005 — Fixture RGBW model and addressing
 -> RTS/DE OFF
 ```
 
-При `close()`, normal stop и error/recovery исходная `serial_rs485` конфигурация восстанавливается.
+При close/stop/error исходная `serial_rs485` конфигурация восстанавливается. Legacy DEV-003 transport остаётся низкоуровневым compatibility fallback, но подтверждённый production profile `<=300 slots / 44 Hz` основан на fast path.
 
-Если требуемые standard Linux ioctl недоступны, transport автоматически использует compatibility fallback, доказанный DEV-003:
+Custom kernel patch на acceptance WB8 не требуется.
 
-```text
-38400 8N2 -> 0x00 -> drain
-250000 8N2 -> Start Code + slots -> drain
-```
+## Art-Net contract, зафиксированный до DEV-009
 
-Custom kernel patch на подтверждённой WB8 acceptance-конфигурации **не требуется**.
+По актуальной Art-Net 4 specification:
 
-## DEV-004B hardware acceptance
+- UDP 6454, IPv4;
+- ArtDmx data length — even `2..512`;
+- внутренний `artnet_state[512]` сохраняется полностью;
+- физически используются только channels `1..300`;
+- `ArtPollReply.RefreshRate = 44`;
+- ArtDmx не ставится в FIFO: latest snapshot wins;
+- физический DMX clock независим и всегда 44 Hz;
+- `ArtSync` поддерживается через staging snapshot и release по следующему ArtSync; timeout обратно в async mode — 4 s;
+- source identity для конфликта — `source IP + ArtDmx.Physical`;
+- multiple-source policy DMXWB = `CONFLICT`, без HTP/LTP merge;
+- ArtPollReply продолжает рекламировать настроенный output universe даже при Source=MQTT, чтобы Art-Net subscription оставалась активной;
+- production release требует зарегистрированный Art-Net OEM Code и обязательный Art-Net credit в user documentation.
 
-Подтверждено production binary на:
+## Hardware acceptance target
 
 ```text
 Controller:       Wiren Board rev. 8.5.1 (T507)
@@ -99,104 +95,38 @@ DMX port:         /dev/ttyRS485-1 -> ttyS2
 Build compiler:   Bullseye aarch64-linux-gnu-g++ 10.2.1
 ```
 
-Ключевые результаты:
+На текущем стенде `/dev/ttyRS485-1` постоянно отключён в WB Serial Device Driver Configuration; hardware helpers могут считать порт освобождённым и не должны каждый раз спрашивать `s/p/q`.
 
-| Case | Frames | Missed deadlines | Max send | Physical result |
-|---|---:|---:|---:|---|
-| 512 slots / 30 Hz / RED / 60 s | 1800 | 0 | 24.004 ms | PASS, no flicker |
-| 512 slots / 30 Hz / GREEN / 10 s | 300 | 0 | 24.870 ms | PASS, no flicker |
-| 512 slots / 30 Hz / BLUE / 10 s | 300 | 0 | 23.284 ms | PASS, no flicker |
-| 512 slots / 30 Hz / WHITE / 10 s | 300 | 0 | 23.188 ms | PASS, no flicker |
-| 240 slots / 44 Hz / BLUE / 30 s | 1320 | 0 | 12.658 ms | PASS, no flicker |
+## Build/test среда
 
-Дополнительно `512 slots / requested 44 Hz` корректно отклонён после первого измерения:
+C++ build/test поддерживается только на Linux. Windows/MSVC не входит в build/test matrix.
 
 ```text
-refresh_rejections: 1
-active_refresh_hz: 30
-missed_deadlines: 0
-```
-
-То есть физически невозможный high refresh не вызывает missed-deadline storm.
-
-## Continuous diagnostic
-
-Diagnostic CLI поддерживает принудительную длину кадра через `--slots`:
-
-```sh
-./dmxwb --dmx-continuous-test blue \
-    --port /dev/ttyRS485-1 \
-    --start-channel 1 \
-    --slots 240 \
-    --refresh 44 \
-    --seconds 30
-```
-
-Основные diagnostics:
-
-```text
-frames_sent
-open_failures
-send_failures
-recoveries
-missed_deadlines
-refresh_rejections
-active_generation
-active_refresh_hz
-max_send_us
-max_transport_overhead_us
-```
-
-## Поддерживаемая build/test среда
-
-**C++ build/test поддерживается только на Linux. Windows/MSVC не входит в build/test matrix проекта.**
-
-```text
-Windows host                 -> project files, editor, ZIP, Git, WSL launch
+Windows host                 -> project files, ZIP, Git, WSL launch
 Local Linux / WSL on laptop -> native C++ build/tests + WB8 target build
 WB8                          -> runtime/hardware/integration acceptance
 Docker                       -> not used
 ```
 
-Native Linux tests:
+Native Linux:
 
 ```sh
 cd /mnt/c/Projects/DMXWB
 cmake -S . -B build-linux -DBUILD_TESTING=ON -DDMXWB_WARNINGS_AS_ERRORS=ON
 cmake --build build-linux -j2
 ctest --test-dir build-linux --output-on-failure
-./build-linux/dmxwb_tests
 ```
 
-WB8 target build:
+Target build:
 
 ```sh
 bash tools/wb8/build_bullseye_arm64.sh
 ```
 
-Target artifact:
-
-```text
-artifacts/wb8-bullseye-arm64/dmxwb
-```
-
 ## Что ещё не реализовано
 
-До соответствующих roadmap gates намеренно отсутствуют:
-
-- RGBW Fixture model;
-- configuration/persistence;
-- MQTT runtime;
-- Groups/Scenes;
-- Art-Net;
-- production systemd service;
-- Web UI.
+До соответствующих roadmap gates намеренно отсутствуют Fixture model, persistence, MQTT runtime, Groups/Scenes, Art-Net runtime/parser, production systemd service и Web UI.
 
 ## Источник истины
 
-Перед каждым шагом читать:
-
-1. [`AGENTS.md`](AGENTS.md)
-2. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)
-3. [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md)
-4. [`docs/ROADMAP.md`](docs/ROADMAP.md)
+Перед каждым шагом читать `AGENTS.md`, `docs/PROJECT_STATE.md`, `docs/TECHNICAL_SPEC.md`, `docs/ROADMAP.md`.

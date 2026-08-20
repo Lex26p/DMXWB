@@ -311,57 +311,39 @@ Core tests deterministic и hardware-independent.
 
 ## Цель
 
-Превратить доказанный transport в независимый непрерывный DMX output engine.
+Независимый continuous physical output с deterministic whole-frame publication, absolute scheduling и serial recovery.
 
-## Реализовать
+## Final production profile
 
-Отдельный `DmxOutput` worker:
+После hardware follow-up DEV-004 зафиксирован окончательный physical profile:
 
-- единственный владелец serial fd;
-- continuous BREAK + frame loop;
-- frame-start scheduling по абсолютному времени;
-- configurable refresh 10..44 Hz, default 30 Hz;
-- validation физически достижимого refresh;
-- новый snapshot только между кадрами;
-- runtime refresh change без закрытия serial, если корректно;
-- serial error detection;
-- close/reopen/retry;
-- recovery с актуального snapshot;
-- diagnostics/counters.
+```text
+DMX512 physical layer
+maximum physical slots = 300
+fixed output cadence = 44 Hz
+```
 
-## Tests
+Core/network data capacity остаётся 512 channels. Пользовательского Refresh Rate нет.
 
-Host/unit:
+## Реализовано / проверено
 
-- scheduler arithmetic;
-- impossible refresh rejected;
-- snapshot switch only at frame boundary;
-- no mixed generation frame;
-- retry-state transitions.
-
-WB8 hardware:
-
-- 10 Hz;
-- 30 Hz;
-- 44 Hz, когда длина кадра и measured transport overhead допускают;
-- full 512-slot continuous smoke минимум на default 30 Hz;
-- representative 240-slot load (60 RGBW) на верхней границе 44 Hz, если hardware допускает;
-- невозможный high refresh должен быть измеренно отклонён без missed-deadline storm;
-- runtime refresh change;
-- continuous fixed-pattern smoke;
-- recoverable serial error/recovery, если безопасно воспроизвести.
+- single `DmxOutput` worker;
+- absolute frame-start grid;
+- whole snapshot only at frame boundary;
+- preallocated mailbox;
+- close/reopen/retry recovery;
+- fast WB8 transport: manual DE + hardware BREAK + physical TEMT;
+- legacy DEV-003 low-level fallback;
+- diagnostics/missed-deadline accounting;
+- full 512/30 proof в раннем DEV-004B;
+- 240/44 proof;
+- 512/40 one-minute experiment: 1 missed deadline -> rejected as fixed profile;
+- two consecutive pre-change 300/44 one-minute runs: 2640/2640, zero missed, no flicker; worst max send 17.689 ms;
+- post-change fixed-profile ARM64 artifact `670036f5...`: 300/44 for 60 s, 2640/2640, zero missed/failures, max send 16.407 ms, no flicker, final all-off/reopen PASS.
 
 ## PASS
 
-- stable continuous DMX;
-- no visible flicker;
-- full 512-slot frame стабилен на default 30 Hz на acceptance WB8;
-- 44 Hz работает для фактической длины кадра, когда измеренный transport это допускает;
-- невозможный refresh корректно отклоняется;
-- fast UART path не требует custom kernel patch на доказанной acceptance-конфигурации и имеет compatibility fallback;
-- recoverable serial error не требует process restart.
-
----
+DEV-004 PASS. Post-gate profile decision confirmed: supported production physical range `<=300 slots` at fixed `44 Hz` on the acceptance fast path. Custom kernel patch not required.
 
 # DEV-005 — Fixture RGBW model and addressing
 
@@ -393,7 +375,7 @@ Fixture collection/config:
 - Start Address;
 - 4 channels per Fixture;
 - sequential addressing;
-- validation <=512;
+- validation physical address <=300;
 - Count=0;
 - stable monotonic IDs;
 - no ID reuse;
@@ -594,85 +576,64 @@ MQTT devices согласно ТЗ.
 
 ## Цель
 
-Реализовать и unit-test Art-Net parser/state machine без реального UDP runtime.
+Реализовать deterministic Art-Net 4 parser/state machine без real UDP runtime.
 
 ## Реализовать
 
-- Art-Net 4 constants;
-- safe packet parsing;
-- ArtDmx/ArtPoll/ArtPollReply;
-- signature/opcode/protocol validation;
-- Port-Address/Universe;
-- even Length 2..512;
-- persistent artnet_state[512];
-- short packet Hold Last;
-- long packet truncation;
-- new channels zero-init when slot_count grows;
-- Sequence ordering/rollover/reset;
+- protocol revision >=14, OpCodes and safe minimum-length parsing;
+- ArtDmx / ArtPoll / ArtPollReply / ArtSync;
+- one 15-bit Port-Address;
+- even ArtDmx Length `2..512`;
+- accept mandatory bytes, ignore valid trailing extension bytes;
+- persistent `artnet_state[512]`;
+- source-to-physical projection channels `1..300`;
+- short packet per-channel Hold Last;
+- Sequence 0 disabled, non-zero rollover/stale protection without waiting for gaps;
+- source identity `IPv4 + Physical`;
 - WAITING/ACTIVE/LOST/CONFLICT;
-- active-source IP lock;
-- timeout release;
-- no HTP/LTP merge.
+- documented CONFLICT policy, no HTP/LTP merge;
+- ArtSync staging/release and 4 s fallback to async;
+- ArtPoll Targeted Mode;
+- ArtPollReply one output subscription, `RefreshRate=44`, output subscription remains advertised independent of DMXWB Source;
+- OEM Code represented as explicit configuration/build identity; no invented production value.
 
 ## Tests
 
-Deterministic packet fixtures для header/opcode/version/length/universe, short/long packets, rollover, source reboot, conflict и lock release.
+Header/opcode/version/minimum length/trailing bytes, Port-Address, 0 compatibility exception, Length, 512 state/300 projection, short packets, Sequence rollover/stale, IP+Physical conflict, ArtSync timing state, Targeted ArtPoll and PollReply fields.
 
 ## PASS
 
-Art-Net core не требует socket/real time для tests.
-
----
+Core/state machine deterministic, socket-free and consistent with current official Art-Net 4 specification.
 
 # DEV-010 — Art-Net runtime, reliability and Source switching
 
 ## Цель
 
-Подключить Art-Net core к UDP 6454 и доказать автоматическое восстановление реальной связи.
+Подключить Art-Net core к UDP 6454 и доказать recovery/source switching на WB8.
 
 ## Реализовать
 
-Art-Net worker:
+- IPv4 UDP 6454 bind/rebind;
+- receive ArtDmx and ArtSync;
+- ArtPoll -> randomized (0..1 s) unicast ArtPollReply;
+- Targeted Mode filtering;
+- advertise configured `SwOut` subscription even while Source=MQTT;
+- `RefreshRate=44`;
+- modern unicast subscription behavior; legacy broadcast receive may be accepted for compatibility but is not required for conformance;
+- 3 s LOST timeout, Hold Last, socket recovery;
+- latest committed snapshot only, no ArtDmx FIFO;
+- Source switch MQTT/ART-NET only at physical frame boundary;
+- no first ArtDmx -> preserve current physical output until valid snapshot;
+- LOST -> Source stays ART-NET, no blackout;
+- return -> automatic recovery without restart.
 
-- IPv4 UDP 6454;
-- bind/rebind;
-- Poll/PollReply/Dmx;
-- 3 s LOST timeout;
-- socket recovery;
-- diagnostics;
-- active/conflict source IP;
-- last packet age;
-- Hold Last.
+## Acceptance
 
-Source selector:
-
-- MQTT / ART-NET;
-- switch only between frames;
-- both inputs live;
-- no first ArtDmx -> preserve current physical output until snapshot;
-- LOST -> Hold Last, Source stays ART-NET;
-- return -> automatic without restart.
-
-## Software test source
-
-На ноутбуке выбрать Art-Net приложение/контроллер и зафиксировать название/версию в PROJECT_STATE перед network acceptance.
-
-## Reliability tests
-
-При активном Art-Net:
-
-- Ethernet disconnect ~0.5/5/30 s;
-- restart/power cycle source;
-- IP change;
-- WB8 network down/up;
-- repeated reconnect;
-- second source conflict if reproducible.
+Use a named/versioned Art-Net controller/tool. Verify discovery/subscription, 44 fps input, ArtSync, Ethernet loss durations, source restart/IP change, WB interface down/up, repeated reconnect and IP+Physical conflict.
 
 ## PASS
 
-После временного Art-Net failure оператор не выполняет ручных действий для восстановления DMXWB.
-
----
+No operator restart after temporary network failure; no accumulating ArtDmx latency; physical output remains fixed 44 Hz and uses latest committed channels 1..300.
 
 # DEV-011 — static MQTT-only Web UI
 

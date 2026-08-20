@@ -2,16 +2,12 @@
 
 **Last updated:** 2026-08-20
 
-## Repository base for DEV-004 closure
-
-DEV-004 closure выполнен от:
+## Repository base
 
 ```text
-22d4befec0884366132355a390879bf89e8255b4
-Add DEV-004 continuous DMX output core
+b6038b87257d50428de4875308ee3025fcf9ab57
+Complete DEV-004 continuous DMX output
 ```
-
-Commit, содержащий этот closure document, завершает DEV-004 и открывает DEV-005.
 
 ## Last confirmed engineering PASS
 
@@ -21,12 +17,109 @@ DEV-004 — continuous DMX engine, timing and serial recovery
 
 DEV-004 подтверждён host tests, Bullseye ARM64 target build и production hardware acceptance на реальном WB8.
 
-Связанные reports:
+## Post-DEV-004 physical profile decision
+
+После DEV-004 дополнительно исследован единый фиксированный production profile вместо runtime refresh calculation.
+
+### 512 slots / 40 Hz
+
+Минутный production run:
 
 ```text
-docs/DEV004A_TARGET_REPORT.txt
-docs/DEV004B_FAST_TRANSPORT_REPORT.txt
+frames_sent: 2399
+missed_deadlines: 1
+active_refresh_hz: 40
+max_send_us: 23932
+user_observation: PASS
 ```
+
+Вывод: `512/40` визуально работал, но строгий timing criterion не прошёл. 40 Hz нельзя считать гарантированным фиксированным потолком полного 512-slot кадра.
+
+### 300 slots / 44 Hz
+
+Выполнены два последовательных production run по 60 секунд на одном acceptance WB8.
+
+Run 1:
+
+```text
+frames_sent: 2640
+open_failures: 0
+send_failures: 0
+recoveries: 0
+missed_deadlines: 0
+refresh_rejections: 0
+active_refresh_hz: 44
+max_send_us: 15525
+max_transport_overhead_us: 2141
+visual: PASS
+```
+
+Run 2:
+
+```text
+frames_sent: 2640
+open_failures: 0
+send_failures: 0
+recoveries: 0
+missed_deadlines: 0
+refresh_rejections: 0
+active_refresh_hz: 44
+max_send_us: 17689
+max_transport_overhead_us: 4305
+visual: PASS
+```
+
+Период 44 Hz ≈ `22.727 ms`; даже второй run сохранил около 5 ms запаса до deadline.
+
+**Decided:** DMXWB сохраняет стандартный DMX512 physical layer, но production profile ограничивает физический output максимумом **300 slots** и использует фиксированные **44 Hz**. Внутренние DMX/Art-Net data structures сохраняют 512 каналов.
+
+## Fixed-profile follow-up acceptance
+
+После внесения fixed-profile изменений выполнена повторная проверка уже **нового production core**, а не только exploratory binary.
+
+Build/test:
+
+```text
+Native Linux GNU 15.2.0 + warnings-as-errors: PASS
+CTest:                                      PASS (1/1)
+Bullseye ARM64 GCC 10.2.1 cross-build:     PASS
+Maximum required glibc:                    GLIBC_2.17
+```
+
+Проверенный ARM64 artifact:
+
+```text
+SHA256: 670036f59558ad0a745c7d1f99764cb9257e08c71f42aa2f7853efc6ea83c1e0
+```
+
+WB8 production acceptance `300 slots / fixed 44 Hz / BLUE / 60 s`:
+
+```text
+frames_sent:               2640
+open_failures:             0
+send_failures:             0
+recoveries:                0
+missed_deadlines:          0
+active_refresh_hz:         44
+max_send_us:               16407
+max_transport_overhead_us: 3023
+visual:                    PASS
+final all-off/reopen:      PASS
+```
+
+Final marker:
+
+```text
+=== DMXWB FIXED 300-SLOT / 44 HZ PROFILE PASS ===
+```
+
+Связанный report:
+
+```text
+docs/DMX_FIXED_PROFILE_REPORT.txt
+```
+
+**Confirmed:** fixed physical profile `<=300 slots / 44 Hz` прошёл post-change build и hardware acceptance.
 
 ## Current engineering gate
 
@@ -34,75 +127,21 @@ docs/DEV004B_FAST_TRANSPORT_REPORT.txt
 DEV-005 — Fixture RGBW model and addressing
 ```
 
-DEV-005 должен использовать уже доказанный `DmxOutput`/`DmxTransport`; возвращаться к изменению physical transport без нового hardware evidence не требуется.
+DEV-005 validation обязана ограничивать последний физический Fixture address значением 300.
 
 ## Build/test policy
 
-**Decided 2026-08-20:** Windows compiler/MSVC не поддерживается и не является PASS-критерием DMXWB.
-
 ```text
-Windows host                 -> project files / editor / ZIP / Git / WSL launch
+Windows host                 -> project files / ZIP / Git / WSL launch
 Local Linux / WSL on laptop -> all C++ host build/tests
-Bullseye cross rootfs        -> production-style ARM64 WB8 artifact
+Bullseye cross rootfs        -> ARM64 WB8 artifact
 WB8                          -> runtime/hardware/integration acceptance
 Docker                       -> not used
 ```
 
-CMake намеренно принимает только Linux. Поддерживаемые host compilers: GNU C++ и Clang. Доказанный target compiler: Bullseye `aarch64-linux-gnu-g++ 10.2.1`.
+Windows/MSVC не входит в поддерживаемую build/test matrix.
 
-## DEV-004 implementation
-
-### Continuous output core
-
-Confirmed:
-
-- отдельный `DmxOutput` worker;
-- continuous DMX независимо от изменения snapshot;
-- absolute frame-start grid;
-- refresh interface `10..44 Hz`, default `30 Hz`;
-- measured refresh feasibility;
-- high-refresh startup сначала использует безопасные `30 Hz`, затем применяет/отклоняет requested value по реальному transport measurement;
-- runtime refresh change на frame boundary;
-- preallocated triple-buffer mailbox;
-- whole snapshot switch только между кадрами;
-- serial open/write failure -> close -> periodic reopen -> current snapshot;
-- diagnostics и missed-deadline accounting;
-- stop закрывает serial без специального blackout frame.
-
-### Production fast DMX transport
-
-Preferred path, если serial port предоставляет стандартные Linux capabilities:
-
-```text
-250000 8N2 constantly
-save original serial_rs485
-kernel automatic RS-485 OFF
-RTS/DE ON
-TIOCSBRK
-BREAK >= 120 us
-TIOCCBRK
-MAB >= 20 us
-write Start Code + active slots
-wait TIOCSERGETLSR/TIOCSER_TEMT
-RTS/DE OFF
-```
-
-При close/error/recovery исходная `serial_rs485` конфигурация восстанавливается.
-
-Если fast capabilities недоступны, остаётся DEV-003 compatibility fallback:
-
-```text
-38400 8N2 -> 0x00 -> physical drain
-250000 8N2 -> Start Code + active slots -> physical drain
-```
-
-Capability определяется runtime для открытого порта; fast path не считается свойством только одной ревизии WB8.
-
-Custom kernel patch для подтверждённой acceptance-конфигурации не требуется.
-
-## DEV-004B production hardware acceptance
-
-Target:
+## Acceptance target
 
 ```text
 Controller:       Wiren Board rev. 8.5.1 (T507)
@@ -113,77 +152,48 @@ Kernel:           6.8.0-wb160
 glibc:            2.31
 DMX port:         /dev/ttyRS485-1 -> ttyS2
 Fixture RGBW:     start channel 1
-Artifact SHA256:  b8d6ab3331a5324e81b8acccd4658d50a4d7536c5ad04bdb5ab989992c1c3c21
+Artifact SHA256:  670036f59558ad0a745c7d1f99764cb9257e08c71f42aa2f7853efc6ea83c1e0
 ```
 
-Production acceptance results:
+На текущем стенде `/dev/ttyRS485-1` постоянно отключён в WB Serial Device Driver Configuration. Для hardware helpers этого стенда используется эквивалент прежнего выбора `p`; helper не должен каждый раз спрашивать `s/p/q`.
 
-| Case | Frames sent | Missed | Max send | Max measured overhead | Result |
-|---|---:|---:|---:|---:|---|
-| 512 slots / 30 Hz / RED / 60 s | 1800 | 0 | 24.004 ms | 1.292 ms | PASS + no flicker |
-| 512 slots / 30 Hz / GREEN / 10 s | 300 | 0 | 24.870 ms | 2.158 ms | PASS + no flicker |
-| 512 slots / 30 Hz / BLUE / 10 s | 300 | 0 | 23.284 ms | 0.572 ms | PASS + no flicker |
-| 512 slots / 30 Hz / WHITE / 10 s | 300 | 0 | 23.188 ms | 0.476 ms | PASS + no flicker |
-| 240 slots / 44 Hz / BLUE / 30 s | 1320 | 0 | 12.658 ms | 1.914 ms | PASS + no flicker |
+## Physical output core after this follow-up
 
-Во всех visual cases:
+- `kDmxMaxChannels = 512` остаётся ёмкостью core/network data;
+- `kDmxPhysicalMaxSlots = 300` — отдельный physical product limit;
+- `kDmxOutputRefreshHz = 44` — единственная production cadence;
+- пользовательской/configurable Refresh Rate нет;
+- physical mailbox отвергает snapshot >300;
+- absolute 44 Hz frame-start grid сохраняется;
+- no FIFO; frame boundary читает только latest whole snapshot;
+- serial error -> close -> periodic reopen -> current snapshot;
+- diagnostics сохраняют `frames_sent`, `missed_deadlines`, active generation, send duration/overhead, serial failures/recovery.
 
-```text
-open_failures = 0
-send_failures = 0
-recoveries = 0
-missed_deadlines = 0
-```
+Legacy DEV-003 transport остаётся низкоуровневым compatibility fallback. Подтверждённый fixed profile `<=300/44` основан на fast path `manual DE + hardware BREAK + TEMT`.
 
-### Measured rejection proof
+## Art-Net decisions confirmed from current official specification
 
-`512 slots / requested 44 Hz / all-off`:
+Перед DEV-009 перепроверена Art-Net 4 Protocol Release V1.4, Document Revision 1.4dp (23/10/2025).
 
-```text
-frames_sent: 91
-open_failures: 0
-send_failures: 0
-missed_deadlines: 0
-refresh_rejections: 1
-active_refresh_hz: 30
-max_send_us: 23153
-max_transport_overhead_us: 441
-```
+Decided:
 
-Это подтверждает, что high refresh сначала измеряется и физически невозможное значение отклоняется без предварительного missed-deadline storm.
-
-### Reopen / final state
-
-Final 512-slot `all-off` one-shot:
-
-```text
-final_all_off_reopen_check: PASS
-serial_reopen_across_separate_runs: PASS
-wb_mqtt_serial_restore: PASS
-kernel_patch_required: NO
-legacy_transport_fallback_retained: YES
-```
-
-Final marker:
-
-```text
-=== DEV-004B PRODUCTION FAST TRANSPORT PASS ===
-```
-
-## DEV-004 conclusion
-
-**Confirmed:** DEV-004 engineering gate PASS.
-
-Доказано:
-
-- stable continuous DMX;
-- full 512-slot default 30 Hz output;
-- 240-slot 44 Hz output (60 RGBW load) на acceptance WB8;
-- правильные RGBW каналы и отсутствие видимого flicker;
-- clean serial close/reopen;
-- measured high-refresh rejection;
-- transport recovery state machine unit coverage;
-- no custom WB kernel patch required.
+- one Art-Net Port-Address/output;
+- ArtDmx Length even `2..512`;
+- persistent `artnet_state[512]`;
+- physical output uses only channels `1..300`;
+- ArtDmx arrival never directly starts serial TX;
+- no ArtDmx FIFO; latest committed snapshot wins;
+- `ArtPollReply.RefreshRate = 44`;
+- output universe remains advertised/subscribed even when Source=MQTT;
+- ArtSync supported: async at startup, staging in sync mode, release on next ArtSync, 4 s timeout back to async;
+- ArtSync accepted only from IP matching the relevant ArtDmx source;
+- source identity = source IP + `Physical`;
+- Sequence 0 disables ordering; non-zero sequence protects against stale/out-of-order updates without waiting for missing packets;
+- multiple source policy = `CONFLICT`, no HTP/LTP merge;
+- 3 s LOST diagnostic/source-lock timeout with Hold Last and no automatic source switch;
+- parser accepts required minimum packet size and ignores valid trailing extension bytes rather than requiring exact UDP length;
+- current Art-Net spec deprecates Port-Address 0; DMXWB keeps user value 0 only as an explicit compatibility exception;
+- production distribution requires registered Art-Net OEM Code and required Art-Net credit.
 
 ## Next
 
@@ -191,11 +201,11 @@ Final marker:
 DEV-005 — Fixture RGBW model and addressing
 ```
 
-Ближайшая работа:
+Nearest work:
 
 - Fixture stable ID/name/state;
-- 4-channel RGBW addressing;
-- Fixture Count / Start Address validation <=512;
+- fixed RGBW 4-channel addressing;
+- `start_address + count * 4 - 1 <= 300`;
 - Brightness / Temperature / Power semantics;
-- whole mqtt snapshot rebuild;
-- host tests, затем WB8 DMX smoke через уже доказанный `DmxOutput`.
+- whole MQTT snapshot rebuild;
+- Linux unit tests, then WB8 DMX smoke through fixed 44 Hz output.

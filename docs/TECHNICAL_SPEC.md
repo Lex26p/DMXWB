@@ -250,7 +250,7 @@ Capability определяется для фактически открытог
 -> wait/drain
 ```
 
-Fast path подтверждён на acceptance-конфигурации WB8 rev. 8.5.1 (T507), kernel `6.8.0-wb160`: полный 512-slot кадр стабильно передавался на 30 Hz, а 240 slots — на 44 Hz без missed deadlines и видимого flicker. Для этой конфигурации custom kernel patch не требуется.
+Fast path подтверждён на acceptance-конфигурации WB8 rev. 8.5.1 (T507), kernel `6.8.0-wb160`. После DEV-004 два последовательных 60-секундных production run `300 slots / 44 Hz` дали `2640/2640`, `missed_deadlines=0` и no visible flicker; максимальный наблюдавшийся send time — `17.689 ms` при периоде `22.727 ms`. Для этой конфигурации custom kernel patch не требуется.
 
 При наличии безопасного измерительного оборудования BREAK/MAB/bit timing дополнительно допускается проверить логическим анализатором или осциллографом с безопасной схемой подключения.
 
@@ -262,78 +262,49 @@ DMX передаётся непрерывно независимо от того
 
 MQTT/Art-Net обновляют только внутренние данные. Физический DMX-цикл работает самостоятельно.
 
-### 4.5. Длина кадра
+### 4.5. Физический лимит slots
 
-Постоянная передача всех 512 каналов не требуется.
-
-Количество физических DMX slots определяется последним используемым адресом конфигурации светильников:
+DMXWB использует стандартный DMX512 physical layer, но намеренно ограничивает production output первыми **300 physical slots**.
 
 ```text
-dmx_slot_count = highest configured fixture address
+kDmxMaxChannels       = 512   // core / Art-Net data capacity
+kDmxPhysicalMaxSlots  = 300   // physical RS-485 product limit
 ```
 
-Пример:
+Это продуктовый профиль DMXWB, а не отдельный протокол «DMX300».
 
-```text
-Count = 10
-Start Address = 1
--> Fixtures = 1..40
--> передаются channels 1..40
-```
+В WB MQTT последний физический адрес Fixture не может превышать 300. Неиспользуемые каналы внутри активного физического диапазона равны нулю.
 
-Пример:
+Art-Net subsystem хранит все 512 сетевых каналов для protocol compatibility, но source selector формирует физический snapshot только из channels `1..300`; channels `301..512` могут сохраняться в `artnet_state` и никогда не передаются в этот RS-485 output.
 
-```text
-Count = 10
-Start Address = 21
--> Fixtures = 21..60
--> физический кадр содержит channels 1..60
-```
+Фактический физический `slot_count` может быть меньше 300, но никогда больше 300. Worst-case timing guarantee проверяется на полном 300-slot кадре.
 
-В WB MQTT неиспользуемые каналы внутри `1..N` равны нулю.
-
-В ART-NET все каналы `1..N` являются прямыми Art-Net каналами, даже если часть из них не занята объектами Fixture.
-
-При `Fixture Count = 0` пользовательских DMX slots нет; приложение не генерирует выдуманный набор каналов.
+При `Fixture Count = 0` пользовательских Fixture slots нет; правила startup/source switching определяют, когда physical output получает первый snapshot.
 
 ### 4.6. Refresh Rate
 
-Пользовательский параметр:
+Production physical DMX cadence фиксирована:
 
 ```text
-DMX Refresh Rate
+44 Hz
 ```
 
-Диапазон интерфейса:
+Refresh Rate **не является пользовательской или persistent настройкой**. Backend, MQTT и Web не предлагают выбор частоты.
 
-```text
-minimum = 10 Hz
-maximum = 44 Hz
-default = 30 Hz
-```
-
-Частота меняется без закрытия serial-порта, если transport это допускает.
-
-Период задаётся между началами кадров, а не как `sleep()` после завершения кадра:
+Период задаётся между началами кадров:
 
 ```text
 T0
-T0 + period
-T0 + 2 * period
+T0 + 1/44 s
+T0 + 2/44 s
 ...
 ```
 
-Приложение не должно молча принимать частоту, которую физически невозможно выдержать при текущем `dmx_slot_count`.
+Отправка текущего кадра не добавляется к следующему period. При scheduler/OS delay прошедшие deadlines считаются в diagnostics и абсолютная grid сохраняется.
 
-Фактически допустимый максимум:
+Решение основано на worst-case physical limit 300 slots. Два последовательных минутных production run `300/44` на acceptance WB8 прошли без missed deadlines и flicker. Проверка `512/40` дала один missed deadline за минуту и поэтому не используется как product profile.
 
-```text
-min(44 Hz, максимум для текущей длины кадра и измеренного transport overhead)
-```
-
-Если выбранное значение невозможно обеспечить, конфигурация отклоняется с понятной ошибкой.
-
-Для refresh выше безопасной стартовой частоты implementation может сначала передать измерительный кадр на default `30 Hz`, измерить фактический transport overhead и только после этого применить повышенное значение. Если измерение показывает невозможность requested refresh, active output остаётся на безопасной частоте без предварительного накопления missed deadlines.
+Гарантия `<=300 slots / 44 Hz` относится к подтверждённому fast transport path. Legacy DEV-003 fallback остаётся compatibility mechanism, но сам по себе не является доказательством production 44 Hz profile на неизвестном WB8 UART implementation.
 
 ### 4.7. Ошибка serial
 
@@ -565,7 +536,7 @@ fixture_start = start_address + fixture_index * 4
 
 ```text
 start_address >= 1
-start_address + count * 4 - 1 <= 512
+start_address + count * 4 - 1 <= 300
 ```
 
 Максимальное количество рассчитывается автоматически.
@@ -1061,13 +1032,12 @@ Backend:
 2. проверяет schema/version;
 3. проверяет ссылки и диапазоны;
 4. проверяет DMX addresses;
-5. проверяет Refresh Rate;
-6. строит новую внутреннюю конфигурацию;
-7. атомарно записывает `config.json`;
-8. увеличивает revision;
-9. одним действием применяет новую конфигурацию;
-10. публикует новый retained `/dmxwb/config`;
-11. публикует result.
+5. строит новую внутреннюю конфигурацию;
+6. атомарно записывает `config.json`;
+7. увеличивает revision;
+8. одним действием применяет новую конфигурацию;
+9. публикует новый retained `/dmxwb/config`;
+10. публикует result.
 
 Если `expected_revision` устарел, save отклоняется.
 
@@ -1243,7 +1213,6 @@ Live controls применяются сразу.
 
 ```text
 DMX Port
-Refresh Rate
 Fixture Count
 Start Address
 Group membership
@@ -1271,149 +1240,153 @@ Reload страницы не должен требоваться.
 
 ### 16.1. Общие параметры
 
-Протокол:
-
 ```text
 Art-Net 4
-UDP
-port 6454 (0x1936)
+UDP 6454 (0x1936)
 IPv4
+one output Port-Address
 ```
 
-Поддерживается один физический Art-Net Port-Address/universe.
+Пользовательская настройка `Art-Net Universe` хранит 15-bit Port-Address.
 
-Пользовательская настройка:
+Текущая Art-Net 4 specification определяет стандартный диапазон `1..32767` и помечает `0` deprecated. DMXWB сознательно сохраняет `0..32767`, default `0`, только как compatibility exception для распространённых zero-based controllers; Web/diagnostics должны явно обозначать значение 0 как legacy compatibility.
 
-```text
-Art-Net Universe
-```
-
-Допустимый диапазон приложения:
-
-```text
-0..32767
-default = 0
-```
-
-Значение 0 сохраняется как режим совместимости с распространёнными контроллерами, использующими нумерацию с нуля.
-
-### 16.2. Пакеты
-
-Минимально обязательны:
+### 16.2. Обязательные packets DMXWB
 
 ```text
 ArtDmx
 ArtPoll
 ArtPollReply
+ArtSync
 ```
 
-`ArtPollReply` объявляет DMXWB как один DMX output node, подписанный на настроенный Port-Address.
+ArtPoll/ArtPollReply являются частью universe subscription, а не только декоративным discovery.
 
-### 16.3. ArtDmx validation
+### 16.3. ArtPoll / ArtPollReply
 
-Принимаются только пакеты:
+DMXWB объявляет один Art-Net output port и **всегда** публикует настроенный output Port-Address в `SwOut`, даже когда physical Source = WB MQTT. Это позволяет корректному Art-Net controller продолжать считать DMXWB subscriber и обновлять background `artnet_state`.
 
-- с корректной сигнатурой `Art-Net\0`;
-- корректным OpCode;
-- поддерживаемой версией протокола;
+`ArtPollReply.RefreshRate`:
+
+```text
+44 Hz
+```
+
+`GoodOutputA.bit7` устанавливается только когда ArtDmx data действительно выбрана и выводится как physical DMX; при Source=MQTT этот bit очищен, хотя `SwOut` subscription остаётся объявленной.
+
+На ArtPoll reply отправляется unicast. Для масштабируемости используется случайная задержка до 1 s. Targeted Mode поддерживается: если включённый диапазон ArtPoll не содержит настроенный Port-Address, DMXWB не отвечает.
+
+### 16.4. ArtDmx validation и extensibility
+
+Принимаются только packets с:
+
+- signature `Art-Net\0`;
+- OpCode = ArtDmx;
+- protocol revision >= 14;
 - нужным Port-Address;
-- корректной длиной;
-- корректным размером UDP payload.
+- `Length` even `2..512`;
+- фактическим UDP payload не короче обязательного header + declared Data.
 
-Для ArtDmx `Length` должен быть чётным числом `2..512`.
+Для ArtDmx минимально требуется `18 + Length` bytes. Дополнительные trailing bytes валидного будущего расширения **игнорируются**, а не вызывают reject. Неиспользуемые/reserved bits не тестируются receiver-ом, если specification требует transmit-as-zero / receiver-do-not-test semantics.
 
-Некорректный пакет игнорируется без нарушения текущего выхода.
+Актуальная specification требует unicast ArtDmx только subscribed nodes и запрещает controller broadcast ArtDmx. DMXWB conformance behavior основан на unicast subscription. Receiver может принимать корректный legacy broadcast packet как compatibility input, но production interoperability не должна зависеть от broadcast.
 
-### 16.4. Переменная Length
+### 16.5. Сетевое состояние 512 и физический output 300
 
-Art-Net хранит persistent `artnet_state[512]`.
+Art-Net хранит:
 
-Если `Length < dmx_slot_count`, обновляются только каналы `1..Length`, остальные сохраняют предыдущее значение.
+```text
+artnet_state[512]
+```
 
-Если `Length > dmx_slot_count`, используются только `1..dmx_slot_count`.
+Если `Length < 512`, обновляются только channels `1..Length`; остальные сохраняют прежние значения (Hold Last per channel).
 
-При увеличении `dmx_slot_count` новые каналы инициализируются нулём до первого обновления.
+Если packet содержит channels `301..512`, они валидируются и сохраняются в `artnet_state`, но physical source snapshot использует только channels `1..300`.
 
-### 16.5. Output cadence
+### 16.6. Output cadence / latest snapshot wins
 
-Art-Net packet arrival не запускает serial-передачу непосредственно.
+ArtDmx arrival **никогда не запускает serial transmission**.
 
-Art-Net только обновляет snapshot. DMX Output передаёт последний snapshot со своим Refresh Rate.
+```text
+ArtDmx -> update latest committed Art-Net state
+DMX frame boundary @ fixed 44 Hz -> acquire latest whole physical snapshot
+```
 
-### 16.6. Hold Last
+ArtDmx frames не ставятся в FIFO. Если между двумя physical boundaries пришло несколько valid updates, промежуточные snapshots superseded более новым. Это предотвращает накопительную latency, когда network input временно быстрее physical output или приходит burst-ами.
+
+### 16.7. ArtSync
+
+После power-on/restart DMXWB работает asynchronous: valid ArtDmx сразу обновляет committed Art-Net state.
+
+После получения valid ArtSync от IP текущего ArtDmx source DMXWB переходит в synchronous mode:
+
+```text
+ArtDmx -> staging state
+next ArtSync -> staging atomically becomes committed state
+next physical DMX boundary -> latest committed snapshot
+```
+
+ArtSync не запускает UART напрямую и не изменяет fixed 44 Hz clock.
+
+Если ArtSync не приходит >= 4 s, DMXWB возвращается в asynchronous mode. ArtSync от IP, не совпадающего с relevant/most-recent ArtDmx source IP, игнорируется.
+
+### 16.8. Sequence
+
+`Sequence = 0` отключает sequence checking.
+
+Для `1..255` newer packets могут заменять state, stale/out-of-order packets не перезаписывают newer state; rollover `0xFF -> 0x01` учитывается. DMXWB не ждёт отсутствующий sequence number и не создаёт очередь network frames.
+
+Tracking сбрасывается при освобождении active source lock.
+
+### 16.9. Source identity и conflict
+
+ArtDmx source identity:
+
+```text
+source IPv4 + Physical
+```
+
+`Physical` нужен, потому что один IP может представлять несколько физических DMX input ports.
+
+DMXWB сознательно выбирает разрешённую specification policy **error/conflict вместо automatic HTP/LTP merge**:
+
+```text
+нет active source -> первый valid source становится ACTIVE
+тот же source     -> packets принимаются
+другой IP или другой Physical на том же Port-Address
+                   -> CONFLICT; second source data не применяется
+```
+
+Policy должна быть отражена в user documentation. HTP/LTP merge не реализуется.
+
+### 16.10. Hold Last и LOST
 
 При прекращении ArtDmx:
 
-- `artnet_buffer` не очищается;
-- физический DMX повторяет последний корректный кадр;
-- Source не переключается;
-- restart не требуется.
+- `artnet_state` не очищается;
+- committed physical snapshot остаётся последним корректным;
+- Source не переключается автоматически;
+- Blackout не генерируется.
 
-### 16.7. Состояния Art-Net
-
-```text
-WAITING
-ACTIVE
-LOST
-CONFLICT
-```
-
-### 16.8. Timeout
-
-Базовый timeout:
+Diagnostic/source-lock timeout DMXWB:
 
 ```text
 3 seconds
 ```
 
-Он используется только для диагностики/освобождения active-source lock.
+Specification рекомендует active-but-unchanged ArtDmx source повторять last packet примерно каждые 800–1000 ms, поэтому 3 s даёт запас для network jitter и одновременно позволяет освобождать stale source lock.
 
-Timeout не вызывает Blackout, очистку buffer, переключение на MQTT или restart.
+После LOST sequence/sync tracking для освобождённого source сбрасывается; следующий valid source может стать ACTIVE.
 
-### 16.9. Sequence
+### 16.11. Network recovery
 
-Если `Sequence = 0`, sequence checking отключён.
+Art-Net subsystem автоматически восстанавливается после Ethernet disconnect/reconnect, source restart/power cycle, IP change, WB network down/up и временной UDP socket error. Socket при необходимости пересоздаётся и bind-ится повторно на UDP 6454.
 
-Если `Sequence != 0`, устаревший пакет не перезаписывает более новое состояние; rollover `0xFF -> 0x01` учитывается.
+### 16.12. OEM / credits
 
-При LOST и выборе нового источника tracking сбрасывается.
+До production release DMXWB должен получить зарегистрированный **Art-Net OEM Code** от Artistic Licence. Не назначать произвольный production OEM Code самостоятельно.
 
-### 16.10. Несколько источников
-
-HTP/LTP mixing не выполняется.
-
-Алгоритм:
-
-```text
-нет active source
--> первый корректный ArtDmx становится active
-
-active source существует
--> его пакеты принимаются
-
-тот же Port-Address с другого IP
--> CONFLICT
--> данные второго источника игнорируются
-
-active source потерян >= timeout
--> lock освобождается
--> следующий корректный источник может стать active
-```
-
-### 16.11. Восстановление связи
-
-Art-Net subsystem самостоятельно восстанавливается после:
-
-- кратковременного/долгого обрыва Ethernet;
-- возврата кабеля;
-- перезапуска или power cycle пульта;
-- изменения IP источника;
-- down/up сетевого интерфейса WB8;
-- временной ошибки UDP socket.
-
-Socket при необходимости пересоздаётся и повторно bind-ится на UDP 6454.
-
----
+User documentation продукта, реализующего Art-Net, должна содержать требуемый Art-Net copyright credit. Development tests могут использовать явно обозначенный placeholder только до получения реального OEM Code; production bundle с placeholder не выпускается.
 
 ## 17. Внутренняя C++ архитектура
 
@@ -1527,7 +1500,7 @@ Group/Scene сначала целиком меняет внутреннюю мо
 ```text
 version
 revision
-DMX: port, refresh_rate
+DMX: port
 Art-Net: universe
 Fixtures: ordered records, id, name, count, start_address
 Groups: id, name, member fixture IDs
@@ -1602,7 +1575,6 @@ dirty = true
 
 ```text
 DMX Port = /dev/ttyRS485-1
-Refresh = 30 Hz
 Art-Net Universe = 0
 Fixture Count = 0
 Start Address = 1
@@ -1687,8 +1659,8 @@ Configuration
 state
 port
 slot_count
-configured_refresh
-actual_refresh
+refresh_hz = 44
+physical_slot_limit = 300
 frames_sent
 last_error
 recovery_state
@@ -1700,10 +1672,16 @@ recovery_state
 state
 universe
 active_source_ip
+active_source_physical
 last_packet_age
 last_sequence
+sync_mode = async / sync
+last_sync_age
 conflicting_source_ip
+conflicting_source_physical
 output_mode = Hold Last / Live
+packets_received
+snapshots_superseded
 recovery_state
 ```
 
@@ -1869,21 +1847,24 @@ Reset
 actual Power status
 actual RGB state
 DMX address calculation
-dynamic slot_count
-Refresh validation
+physical slot limit <=300
+fixed 44 Hz cadence
 Fixture config validation
 stable IDs
 Group operations
 Group power aggregation
 Scene snapshot/apply
 Scene with missing/new Fixtures
-ArtDmx parser
-ArtDmx length validation
-short ArtDmx Hold Last
-ArtDmx truncation
-Sequence/rollover
+ArtDmx parser/minimum length/trailing extension bytes
+ArtDmx even Length 2..512
+short ArtDmx per-channel Hold Last
+512 network state -> 300 physical truncation
+Sequence/rollover/no-wait ordering
+ArtSync staging/release/4 s async fallback
+ArtPoll/ArtPollReply subscription + Targeted Mode + RefreshRate 44
+source identity IP+Physical
 active source timeout
-source conflict
+source conflict without merge
 Source selector
 config parse/serialize
 state parse/serialize
@@ -2050,7 +2031,7 @@ ART-NET -> WB MQTT
 
 ### 24.7. Persistence
 
-После `systemctl restart dmxwb` и полного reboot должны сохраняться согласованные config/state данные: порт, refresh, Art-Net universe, Source, Fixtures, names, Groups, Scenes, RGBW, Brightness, Temperature и requested_power.
+После `systemctl restart dmxwb` и полного reboot должны сохраняться согласованные config/state данные: порт, Art-Net universe, Source, Fixtures, names, Groups, Scenes, RGBW, Brightness, Temperature и requested_power.
 
 ### 24.8. Длительный тест
 
@@ -2117,7 +2098,7 @@ Fixture ID не переиспользуются после уменьшения
 
 ### 26.4. 44 Hz и сокращённый кадр
 
-44 Hz — протокольный потолок, но не гарантированная частота при любой длине кадра и transport overhead. Backend учитывает физическую достижимость.
+DMXWB physical profile ограничен 300 slots и фиксирован на 44 Hz. Внутренние DMX/Art-Net structures сохраняют 512 channels; physical output никогда не передаёт channel >300.
 
 ### 26.5. WB web и Fixture MQTT
 
@@ -2164,7 +2145,7 @@ Windows/Visual Studio 2026 и локальный Linux на ноутбуке я�
 
 ### Art-Net 4
 
-Проверяются UDP 6454, Port-Address, ArtDmx, ArtPoll/ArtPollReply, Sequence, Length, variable Data, retransmission/Hold Last, refresh и multiple-source behavior.
+Проверяются UDP 6454, Port-Address, unicast subscription, ArtDmx, ArtPoll/ArtPollReply, ArtSync, Sequence, Physical source identity, Length/minimum packet size, trailing extension bytes, Hold Last, RefreshRate=44 и documented CONFLICT multiple-source policy.
 
 Источник: `https://art-net.org.uk/downloads/art-net.pdf`
 

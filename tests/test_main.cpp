@@ -245,8 +245,14 @@ void test_slot_count_helpers() {
         dmxwb::calculate_slot_count(1, 0, 4) == std::optional<std::size_t>{0},
         "zero items produce zero slots");
     expect_true(
+        dmxwb::calculate_slot_count(297, 1, 4) == std::optional<std::size_t>{300},
+        "RGBW fixture ending at physical slot 300 accepted");
+    expect_true(
+        !dmxwb::calculate_slot_count(298, 1, 4).has_value(),
+        "RGBW fixture crossing physical slot 300 rejected");
+    expect_true(
         !dmxwb::calculate_slot_count(510, 1, 4).has_value(),
-        "address range beyond 512 rejected");
+        "start address outside physical 300-slot profile rejected");
     expect_true(
         !dmxwb::calculate_slot_count(1, 1, 0).has_value(),
         "zero channels per item rejected");
@@ -352,61 +358,29 @@ void test_clock_abstraction() {
     expect_true(clock.now() == deadline, "fake monotonic clock advances to absolute deadline");
 }
 
-void test_refresh_validation() {
-    const auto short_frame_44 = dmxwb::check_dmx_refresh_rate(4, 44);
-    expect_true(short_frame_44.valid, "44 Hz accepted for short four-slot frame");
+void test_fixed_physical_output_profile() {
+    expect_true(dmxwb::kDmxMaxChannels == 512, "DMX/Art-Net core retains 512-channel data capacity");
+    expect_true(dmxwb::kDmxPhysicalMaxSlots == 300, "physical DMXWB output is limited to 300 slots");
+    expect_true(dmxwb::kDmxOutputRefreshHz == 44, "physical DMXWB output cadence is fixed at 44 Hz");
 
-    const auto full_frame_44 = dmxwb::check_dmx_refresh_rate(512, 44);
-    expect_true(full_frame_44.valid, "44 Hz is theoretically possible for full 512-slot hardware-BREAK frame");
-    expect_true(full_frame_44.max_supported_hz == 44, "full 512-slot theoretical maximum reaches interface cap 44 Hz");
-
-    const auto full_frame_with_measured_overhead =
-        dmxwb::check_dmx_refresh_rate(512, 44, std::chrono::milliseconds{1});
-    expect_true(
-        !full_frame_with_measured_overhead.valid,
-        "measured 512-slot transport overhead rejects 44 Hz when real frame exceeds period");
-
-    expect_true(!dmxwb::check_dmx_refresh_rate(4, 9).valid, "refresh below 10 Hz rejected");
-    expect_true(!dmxwb::check_dmx_refresh_rate(4, 45).valid, "refresh above 44 Hz rejected");
-
-    const auto with_overhead = dmxwb::check_dmx_refresh_rate(4, 10, std::chrono::milliseconds{100});
-    expect_true(!with_overhead.valid, "measured transport overhead participates in refresh feasibility");
-}
-
-void test_high_startup_refresh_waits_for_transport_measurement() {
-    FakeMonotonicClock clock;
-    FakeDmxTransport transport{clock};
-    transport.set_send_duration(std::chrono::milliseconds{24});
-
-    dmxwb::DmxOutputMailbox mailbox;
-    const auto snapshot = make_filled_snapshot(512, 0x22, 21);
-    expect_true(snapshot != nullptr, "high-startup snapshot built");
-    if (!snapshot) {
+    const auto snapshot_300 = make_filled_snapshot(300, 0x22, 21);
+    const auto snapshot_301 = make_filled_snapshot(301, 0x33, 22);
+    const auto snapshot_512 = make_filled_snapshot(512, 0x44, 23);
+    expect_true(snapshot_300 != nullptr && snapshot_301 != nullptr && snapshot_512 != nullptr,
+                "core snapshots can still represent 300, 301 and 512 channels");
+    if (!snapshot_300 || !snapshot_301 || !snapshot_512) {
         return;
     }
-    expect_true(mailbox.publish(*snapshot), "high-startup snapshot published");
 
-    std::atomic<std::uint32_t> refresh_hz{44};
-    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
-    expect_true(
-        loop.diagnostics().active_refresh_hz == dmxwb::kDmxDefaultRefreshHz,
-        "high startup request begins at safe default refresh before measurement");
+    dmxwb::DmxOutputMailbox mailbox;
+    expect_true(mailbox.publish(*snapshot_300), "physical mailbox accepts exactly 300 slots");
+    expect_true(!mailbox.publish(*snapshot_301), "physical mailbox rejects slot 301 and above");
+    expect_true(!mailbox.publish(*snapshot_512), "physical mailbox rejects a 512-slot snapshot");
+    expect_true(mailbox.published_slot_count() == 300, "rejected oversized snapshot does not replace physical frame");
 
-    expect_true(drive_until_frames(loop, clock, 1), "high-startup first measurement frame sent");
-    expect_true(
-        loop.diagnostics().active_refresh_hz == dmxwb::kDmxDefaultRefreshHz,
-        "first measurement frame remains on safe default refresh");
-
-    expect_true(drive_until_frames(loop, clock, 2), "high-startup second frame sent after feasibility decision");
-    const auto diagnostics = loop.diagnostics();
-    expect_true(diagnostics.refresh_rejections == 1, "measured impossible high startup refresh rejected once");
-    expect_true(
-        diagnostics.active_refresh_hz == dmxwb::kDmxDefaultRefreshHz,
-        "rejected high startup refresh stays at safe default");
-    expect_true(
-        refresh_hz.load(std::memory_order_acquire) == dmxwb::kDmxDefaultRefreshHz,
-        "rejected requested refresh is normalized to active refresh");
-    loop.shutdown();
+    const auto wire_time = dmxwb::minimum_dmx_frame_time(300);
+    const auto period = std::chrono::nanoseconds{1'000'000'000LL / 44LL};
+    expect_true(wire_time < period, "300-slot DMX wire time fits inside the fixed 44 Hz period before OS overhead");
 }
 
 void test_preallocated_mailbox_frame_boundary() {
@@ -482,17 +456,22 @@ void test_absolute_frame_schedule_no_drift() {
     }
     expect_true(mailbox.publish(*snapshot), "absolute schedule snapshot published");
 
-    std::atomic<std::uint32_t> refresh_hz{10};
-    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock};
     expect_true(drive_until_frames(loop, clock, 3), "absolute scheduler produced three frames");
 
     const auto& starts = transport.send_start_times();
     expect_true(starts.size() >= 3, "absolute scheduler recorded three frame starts");
     if (starts.size() >= 3) {
+        constexpr auto period_ns = 1'000'000'000LL / 44LL;
         expect_true(starts[0] == dmxwb::MonotonicClock::time_point{}, "first frame starts at T0");
-        expect_true(starts[1] == dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{100}}, "second frame starts at T0 + period");
-        expect_true(starts[2] == dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{200}}, "third frame starts at T0 + 2*period without drift");
+        expect_true(
+            starts[1] == dmxwb::MonotonicClock::time_point{std::chrono::nanoseconds{period_ns}},
+            "second frame starts at T0 + fixed 44 Hz period");
+        expect_true(
+            starts[2] == dmxwb::MonotonicClock::time_point{std::chrono::nanoseconds{period_ns * 2}},
+            "third frame stays on the fixed absolute 44 Hz grid without drift");
     }
+    expect_true(loop.diagnostics().active_refresh_hz == 44, "diagnostics report fixed 44 Hz output");
     expect_true(loop.diagnostics().missed_deadlines == 0, "normal send duration does not miss deadlines");
     loop.shutdown();
 }
@@ -517,8 +496,7 @@ void test_snapshot_switch_only_between_frames() {
         }
     });
 
-    std::atomic<std::uint32_t> refresh_hz{30};
-    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock};
     expect_true(drive_until_frames(loop, clock, 2), "frame-boundary scheduler produced two frames");
 
     const auto& generations = transport.generations();
@@ -546,12 +524,10 @@ void test_serial_failure_reopen_recovery() {
     }
     expect_true(mailbox.publish(*snapshot), "recovery snapshot published");
 
-    std::atomic<std::uint32_t> refresh_hz{30};
     dmxwb::DmxOutputLoop loop{
         transport,
         mailbox,
         clock,
-        refresh_hz,
         std::chrono::milliseconds{250}};
 
     expect_true(drive_until_frames(loop, clock, 2), "output resumes after simulated serial send failure");
@@ -565,43 +541,10 @@ void test_serial_failure_reopen_recovery() {
     loop.shutdown();
 }
 
-void test_runtime_refresh_change_keeps_absolute_schedule() {
-    FakeMonotonicClock clock;
-    FakeDmxTransport transport{clock};
-    transport.set_send_duration(std::chrono::milliseconds{1});
-
-    dmxwb::DmxOutputMailbox mailbox;
-    const auto snapshot = make_filled_snapshot(4, 0x55, 12);
-    expect_true(snapshot != nullptr, "refresh-change snapshot built");
-    if (!snapshot) {
-        return;
-    }
-    expect_true(mailbox.publish(*snapshot), "refresh-change snapshot published");
-
-    std::atomic<std::uint32_t> refresh_hz{30};
-    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
-    expect_true(drive_until_frames(loop, clock, 1), "refresh-change first frame sent");
-
-    refresh_hz.store(20, std::memory_order_release);
-    expect_true(drive_until_frames(loop, clock, 3), "refresh-change produced frames at new rate");
-
-    const auto& starts = transport.send_start_times();
-    expect_true(starts.size() >= 3, "refresh-change transport recorded three frames");
-    if (starts.size() >= 3) {
-        const auto first_30hz_deadline = dmxwb::MonotonicClock::time_point{std::chrono::nanoseconds{33'333'333}};
-        const auto next_20hz_deadline = dmxwb::MonotonicClock::time_point{std::chrono::nanoseconds{83'333'333}};
-        expect_true(starts[1] == first_30hz_deadline, "refresh change applies at next frame boundary without closing serial");
-        expect_true(starts[2] == next_20hz_deadline, "new 20 Hz period advances from absolute boundary");
-    }
-    expect_true(loop.diagnostics().active_refresh_hz == 20, "active refresh diagnostics report runtime change");
-    expect_true(transport.open_calls() == 1, "runtime refresh change does not reopen serial");
-    loop.shutdown();
-}
-
 void test_missed_deadline_is_counted_and_grid_recovers() {
     FakeMonotonicClock clock;
     FakeDmxTransport transport{clock};
-    transport.set_send_duration(std::chrono::milliseconds{120});
+    transport.set_send_duration(std::chrono::milliseconds{30});
 
     dmxwb::DmxOutputMailbox mailbox;
     const auto snapshot = make_filled_snapshot(4, 0x66, 13);
@@ -611,15 +554,17 @@ void test_missed_deadline_is_counted_and_grid_recovers() {
     }
     expect_true(mailbox.publish(*snapshot), "deadline snapshot published");
 
-    std::atomic<std::uint32_t> refresh_hz{10};
-    dmxwb::DmxOutputLoop loop{transport, mailbox, clock, refresh_hz};
+    dmxwb::DmxOutputLoop loop{transport, mailbox, clock};
     expect_true(drive_until_frames(loop, clock, 2), "deadline test produced two frames");
-    expect_true(loop.diagnostics().missed_deadlines >= 1, "frame longer than period increments missed deadline counter");
+    expect_true(loop.diagnostics().missed_deadlines >= 1, "frame longer than fixed 44 Hz period increments missed deadline counter");
 
     const auto& starts = transport.send_start_times();
     expect_true(starts.size() >= 2, "deadline test recorded two starts");
     if (starts.size() >= 2) {
-        expect_true(starts[1] == dmxwb::MonotonicClock::time_point{std::chrono::milliseconds{200}}, "scheduler skips missed 100 ms boundary and returns to absolute grid");
+        constexpr auto period_ns = 1'000'000'000LL / 44LL;
+        expect_true(
+            starts[1] == dmxwb::MonotonicClock::time_point{std::chrono::nanoseconds{period_ns * 2}},
+            "scheduler skips one missed fixed-rate boundary and returns to the absolute grid");
     }
     loop.shutdown();
 }
@@ -636,14 +581,12 @@ int main() {
     test_immutable_publication();
     test_dmx_diagnostic_patterns();
     test_clock_abstraction();
-    test_refresh_validation();
-    test_high_startup_refresh_waits_for_transport_measurement();
+    test_fixed_physical_output_profile();
     test_preallocated_mailbox_frame_boundary();
     test_mailbox_concurrent_whole_frames();
     test_absolute_frame_schedule_no_drift();
     test_snapshot_switch_only_between_frames();
     test_serial_failure_reopen_recovery();
-    test_runtime_refresh_change_keeps_absolute_schedule();
     test_missed_deadline_is_counted_and_grid_recovers();
 
     if (failures != 0) {
