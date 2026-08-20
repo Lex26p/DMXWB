@@ -90,12 +90,20 @@ bool DmxSnapshotPublisher::publish(std::shared_ptr<const DmxSnapshot> snapshot) 
     if (!snapshot) {
         return false;
     }
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
     current_.store(std::move(snapshot), std::memory_order_release);
+#else
+    std::atomic_store_explicit(&current_, std::move(snapshot), std::memory_order_release);
+#endif
     return true;
 }
 
 std::shared_ptr<const DmxSnapshot> DmxSnapshotPublisher::load() const noexcept {
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
     return current_.load(std::memory_order_acquire);
+#else
+    return std::atomic_load_explicit(&current_, std::memory_order_acquire);
+#endif
 }
 
 }  // namespace dmxwb

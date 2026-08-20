@@ -83,7 +83,11 @@ public:
     [[nodiscard]] std::shared_ptr<const DmxSnapshot> load() const noexcept;
 
 private:
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
     std::atomic<std::shared_ptr<const DmxSnapshot>> current_;
+#else
+    std::shared_ptr<const DmxSnapshot> current_;
+#endif
 };
 
 }  // namespace dmxwb

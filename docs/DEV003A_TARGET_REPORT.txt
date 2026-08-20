@@ -1,0 +1,51 @@
+=== DMXWB DEV-003A target report ===
+generated_utc: 2026-08-20T12:11:09Z
+source_head: b90cd3c0ca22b67e920828696aff5d30dccaacec
+source_worktree: modified (DEV-003A package applied, not committed yet)
+artifact_sha256: 3ea1382e9637df786473b74b336ba3784d75148fb18f627c6722a68e477b71be
+target: root@10.200.200.1
+
+=== DMXWB WB8 target probe ===
+date: 2026-08-17T20:57:25+00:00
+device_model: Wiren Board rev. 8.5.1 (T507)
+uname_machine: aarch64
+kernel: 6.8.0-wb160
+dpkg_architecture: arm64
+glibc: glibc 2.31
+--- os-release ---
+PRETTY_NAME="Debian GNU/Linux 11 (bullseye)"
+NAME="Debian GNU/Linux"
+VERSION_ID="11"
+VERSION="11 (bullseye)"
+VERSION_CODENAME=bullseye
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+--- wb-release ---
+Wirenboard release wb-2606 (as stable), target wb8/bullseye
+
+You can get this info in scripts from /usr/lib/wb-release.
+--- RS-485 ports ---
+lrwxrwxrwx 1 root root 5 Aug 17 16:13 /dev/ttyRS485-1 -> ttyS2
+lrwxrwxrwx 1 root root 5 Aug 17 16:13 /dev/ttyRS485-2 -> ttyS1
+=== end probe ===
+--- target binary ---
+/tmp/dmxwb-dev003a/dmxwb: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (GNU/Linux), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=f597c0a028ad0ac4c77564e31f3adda795a85b4a, for GNU/Linux 3.7.0, not stripped
+	linux-vdso.so.1 (0x0000ffff8c268000)
+	libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ffff8bfc7000)
+	/lib/ld-linux-aarch64.so.1 (0x0000ffff8c238000)
+--- dmxwb --version ---
+dmxwb 0.1.0
+--- dmxwb --help ---
+Usage:
+  dmxwb --help
+  dmxwb --version
+  dmxwb --dmx-test PATTERN [--port PATH] [--start-channel N] [--frames N]
+
+DEV-003 hardware diagnostic mode (Linux/Wiren Board only).
+PATTERN: all-off | red | green | blue | white | all-on
+Defaults: --port /dev/ttyRS485-1 --start-channel 1 --frames 120
+The diagnostic repeats one fixed RGBW frame with an approximate 25 ms pause.
+It is not the production continuous/timed DMX engine from DEV-004.
+=== DEV-003A target execution PASS ===
