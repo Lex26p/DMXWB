@@ -41,6 +41,7 @@ find_package(Threads REQUIRED)
 add_library(dmxwb_core STATIC
     src/app_info.cpp
     src/dmx_output.cpp
+    src/fixture.cpp
     src/dmx_snapshot.cpp
     src/dmx_test_pattern.cpp
     src/monotonic_clock.cpp

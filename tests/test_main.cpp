@@ -1,5 +1,6 @@
 #include "dmxwb/app_info.hpp"
 #include "dmxwb/dmx_output.hpp"
+#include "dmxwb/fixture.hpp"
 #include "dmxwb/dmx_snapshot.hpp"
 #include "dmxwb/dmx_test_pattern.hpp"
 #include "dmxwb/dmx_transport.hpp"
@@ -569,6 +570,237 @@ void test_missed_deadline_is_counted_and_grid_recovers() {
     loop.shutdown();
 }
 
+
+void test_fixture_initial_state_and_identity() {
+    dmxwb::FixtureCollection fixtures;
+    expect_true(fixtures.reconfigure(2, 1), "fixture collection creates two fixtures");
+
+    const auto* first = fixtures.fixture_at(0);
+    const auto* second = fixtures.fixture_at(1);
+    expect_true(first != nullptr && second != nullptr, "created fixtures are addressable");
+    if (!first || !second) {
+        return;
+    }
+
+    expect_true(first->id() == 1 && second->id() == 2, "fixture IDs start monotonically at 1");
+    expect_true(first->name() == "Светильник 1", "first fixture gets default Russian name");
+    expect_true(second->name() == "Светильник 2", "second fixture gets default Russian name");
+    expect_true(!first->requested_power(), "new fixture starts requested OFF");
+    expect_true(
+        first->saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 255},
+        "new fixture stores full RGBW values");
+    expect_true(first->brightness() == 100, "new fixture brightness defaults to 100");
+    expect_true(first->temperature() == 100, "new fixture temperature defaults to 100");
+    expect_true(first->actual_rgbw() == dmxwb::RgbwValues{}, "new OFF fixture has zero physical RGBW");
+    expect_true(!first->actual_power(), "new OFF fixture factual power is OFF");
+}
+
+void test_fixture_rgb_color_temperature_semantics() {
+    dmxwb::Fixture fixture{10, "Fixture"};
+    fixture.set_power(true);
+
+    expect_true(fixture.set_temperature(50), "temperature 50 accepted");
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 128},
+        "temperature 50 sets RGB to 255 and rounded W to 128");
+    expect_true(fixture.temperature() == 50, "temperature setting is stored");
+
+    fixture.set_red(17);
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{17, 255, 255, 0},
+        "individual red preserves G/B and immediately clears W");
+
+    fixture.set_green(23);
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{17, 23, 255, 0},
+        "individual green preserves R/B and keeps W cleared");
+
+    fixture.set_blue(31);
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{17, 23, 31, 0},
+        "individual blue preserves R/G and keeps W cleared");
+
+    fixture.set_color(1, 2, 3);
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{1, 2, 3, 0},
+        "Color replaces RGB together and clears W");
+    expect_true(fixture.temperature() == 50, "RGB/Color takeover does not destroy last temperature setting");
+
+    expect_true(fixture.set_temperature(0), "temperature 0 accepted");
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 0},
+        "temperature 0 maps to 255/255/255/0");
+
+    expect_true(fixture.set_temperature(50), "temperature 50 accepted again");
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 128},
+        "temperature 50 maps to rounded white 128");
+
+    expect_true(fixture.set_temperature(100), "temperature 100 accepted");
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 255},
+        "temperature 100 maps to full RGBW");
+
+    const auto before_invalid = fixture.saved_rgbw();
+    expect_true(!fixture.set_temperature(101), "temperature above 100 rejected");
+    expect_true(fixture.saved_rgbw() == before_invalid, "invalid temperature does not mutate saved RGBW");
+    expect_true(fixture.temperature() == 100, "invalid temperature does not mutate setting");
+}
+
+void test_fixture_brightness_power_and_reset() {
+    dmxwb::Fixture fixture{11, "Fixture"};
+    fixture.set_color(255, 128, 1);
+    fixture.set_power(true);
+
+    expect_true(fixture.set_brightness(50), "brightness 50 accepted");
+    expect_true(
+        fixture.actual_rgbw() == dmxwb::RgbwValues{127, 64, 0, 0},
+        "brightness uses saved_channel * percent / 100 for all channels");
+    expect_true(fixture.actual_power(), "non-zero scaled output is factually ON");
+
+    const auto saved_before_off = fixture.saved_rgbw();
+    fixture.set_power(false);
+    expect_true(fixture.actual_rgbw() == dmxwb::RgbwValues{}, "Power OFF forces physical RGBW to zero");
+    expect_true(fixture.saved_rgbw() == saved_before_off, "Power OFF preserves saved RGBW");
+    expect_true(fixture.brightness() == 50, "Power OFF preserves brightness");
+
+    fixture.set_power(true);
+    expect_true(
+        fixture.actual_rgbw() == dmxwb::RgbwValues{127, 64, 0, 0},
+        "Power ON restores saved state through current brightness");
+
+    expect_true(fixture.set_brightness(0), "brightness 0 accepted");
+    expect_true(fixture.requested_power(), "brightness 0 does not change requested power");
+    expect_true(!fixture.actual_power(), "requested ON with brightness 0 is factually OFF");
+
+    expect_true(!fixture.set_brightness(101), "brightness above 100 rejected");
+    expect_true(fixture.brightness() == 0, "invalid brightness does not mutate setting");
+
+    fixture.reset();
+    expect_true(fixture.requested_power(), "Reset requests Power ON");
+    expect_true(fixture.brightness() == 100, "Reset restores brightness 100");
+    expect_true(fixture.temperature() == 100, "Reset restores temperature 100");
+    expect_true(
+        fixture.saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 255},
+        "Reset restores saved RGBW to full");
+    expect_true(
+        fixture.actual_rgbw() == dmxwb::RgbwValues{255, 255, 255, 255},
+        "Reset produces full physical RGBW");
+    expect_true(fixture.actual_power(), "Reset fixture is factually ON");
+}
+
+void test_fixture_addressing_and_stable_ids() {
+    dmxwb::FixtureCollection fixtures;
+
+    expect_true(fixtures.reconfigure(75, 1), "75 RGBW fixtures fit exactly in physical slots 1..300");
+    expect_true(fixtures.physical_slot_count() == std::optional<std::size_t>{300}, "75 fixtures produce slot_count 300");
+    expect_true(fixtures.fixture_start_address(0) == std::optional<std::size_t>{1}, "first fixture starts at channel 1");
+    expect_true(fixtures.fixture_start_address(74) == std::optional<std::size_t>{297}, "75th fixture starts at channel 297");
+    expect_true(!fixtures.fixture_start_address(75).has_value(), "fixture address outside collection rejected");
+
+    expect_true(!fixtures.reconfigure(75, 2), "configuration crossing physical slot 300 rejected");
+    expect_true(fixtures.fixture_count() == 75 && fixtures.start_address() == 1,
+                "invalid reconfigure leaves existing configuration unchanged");
+
+    expect_true(fixtures.reconfigure(1, 297), "single RGBW fixture ending exactly at 300 accepted");
+    expect_true(!fixtures.set_start_address(298), "single RGBW fixture crossing slot 300 rejected");
+    expect_true(fixtures.start_address() == 297, "invalid start-address change leaves mapping unchanged");
+
+    dmxwb::FixtureCollection identity;
+    expect_true(identity.reconfigure(3, 1), "identity collection creates three fixtures");
+    auto* first = identity.fixture_at(0);
+    auto* third = identity.fixture_at(2);
+    expect_true(first != nullptr && third != nullptr, "identity fixtures available");
+    if (!first || !third) {
+        return;
+    }
+
+    const auto first_id = first->id();
+    const auto removed_id = third->id();
+    first->set_name("Front");
+    first->set_power(true);
+    first->set_color(10, 20, 30);
+
+    expect_true(identity.set_start_address(9), "valid Start Address change accepted");
+    first = identity.fixture_at(0);
+    expect_true(first != nullptr && first->id() == first_id, "Start Address change preserves fixture ID");
+    if (!first) {
+        return;
+    }
+    expect_true(first->name() == "Front", "Start Address change preserves Name");
+    expect_true(first->saved_rgbw() == dmxwb::RgbwValues{10, 20, 30, 0},
+                "Start Address change preserves saved RGBW");
+    expect_true(first->requested_power(), "Start Address change preserves Power");
+
+    expect_true(identity.set_fixture_count(2), "shrinking collection removes last fixture");
+    expect_true(identity.set_fixture_count(3), "growing collection creates a new last fixture");
+    const auto* replacement = identity.fixture_at(2);
+    expect_true(replacement != nullptr, "replacement fixture exists");
+    if (replacement) {
+        expect_true(replacement->id() > removed_id, "removed Fixture ID is never reused");
+        expect_true(replacement->name() == "Светильник 3", "new fixture gets default name for current position");
+    }
+
+    dmxwb::FixtureCollection empty;
+    expect_true(empty.reconfigure(0, 1), "Fixture Count 0 is valid");
+    expect_true(empty.physical_slot_count() == std::optional<std::size_t>{0}, "zero fixtures produce zero physical slots");
+    const auto empty_snapshot = empty.build_snapshot(9);
+    expect_true(empty_snapshot != nullptr && empty_snapshot->slot_count() == 0,
+                "zero-fixture collection builds a valid zero-slot snapshot");
+}
+
+void test_fixture_whole_snapshot_rebuild() {
+    dmxwb::FixtureCollection fixtures;
+    expect_true(fixtures.reconfigure(2, 5), "snapshot collection maps two fixtures from start channel 5");
+
+    auto* first = fixtures.fixture_at(0);
+    auto* second = fixtures.fixture_at(1);
+    expect_true(first != nullptr && second != nullptr, "snapshot fixtures available");
+    if (!first || !second) {
+        return;
+    }
+
+    first->set_power(true);
+    first->set_color(10, 20, 30);
+
+    second->set_power(true);
+    expect_true(second->set_temperature(50), "second fixture temperature set");
+    expect_true(second->set_brightness(50), "second fixture brightness set");
+
+    const auto snapshot_one = fixtures.build_snapshot(100);
+    expect_true(snapshot_one != nullptr, "whole Fixture snapshot built");
+    if (!snapshot_one) {
+        return;
+    }
+
+    expect_true(snapshot_one->slot_count() == 12, "start 5 plus two RGBW fixtures produces slot_count 12");
+    expect_true(snapshot_one->generation() == 100, "Fixture snapshot preserves supplied generation");
+    expect_true(snapshot_one->channel(1) == std::optional<std::uint8_t>{0}, "unused channel before Start Address is zero");
+    expect_true(snapshot_one->channel(4) == std::optional<std::uint8_t>{0}, "all leading unused channels remain zero");
+    expect_true(snapshot_one->channel(5) == std::optional<std::uint8_t>{10}, "fixture 1 R mapped to channel 5");
+    expect_true(snapshot_one->channel(6) == std::optional<std::uint8_t>{20}, "fixture 1 G mapped to channel 6");
+    expect_true(snapshot_one->channel(7) == std::optional<std::uint8_t>{30}, "fixture 1 B mapped to channel 7");
+    expect_true(snapshot_one->channel(8) == std::optional<std::uint8_t>{0}, "fixture 1 W mapped to channel 8");
+    expect_true(snapshot_one->channel(9) == std::optional<std::uint8_t>{127}, "fixture 2 scaled R mapped to channel 9");
+    expect_true(snapshot_one->channel(10) == std::optional<std::uint8_t>{127}, "fixture 2 scaled G mapped to channel 10");
+    expect_true(snapshot_one->channel(11) == std::optional<std::uint8_t>{127}, "fixture 2 scaled B mapped to channel 11");
+    expect_true(snapshot_one->channel(12) == std::optional<std::uint8_t>{64}, "fixture 2 scaled W mapped to channel 12");
+
+    first->set_color(99, 88, 77);
+    const auto snapshot_two = fixtures.build_snapshot(101);
+    expect_true(snapshot_two != nullptr, "second whole Fixture snapshot built");
+    if (!snapshot_two) {
+        return;
+    }
+
+    expect_true(snapshot_one->channel(5) == std::optional<std::uint8_t>{10},
+                "previous immutable snapshot is unchanged after Fixture mutation");
+    expect_true(snapshot_one->generation() == 100, "previous snapshot generation remains unchanged");
+    expect_true(snapshot_two->channel(5) == std::optional<std::uint8_t>{99},
+                "new snapshot contains latest whole Fixture state");
+    expect_true(snapshot_two->generation() == 101, "new snapshot receives new generation");
+}
+
 }  // namespace
 
 int main() {
@@ -588,6 +820,12 @@ int main() {
     test_snapshot_switch_only_between_frames();
     test_serial_failure_reopen_recovery();
     test_missed_deadline_is_counted_and_grid_recovers();
+
+    test_fixture_initial_state_and_identity();
+    test_fixture_rgb_color_temperature_semantics();
+    test_fixture_brightness_power_and_reset();
+    test_fixture_addressing_and_stable_ids();
+    test_fixture_whole_snapshot_rebuild();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
