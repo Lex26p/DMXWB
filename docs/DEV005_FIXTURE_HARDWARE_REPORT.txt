@@ -1,0 +1,364 @@
+=== DMXWB DEV-005 Fixture RGBW hardware acceptance ===
+generated_utc: 2026-08-24T10:53:09Z
+source_head: 5dc3b31e5c62011122b8246527045e3b19cb3418
+source_worktree: modified
+artifact_sha256: ef595ec643c419254c6a9395a1c4f47c7b456e5e697872cbe217c5ab075ca30b
+target: root@10.200.200.1
+port: /dev/ttyRS485-1
+port_release_mode: permanently_disabled_in_wb_serial_driver_config
+fixture_start_address: 1
+fixed_refresh_hz: 44
+step_duration_seconds: 3
+minimum_frames_per_step: 128
+
+--- target identity ---
+model: Wiren Board rev. 8.5.1 (T507)
+Linux wirenboard-A35WDYWM 6.8.0-wb160 #1 SMP Wed Jul  8 12:40:57 UTC 2026 aarch64 GNU/Linux
+RELEASE_NAME=wb-2606
+SUITE=stable
+TARGET=wb8/bullseye
+REPO_PREFIX=wb_mqtt_serial_state: active
+binary_fixture_cli_check: PASS
+
+--- fixture state 1/10: red ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: red
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 255/0/0/0
+  brightness: 100
+  temperature: 100
+  actual_rgbw: 255/0/0/0
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 133
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 917
+  max_transport_overhead_us: 557
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 2/10: green ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: green
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 0/255/0/0
+  brightness: 100
+  temperature: 100
+  actual_rgbw: 0/255/0/0
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 2653
+  max_transport_overhead_us: 2293
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 3/10: blue ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: blue
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 0/0/255/0
+  brightness: 100
+  temperature: 100
+  actual_rgbw: 0/0/255/0
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 834
+  max_transport_overhead_us: 474
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 4/10: temperature-0 ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: temperature-0
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 255/255/255/0
+  brightness: 100
+  temperature: 0
+  actual_rgbw: 255/255/255/0
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 792
+  max_transport_overhead_us: 432
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 5/10: temperature-50 ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: temperature-50
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 255/255/255/128
+  brightness: 100
+  temperature: 50
+  actual_rgbw: 255/255/255/128
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 1204
+  max_transport_overhead_us: 844
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 6/10: temperature-100 ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: temperature-100
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 255/255/255/255
+  brightness: 100
+  temperature: 100
+  actual_rgbw: 255/255/255/255
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 3509
+  max_transport_overhead_us: 3149
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 7/10: brightness-50 ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: brightness-50
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 255/255/255/255
+  brightness: 50
+  temperature: 100
+  actual_rgbw: 127/127/127/127
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 1285
+  max_transport_overhead_us: 925
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 8/10: power-off ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: power-off
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: OFF
+  saved_rgbw: 255/255/255/255
+  brightness: 50
+  temperature: 100
+  actual_rgbw: 0/0/0/0
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 133
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 786
+  max_transport_overhead_us: 426
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 9/10: power-on-restore ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: power-on-restore
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 255/255/255/255
+  brightness: 50
+  temperature: 100
+  actual_rgbw: 127/127/127/127
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 1912
+  max_transport_overhead_us: 1552
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- fixture state 10/10: reset ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: reset
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: ON
+  saved_rgbw: 255/255/255/255
+  brightness: 100
+  temperature: 100
+  actual_rgbw: 255/255/255/255
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 3 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 132
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 809
+  max_transport_overhead_us: 449
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+step_software_acceptance: PASS
+step_user_observation: PASS
+
+--- final all-off through Fixture model ---
+DEV-005 Fixture RGBW hardware diagnostic
+  port: /dev/ttyRS485-1
+  state: all-off
+  fixture_id: 1
+  fixture_start_address: 1
+  requested_power: OFF
+  saved_rgbw: 255/255/255/255
+  brightness: 100
+  temperature: 100
+  actual_rgbw: 0/0/0/0
+  physical_slots: 4
+  refresh: 44 Hz
+  duration: 1 s
+  snapshot_check: PASS
+DmxOutput diagnostics
+  frames_sent: 45
+  open_failures: 0
+  send_failures: 0
+  recoveries: 0
+  missed_deadlines: 0
+  active_generation: 5005
+  active_refresh_hz: 44
+  max_send_us: 708
+  max_transport_overhead_us: 348
+  serial_open_after_stop: 0
+software_result: PASS
+DEV-005 Fixture RGBW hardware diagnostic completed; serial port closed cleanly.
+final_all_off_software: PASS
+final_all_off_user_observation: PASS
+dev005_fixture_hardware_result: PASS
+=== DMXWB DEV-005 FIXTURE RGBW HARDWARE PASS ===
