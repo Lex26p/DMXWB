@@ -9,25 +9,43 @@ DMXWB не заменяет Wiren Board и использует штатную L
 Последний завершённый engineering gate:
 
 ```text
-DEV-004 — continuous DMX engine, timing and serial recovery
-b6038b87257d50428de4875308ee3025fcf9ab57
-```
-
-Перед DEV-005 зафиксирован подтверждённый hardware follow-up для упрощённого production profile:
-
-```text
-physical DMX slots: 1..300 maximum
-physical DMX refresh: fixed 44 Hz
-```
-
-До изменения core два последовательных production hardware run подтвердили `300 slots / 44 Hz / 60 s`: оба раза `2640/2640`, `missed_deadlines=0`, без видимого flicker; worst observed send time был `17.689 ms` при периоде `22.727 ms`.
-
-После фиксации profile новый ARM64 artifact `670036f5...` прошёл отдельный 60-секундный production acceptance: `2640/2640`, `missed_deadlines=0`, `open/send/recoveries=0`, `active_refresh_hz=44`, `max_send_us=16.407 ms`, visual PASS и final all-off/reopen PASS.
-
-Следующий gate после фиксации этого profile:
-
-```text
 DEV-005 — Fixture RGBW model and addressing
+8a6d6212179a85b880a5eed291afee30bffa6ba0
+```
+
+Подтверждены:
+
+- RGBW Fixture model со stable monotonic ID и Name;
+- requested/factual Power;
+- RGB/Color takeover с `W=0`;
+- Temperature `0..100` -> `RGB=255`, `W=0..255`;
+- Brightness scaling всех четырёх каналов;
+- Power OFF/ON restore;
+- Reset;
+- Fixture Count / Start Address;
+- sequential 4-channel RGBW addressing;
+- physical Fixture range только до slot 300;
+- immutable whole `DmxSnapshot` из actual Fixture state;
+- физический WB8 smoke через `FixtureCollection -> DmxSnapshot -> DmxOutput -> RS-485`.
+
+DEV-005 ARM64 artifact:
+
+```text
+SHA256: ef595ec643c419254c6a9395a1c4f47c7b456e5e697872cbe217c5ab075ca30b
+```
+
+Hardware marker:
+
+```text
+=== DMXWB DEV-005 FIXTURE RGBW HARDWARE PASS ===
+```
+
+Report: `docs/DEV005_FIXTURE_HARDWARE_REPORT.txt`.
+
+Следующий gate:
+
+```text
+DEV-006 — configuration and persistence
 ```
 
 ## Физический DMX profile
@@ -37,12 +55,40 @@ DEV-005 — Fixture RGBW model and addressing
 - внутренние DMX/Art-Net структуры сохраняют ёмкость 512 каналов;
 - физический RS-485 output принимает максимум 300 slots;
 - production cadence фиксирован на 44 Hz;
-- отдельной пользовательской настройки Refresh Rate больше нет;
+- отдельной пользовательской настройки Refresh Rate нет;
 - абсолютный scheduler остаётся `T0`, `T0+period`, ...;
 - whole snapshot меняется только на границе кадров;
 - `missed_deadlines` остаётся диагностикой фактической способности target выдерживать profile.
 
-Для RGBW при Start Address = 1 максимум физического profile — 75 приборов; требуемые 60 RGBW занимают 240 slots.
+Для RGBW при Start Address = 1 максимум physical profile — 75 приборов; требуемые 60 RGBW занимают 240 slots.
+
+## Fixture RGBW model
+
+Каждый Fixture занимает четыре последовательных канала:
+
+```text
+Address + 0 = R
+Address + 1 = G
+Address + 2 = B
+Address + 3 = W
+```
+
+Новый Fixture создаётся OFF, но сохраняет `RGBW=255/255/255/255`, `Brightness=100`, `Temperature=100`.
+
+Основные semantics:
+
+```text
+RGB/Color       -> W = 0
+Temperature 0   -> 255/255/255/0
+Temperature 50  -> 255/255/255/128
+Temperature 100 -> 255/255/255/255
+Brightness      -> saved_channel * percent / 100
+Power OFF       -> actual 0/0/0/0, saved state сохраняется
+Power ON        -> saved state восстанавливается через текущий Brightness
+Reset           -> ON, Brightness 100, Temperature 100, RGBW 255/255/255/255
+```
+
+Stable Fixture ID не зависит от DMX-адреса или Name и не переиспользуется после удаления.
 
 ## Production DMX transport
 
@@ -79,15 +125,15 @@ Custom kernel patch на acceptance WB8 не требуется.
 - `ArtSync` поддерживается через staging snapshot и release по следующему ArtSync; timeout обратно в async mode — 4 s;
 - source identity для конфликта — `source IP + ArtDmx.Physical`;
 - multiple-source policy DMXWB = `CONFLICT`, без HTP/LTP merge;
-- ArtPollReply продолжает рекламировать настроенный output universe даже при Source=MQTT, чтобы Art-Net subscription оставалась активной;
+- ArtPollReply продолжает рекламировать настроенный output universe даже при Source=MQTT;
 - production release требует зарегистрированный Art-Net OEM Code и обязательный Art-Net credit в user documentation.
 
 ## Инженерные reference-документы
 
 Отдельные reusable-документы сохраняют технические знания проекта и могут использоваться как база для других разработок:
 
-- [`docs/reference/WB8_RS485_DMX.md`](docs/reference/WB8_RS485_DMX.md) — как был исследован и реализован физический DMX512 через встроенный RS-485 WB8: transport, DE/BREAK/TEMT, timing, failure cases и hardware acceptance;
-- [`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md) — актуальный Art-Net 4 integration contract: ArtDmx, discovery/subscription, ArtSync, Sequence, conflict, Hold Last и связь network cadence с physical DMX.
+- [`docs/reference/WB8_RS485_DMX.md`](docs/reference/WB8_RS485_DMX.md) — исследование и реализация физического DMX512 через встроенный RS-485 WB8: transport, DE/BREAK/TEMT, timing, failure cases и hardware acceptance;
+- [`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md) — Art-Net 4 integration contract: ArtDmx, discovery/subscription, ArtSync, Sequence, conflict, Hold Last и связь network cadence с physical DMX.
 
 `docs/reference/` не заменяет `TECHNICAL_SPEC.md`: reference объясняет инженерные решения и исследования, а нормативные требования конкретно к DMXWB остаются в проектных документах.
 
@@ -104,7 +150,7 @@ DMX port:         /dev/ttyRS485-1 -> ttyS2
 Build compiler:   Bullseye aarch64-linux-gnu-g++ 10.2.1
 ```
 
-На текущем стенде `/dev/ttyRS485-1` постоянно отключён в WB Serial Device Driver Configuration; hardware helpers могут считать порт освобождённым и не должны каждый раз спрашивать `s/p/q`.
+На текущем стенде `/dev/ttyRS485-1` постоянно отключён в WB Serial Device Driver Configuration; hardware helpers считают порт освобождённым и не должны каждый раз спрашивать `s/p/q`.
 
 ## Build/test среда
 
@@ -134,7 +180,9 @@ bash tools/wb8/build_bullseye_arm64.sh
 
 ## Что ещё не реализовано
 
-До соответствующих roadmap gates намеренно отсутствуют Fixture model, persistence, MQTT runtime, Groups/Scenes, Art-Net runtime/parser, production systemd service и Web UI.
+До соответствующих roadmap gates намеренно отсутствуют persistence, MQTT runtime, Groups/Scenes, Art-Net runtime/parser, production systemd service и Web UI.
+
+Fixture model и её physical mapping реализованы и hardware-confirmed в DEV-005; persistence для stable IDs/state начинается в DEV-006.
 
 ## Источник истины
 
