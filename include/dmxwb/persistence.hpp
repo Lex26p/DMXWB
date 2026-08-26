@@ -131,6 +131,10 @@ struct PersistenceResult final {
 [[nodiscard]] std::string serialize_config_json(const AppConfig& config);
 [[nodiscard]] std::string serialize_state_json(const AppState& state);
 
+// Schema/type/version parser used by transactional APIs that may normalize a
+// proposal against the current config before full reference/range validation.
+// Normal file loading must use parse_config_json(), which validates fully.
+[[nodiscard]] PersistenceResult<AppConfig> parse_config_json_unvalidated(std::string_view json);
 [[nodiscard]] PersistenceResult<AppConfig> parse_config_json(std::string_view json);
 [[nodiscard]] PersistenceResult<AppState> parse_state_json(std::string_view json);
 

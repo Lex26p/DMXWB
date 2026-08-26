@@ -730,8 +730,11 @@ PersistenceError validate_config(const AppConfig& config) {
         std::unordered_set<Fixture::Id> scene_fixture_ids;
         scene_fixture_ids.reserve(scene.fixtures.size());
         for (const auto& fixture : scene.fixtures) {
-            if (fixture_ids.find(fixture.fixture_id) == fixture_ids.end()) {
-                return make_error(PersistenceErrorCode::validation, "scene references missing fixture ID");
+            // Scene snapshots may keep a deleted Fixture stable ID. Apply ignores
+            // such records and IDs are never reused. Future/unallocated IDs are
+            // still invalid: every historical ID is below next_fixture_id.
+            if (fixture.fixture_id == 0 || fixture.fixture_id >= config.id_counters.next_fixture_id) {
+                return make_error(PersistenceErrorCode::validation, "scene fixture ID was never allocated");
             }
             if (!scene_fixture_ids.insert(fixture.fixture_id).second) {
                 return make_error(PersistenceErrorCode::validation, "scene contains duplicate fixture snapshot");
@@ -900,7 +903,7 @@ std::string serialize_state_json(const AppState& state) {
     return output;
 }
 
-PersistenceResult<AppConfig> parse_config_json(std::string_view json) {
+PersistenceResult<AppConfig> parse_config_json_unvalidated(std::string_view json) {
     JsonValue root;
     JsonParser parser{json};
     if (!parser.parse(root)) {
@@ -997,11 +1000,19 @@ PersistenceResult<AppConfig> parse_config_json(std::string_view json) {
         return {{}, make_error(PersistenceErrorCode::schema, "id counters must be integers")};
     }
 
-    const auto validation_error = validate_config(config);
+    return {std::move(config), {}};
+}
+
+PersistenceResult<AppConfig> parse_config_json(std::string_view json) {
+    auto parsed = parse_config_json_unvalidated(json);
+    if (!parsed.ok()) {
+        return parsed;
+    }
+    const auto validation_error = validate_config(*parsed.value);
     if (validation_error) {
         return {{}, validation_error};
     }
-    return {std::move(config), {}};
+    return parsed;
 }
 
 PersistenceResult<AppState> parse_state_json(std::string_view json) {

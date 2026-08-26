@@ -391,7 +391,12 @@ void test_config_set_fixture_removal_cleans_retained_topics() {
     auto config = make_config();
     config.fixture_count = 2;
     config.fixtures.push_back(dmxwb::FixtureConfigRecord{11, "Fixture 11"});
-    config.id_counters.next_fixture_id = 12;
+    config.groups = {{5, "Group 5", {10, 11}}};
+    config.scenes = {{7, "Scene 7", {
+        {10, {1, 2, 3, 4}, 50, true},
+        {11, {5, 6, 7, 8}, 60, false},
+    }}};
+    config.id_counters = {12, 6, 8};
     const auto state = dmxwb::make_default_state(config);
     (void)dmxwb::write_persistence_text_file_atomic(config_path, dmxwb::serialize_config_json(config));
     (void)dmxwb::save_state_file_atomic(state_path, state, config);
@@ -414,6 +419,12 @@ void test_config_set_fixture_removal_cleans_retained_topics() {
         "removed Fixture device metadata retained topic is cleared");
     expect_true(removed_power != nullptr && removed_power->retained && removed_power->payload.empty(),
         "removed Fixture retained state topic is cleared");
+    expect_true(runtime.config().groups.size() == 1 &&
+                runtime.config().groups[0].members == std::vector<dmxwb::Fixture::Id>{10},
+        "Fixture removal config/set automatically cleans Group membership");
+    expect_true(runtime.config().scenes.size() == 1 && runtime.config().scenes[0].fixtures.size() == 2 &&
+                runtime.config().scenes[0].fixtures[1].fixture_id == 11,
+        "Fixture removal config/set preserves historical Scene snapshot stable ID");
 }
 
 void test_unknown_fixture_does_not_mutate_model() {

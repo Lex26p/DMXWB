@@ -147,7 +147,13 @@ void test_config_validation() {
         auto config = make_populated_config();
         config.scenes[0].fixtures[0].fixture_id = 999;
         expect_true(dmxwb::validate_config(config).code == dmxwb::PersistenceErrorCode::validation,
-                    "scene with missing fixture rejected");
+                    "scene with future/unallocated fixture ID rejected");
+    }
+    {
+        auto config = make_populated_config();
+        config.scenes[0].fixtures[0].fixture_id = 43;
+        expect_true(!dmxwb::validate_config(config),
+                    "scene may keep historical deleted Fixture ID below next_fixture_id");
     }
     {
         auto config = make_populated_config();

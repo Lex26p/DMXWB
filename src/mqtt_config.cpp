@@ -615,7 +615,7 @@ MqttConfigSetParseResult parse_mqtt_config_set_request(std::string_view payload)
         return result;
     }
 
-    const auto parsed_config = parse_config_json(
+    const auto parsed_config = parse_config_json_unvalidated(
         payload.substr(config_slice.begin, config_slice.end - config_slice.begin));
     if (!parsed_config.ok()) {
         result.error_code = std::string{persistence_error_code_name(parsed_config.error.code)};

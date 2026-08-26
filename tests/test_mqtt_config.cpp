@@ -101,9 +101,12 @@ void test_invalid_nested_config() {
     config.start_address = 300;
     const auto parsed = dmxwb::parse_mqtt_config_set_request(
         make_request("\"req-invalid-config\"", "7", config));
-    expect_true(!parsed.ok(), "invalid nested config rejected before transaction");
-    expect_true(parsed.request_id == "req-invalid-config", "nested config error keeps request_id for result correlation");
-    expect_true(parsed.error_code == "validation", "nested config validation error has stable error_code");
+    expect_true(parsed.ok(), "config/set parser accepts schema-valid proposal for transactional validation");
+    expect_true(parsed.ok() && parsed.request->request_id == "req-invalid-config",
+        "schema-valid proposal keeps request_id for Controller transaction result");
+    expect_true(parsed.ok() && dmxwb::validate_config(parsed.request->proposed_config).code ==
+        dmxwb::PersistenceErrorCode::validation,
+        "full config validation remains explicit after envelope/schema parse");
 }
 
 void test_result_publication() {

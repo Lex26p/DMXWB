@@ -1,7 +1,9 @@
 #include "dmxwb/persistence_runtime.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace dmxwb {
@@ -21,6 +23,36 @@ namespace {
         return make_runtime_file_error(PersistenceFileErrorCode::revision_conflict, error.message);
     }
     return make_runtime_file_error(PersistenceFileErrorCode::validation, error.message);
+}
+
+[[nodiscard]] AppConfig normalize_removed_fixture_memberships(
+    const AppConfig& current,
+    const AppConfig& proposed) {
+    AppConfig normalized = proposed;
+
+    std::unordered_set<Fixture::Id> proposed_ids;
+    proposed_ids.reserve(proposed.fixtures.size());
+    for (const auto& fixture : proposed.fixtures) {
+        proposed_ids.insert(fixture.id);
+    }
+
+    std::unordered_set<Fixture::Id> removed_ids;
+    removed_ids.reserve(current.fixtures.size());
+    for (const auto& fixture : current.fixtures) {
+        if (proposed_ids.find(fixture.id) == proposed_ids.end()) {
+            removed_ids.insert(fixture.id);
+        }
+    }
+    if (removed_ids.empty()) {
+        return normalized;
+    }
+
+    for (auto& group : normalized.groups) {
+        std::erase_if(group.members, [&removed_ids](Fixture::Id member_id) {
+            return removed_ids.find(member_id) != removed_ids.end();
+        });
+    }
+    return normalized;
 }
 
 }  // namespace
@@ -115,7 +147,8 @@ PersistenceFileResult<AppConfig> PersistenceRuntime::apply_config_transaction(
         return {{}, map_runtime_model_error(revision_error)};
     }
 
-    const auto config_error = validate_config(proposed_config);
+    const AppConfig normalized = normalize_removed_fixture_memberships(config_, proposed_config);
+    const auto config_error = validate_config(normalized);
     if (config_error) {
         return {{}, map_runtime_model_error(config_error)};
     }
@@ -126,9 +159,9 @@ PersistenceFileResult<AppConfig> PersistenceRuntime::apply_config_transaction(
             "configuration revision counter exhausted")};
     }
 
-    AppState next_state = reconcile_state_for_config(proposed_config);
+    AppState next_state = reconcile_state_for_config(normalized);
     FixtureCollection next_fixtures;
-    const auto restore_error = restore_fixture_collection(proposed_config, next_state, next_fixtures);
+    const auto restore_error = restore_fixture_collection(normalized, next_state, next_fixtures);
     if (restore_error) {
         return {{}, map_runtime_model_error(restore_error)};
     }
@@ -137,7 +170,7 @@ PersistenceFileResult<AppConfig> PersistenceRuntime::apply_config_transaction(
         config_path_,
         config_.revision,
         expected_revision,
-        proposed_config);
+        normalized);
     if (!committed.ok()) {
         return committed;
     }
