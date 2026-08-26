@@ -45,6 +45,7 @@ add_library(dmxwb_core STATIC
     src/dmx_snapshot.cpp
     src/dmx_test_pattern.cpp
     src/monotonic_clock.cpp
+    src/mqtt_contract.cpp
     src/persistence.cpp
     src/persistence_storage.cpp
     src/persistence_runtime.cpp
@@ -110,8 +111,18 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_persistence_runtime_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_persistence_runtime_tests)
 
+    add_executable(dmxwb_mqtt_contract_tests
+        tests/test_mqtt_contract.cpp
+    )
+
+    target_link_libraries(dmxwb_mqtt_contract_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_mqtt_contract_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_mqtt_contract_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_contract_tests)
+
     add_test(NAME dmxwb.unit COMMAND dmxwb_tests)
     add_test(NAME dmxwb.persistence COMMAND dmxwb_persistence_tests)
     add_test(NAME dmxwb.persistence_storage COMMAND dmxwb_persistence_storage_tests)
     add_test(NAME dmxwb.persistence_runtime COMMAND dmxwb_persistence_runtime_tests)
+    add_test(NAME dmxwb.mqtt_contract COMMAND dmxwb_mqtt_contract_tests)
 endif()
