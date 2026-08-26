@@ -1,0 +1,70 @@
+=== DMXWB DEV-008 Group + Scene hardware acceptance ===
+generated_utc: 2026-08-26T15:50:57Z
+source_head: f852119a522aea5c03b7af3d5186a3e0b7c129ab
+source_worktree: modified
+artifact_sha256: e623a1d5d29b06934d17403b4302a2d10a5813a43ca24d1064c35c26d0f3ca66
+target: root@10.200.200.1
+port: /dev/ttyRS485-1
+fixture_1_start_address: 1
+fixture_2_start_address: 5
+fixed_refresh_hz: 44
+
+--- target identity ---
+model: Wiren Board rev. 8.5.1 (T507)
+Linux wirenboard-A35WDYWM 6.8.0-wb160 #1 SMP Wed Jul  8 12:40:57 UTC 2026 aarch64 GNU/Linux
+RELEASE_NAME=wb-2606
+SUITE=stable
+TARGET=wb8/bullseye
+REPO_PREFIX=libmosquitto: 	libmosquitto.so.1 (libc6,AArch64) => /lib/aarch64-linux-gnu/libmosquitto.so.1
+runtime_pid: 204772
+retained_group_command_ignored: PASS
+retained_scene_lifecycle_ignored: PASS
+group_pair_red_user: PASS
+multiple_group_membership_user: PASS
+factual_group_power_overlap: PASS
+factual_group_power_all_off: PASS
+group_power_restore_user: PASS
+scene_create_mqtt_lifecycle: PASS
+scene_preapply_blue_user: PASS
+scene_atomic_apply_user: PASS
+scene_overwrite_mqtt_lifecycle: PASS
+scene_overwrite_apply_user: PASS
+scene_delete_mqtt_lifecycle: PASS
+scene_retained_cleanup: PASS
+scene_id_monotonic_no_reuse: PASS
+scene_2_retained_cleanup: PASS
+final_all_off_user: PASS
+DEV-007 MQTT acceptance runtime
+  config_path: /tmp/dmxwb-dev008-group-scene/config.json
+  state_path: /tmp/dmxwb-dev008-group-scene/state.json
+  dmx_port: /dev/ttyRS485-1
+  fixture_count: 2
+  source: mqtt
+runtime_started: PASS
+mqtt_successful_connections: 1
+mqtt_disconnects: 1
+mqtt_commands_accepted: 19
+mqtt_commands_ignored: 2
+mqtt_commands_rejected: 1
+mqtt_publish_failures: 0
+mqtt_callback_failures: 0
+runtime_commands_processed: 18
+runtime_commands_rejected: 1
+runtime_dmx_snapshots_published: 14
+runtime_dmx_publish_failures: 0
+runtime_full_republishes: 1
+runtime_mqtt_publish_failures: 0
+runtime_state_save_failures: 0
+state_flush_action: not_dirty
+dmx_frames_sent: 3594
+dmx_open_failures: 0
+dmx_send_failures: 0
+dmx_recoveries: 0
+dmx_missed_deadlines: 0
+dmx_active_refresh_hz: 44
+dmx_serial_open_after_stop: 0
+software_result: PASS
+dev008_runtime_diagnostics: PASS
+graceful_off_status: PASS
+dev008_group_scene_hardware_result: PASS
+=== DMXWB DEV-008 GROUP + SCENE HARDWARE PASS ===

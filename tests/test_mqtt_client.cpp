@@ -31,6 +31,10 @@ int main() {
         mosquitto_sub_topic_check(dmxwb::kMqttConfigSetTopic.data()) == MOSQ_ERR_SUCCESS,
         "config/set exact subscription is valid MQTT syntax");
 
+    expect_true(
+        mosquitto_sub_topic_check(dmxwb::kMqttSceneLifecycleSubscription.data()) == MOSQ_ERR_SUCCESS,
+        "Scene lifecycle subscription is valid MQTT syntax");
+
     expect_true(!client.running(), "MQTT client initially stopped");
     expect_true(!client.connected(), "MQTT client initially disconnected");
     expect_true(!client.take_full_republish_request(), "no reconnect republish before connection");

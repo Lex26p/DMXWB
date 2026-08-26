@@ -109,6 +109,40 @@ void test_invalid_nested_config() {
         "full config validation remains explicit after envelope/schema parse");
 }
 
+void test_scene_lifecycle_payloads() {
+    auto created = dmxwb::parse_mqtt_scene_create_request(
+        R"({"request_id":"scene-\u0031","name":"Вечер"})");
+    expect_true(created.ok(), "valid Scene create envelope parses");
+    expect_true(created.ok() && created.request->request_id == "scene-1",
+        "Scene create request_id JSON escape decoded");
+    expect_true(created.ok() && created.request->name == "Вечер",
+        "Scene create UTF-8 Name preserved");
+
+    auto action = dmxwb::parse_mqtt_scene_action_request(
+        R"({"request_id":"overwrite-1"})");
+    expect_true(action.ok() && action.request->request_id == "overwrite-1",
+        "Scene overwrite/delete action envelope parses");
+
+    created = dmxwb::parse_mqtt_scene_create_request(R"({"request_id":"missing-name"})");
+    expect_true(!created.ok() && created.error_code == "invalid_request" &&
+        created.request_id == "missing-name",
+        "Scene create requires Name and preserves request_id on envelope error");
+
+    created = dmxwb::parse_mqtt_scene_create_request(
+        R"({"request_id":"extra","name":"x","unknown":1})");
+    expect_true(!created.ok() && created.error_code == "invalid_request",
+        "Scene create rejects unknown fields");
+
+    action = dmxwb::parse_mqtt_scene_action_request(
+        R"({"request_id":"action","name":"not-allowed"})");
+    expect_true(!action.ok() && action.request_id == "action",
+        "Scene action accepts only request_id");
+
+    action = dmxwb::parse_mqtt_scene_action_request(R"({"request_id":""})");
+    expect_true(!action.ok() && action.error_code == "invalid_request",
+        "Scene lifecycle rejects empty request_id");
+}
+
 void test_result_publication() {
     const auto publication = dmxwb::build_mqtt_config_result_publication(
         "req-\"7\"",
@@ -135,6 +169,7 @@ int main() {
     test_escaped_request_id_and_field_order();
     test_invalid_envelopes();
     test_invalid_nested_config();
+    test_scene_lifecycle_payloads();
     test_result_publication();
 
     if (failures != 0) {

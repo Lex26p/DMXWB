@@ -29,6 +29,8 @@ inline constexpr std::string_view kMqttDeviceCommandSubscription =
 inline constexpr std::string_view kMqttConfigTopic = "/dmxwb/config";
 inline constexpr std::string_view kMqttConfigSetTopic = "/dmxwb/config/set";
 inline constexpr std::string_view kMqttConfigResultTopic = "/dmxwb/config/result";
+inline constexpr std::string_view kMqttSceneCreateTopic = "/dmxwb/scenes/create";
+inline constexpr std::string_view kMqttSceneLifecycleSubscription = "/dmxwb/scenes/#";
 inline constexpr std::string_view kMqttStateTopic = "/dmxwb/state";
 inline constexpr std::string_view kMqttStatusTopic = "/dmxwb/status";
 
@@ -55,6 +57,9 @@ enum class MqttCommandType {
     group_reset,
     scene_name,
     scene_apply,
+    scene_create,
+    scene_overwrite,
+    scene_delete,
 };
 
 struct MqttCommand final {

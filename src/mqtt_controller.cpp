@@ -71,6 +71,17 @@ void append_publications(
     return group;
 }
 
+[[nodiscard]] std::string_view scene_operation_error_code(std::string_view error) noexcept {
+    if (error.find("does not exist") != std::string_view::npos) {
+        return "not_found";
+    }
+    if (error.find("exhausted") != std::string_view::npos ||
+        error.find("invalid") != std::string_view::npos) {
+        return "validation";
+    }
+    return "operation_failed";
+}
+
 }  // namespace
 
 MqttController::MqttController(PersistenceRuntime& runtime)
@@ -114,6 +125,15 @@ MqttControllerUpdate MqttController::process_command(
     }
     if (command.type == MqttCommandType::scene_apply) {
         return apply_scene_apply(command.scene_id, now);
+    }
+    if (command.type == MqttCommandType::scene_create) {
+        return apply_scene_create(command.text, now);
+    }
+    if (command.type == MqttCommandType::scene_overwrite) {
+        return apply_scene_overwrite(command.scene_id, command.text, now);
+    }
+    if (command.type == MqttCommandType::scene_delete) {
+        return apply_scene_delete(command.scene_id, command.text, now);
     }
 
     auto* fixture = find_fixture(command.fixture_id);
@@ -413,6 +433,147 @@ MqttControllerUpdate MqttController::apply_scene_apply(
     }
     result.publications.push_back(MqttPublication{
         std::string{kMqttStateTopic}, serialize_state_json(runtime_.capture_state()), true});
+    return result;
+}
+
+MqttControllerUpdate MqttController::apply_scene_create(
+    std::string_view payload,
+    time_point now) {
+    const auto parsed = parse_mqtt_scene_create_request(payload);
+    if (!parsed.ok()) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            parsed.request_id,
+            false,
+            runtime_.config().revision,
+            parsed.error_code.empty() ? std::string_view{"invalid_request"} : std::string_view{parsed.error_code},
+            parsed.message));
+        result.error = parsed.message;
+        return result;
+    }
+
+    const auto request = *parsed.request;
+    const auto created = group_scene_.create_scene(request.name, now);
+    if (!created.ok) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            request.request_id,
+            false,
+            runtime_.config().revision,
+            scene_operation_error_code(created.error),
+            created.error));
+        result.error = created.error;
+        return result;
+    }
+
+    MqttControllerUpdate result;
+    result.applied = true;
+    const auto* scene = find_scene(created.scene_id);
+    if (scene != nullptr) {
+        append_publications(result.publications, build_scene_metadata_publications(*scene));
+        append_publications(result.publications, build_scene_state_publications(*scene));
+    }
+    result.publications.push_back(MqttPublication{
+        std::string{kMqttConfigTopic}, serialize_config_json(runtime_.config()), true});
+    result.publications.push_back(build_mqtt_config_result_publication(
+        request.request_id,
+        true,
+        runtime_.config().revision,
+        "none",
+        "scene created"));
+    return result;
+}
+
+MqttControllerUpdate MqttController::apply_scene_overwrite(
+    SceneId scene_id,
+    std::string_view payload,
+    time_point now) {
+    const auto parsed = parse_mqtt_scene_action_request(payload);
+    if (!parsed.ok()) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            parsed.request_id,
+            false,
+            runtime_.config().revision,
+            parsed.error_code.empty() ? std::string_view{"invalid_request"} : std::string_view{parsed.error_code},
+            parsed.message));
+        result.error = parsed.message;
+        return result;
+    }
+
+    const auto request = *parsed.request;
+    const auto overwritten = group_scene_.overwrite_scene(scene_id, now);
+    if (!overwritten.ok) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            request.request_id,
+            false,
+            runtime_.config().revision,
+            scene_operation_error_code(overwritten.error),
+            overwritten.error));
+        result.error = overwritten.error;
+        return result;
+    }
+
+    MqttControllerUpdate result;
+    result.applied = true;
+    if (const auto* scene = find_scene(scene_id); scene != nullptr) {
+        append_publications(result.publications, build_scene_metadata_publications(*scene));
+        append_publications(result.publications, build_scene_state_publications(*scene));
+    }
+    result.publications.push_back(MqttPublication{
+        std::string{kMqttConfigTopic}, serialize_config_json(runtime_.config()), true});
+    result.publications.push_back(build_mqtt_config_result_publication(
+        request.request_id,
+        true,
+        runtime_.config().revision,
+        "none",
+        "scene overwritten"));
+    return result;
+}
+
+MqttControllerUpdate MqttController::apply_scene_delete(
+    SceneId scene_id,
+    std::string_view payload,
+    time_point now) {
+    const auto parsed = parse_mqtt_scene_action_request(payload);
+    if (!parsed.ok()) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            parsed.request_id,
+            false,
+            runtime_.config().revision,
+            parsed.error_code.empty() ? std::string_view{"invalid_request"} : std::string_view{parsed.error_code},
+            parsed.message));
+        result.error = parsed.message;
+        return result;
+    }
+
+    const auto request = *parsed.request;
+    const auto deleted = group_scene_.delete_scene(scene_id, now);
+    if (!deleted.ok) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            request.request_id,
+            false,
+            runtime_.config().revision,
+            scene_operation_error_code(deleted.error),
+            deleted.error));
+        result.error = deleted.error;
+        return result;
+    }
+
+    MqttControllerUpdate result;
+    result.applied = true;
+    append_publications(result.publications, build_scene_retained_cleanup_publications(scene_id));
+    result.publications.push_back(MqttPublication{
+        std::string{kMqttConfigTopic}, serialize_config_json(runtime_.config()), true});
+    result.publications.push_back(build_mqtt_config_result_publication(
+        request.request_id,
+        true,
+        runtime_.config().revision,
+        "none",
+        "scene deleted"));
     return result;
 }
 

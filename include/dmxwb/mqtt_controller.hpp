@@ -64,6 +64,17 @@ private:
     [[nodiscard]] MqttControllerUpdate apply_scene_apply(
         SceneId scene_id,
         time_point now);
+    [[nodiscard]] MqttControllerUpdate apply_scene_create(
+        std::string_view payload,
+        time_point now);
+    [[nodiscard]] MqttControllerUpdate apply_scene_overwrite(
+        SceneId scene_id,
+        std::string_view payload,
+        time_point now);
+    [[nodiscard]] MqttControllerUpdate apply_scene_delete(
+        SceneId scene_id,
+        std::string_view payload,
+        time_point now);
     [[nodiscard]] MqttControllerUpdate apply_config_set(
         std::string_view payload,
         time_point now);

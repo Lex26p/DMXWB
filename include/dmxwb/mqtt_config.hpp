@@ -27,6 +27,37 @@ struct MqttConfigSetParseResult final {
     }
 };
 
+struct MqttSceneCreateRequest final {
+    std::string request_id;
+    std::string name;
+};
+
+struct MqttSceneActionRequest final {
+    std::string request_id;
+};
+
+struct MqttSceneCreateParseResult final {
+    std::optional<MqttSceneCreateRequest> request;
+    std::string request_id;
+    std::string error_code;
+    std::string message;
+
+    [[nodiscard]] bool ok() const noexcept {
+        return request.has_value() && error_code.empty();
+    }
+};
+
+struct MqttSceneActionParseResult final {
+    std::optional<MqttSceneActionRequest> request;
+    std::string request_id;
+    std::string error_code;
+    std::string message;
+
+    [[nodiscard]] bool ok() const noexcept {
+        return request.has_value() && error_code.empty();
+    }
+};
+
 // Payload schema:
 // {
 //   "request_id": "opaque caller token",
@@ -36,6 +67,13 @@ struct MqttConfigSetParseResult final {
 //
 // Parsing runs in Controller context, not in the libmosquitto callback.
 [[nodiscard]] MqttConfigSetParseResult parse_mqtt_config_set_request(std::string_view payload);
+
+// Scene lifecycle payloads are parsed in Controller context:
+// create:    {"request_id":"opaque token","name":"Scene name"}
+// overwrite: {"request_id":"opaque token"}
+// delete:    {"request_id":"opaque token"}
+[[nodiscard]] MqttSceneCreateParseResult parse_mqtt_scene_create_request(std::string_view payload);
+[[nodiscard]] MqttSceneActionParseResult parse_mqtt_scene_action_request(std::string_view payload);
 
 [[nodiscard]] std::string_view mqtt_config_file_error_code_name(
     PersistenceFileErrorCode code) noexcept;

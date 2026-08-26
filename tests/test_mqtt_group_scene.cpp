@@ -156,6 +156,24 @@ void test_group_scene_parser_contract() {
         "/devices/dmxwb_scene_200/controls/apply/on", "1", true);
     expect_true(parsed.status == dmxwb::MqttCommandParseStatus::ignored,
         "retained Scene Apply ignored");
+
+    parsed = dmxwb::parse_mqtt_command(
+        dmxwb::kMqttSceneCreateTopic,
+        R"({"request_id":"create-1","name":"Scene"})",
+        false);
+    expect_true(parsed.accepted() && parsed.command->type == dmxwb::MqttCommandType::scene_create,
+        "Scene lifecycle create topic enqueued as raw Controller command");
+
+    parsed = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/200/overwrite", R"({"request_id":"overwrite-1"})", false);
+    expect_true(parsed.accepted() && parsed.command->type == dmxwb::MqttCommandType::scene_overwrite &&
+        parsed.command->scene_id == 200,
+        "Scene lifecycle overwrite stable ID parsed");
+
+    parsed = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/200/delete", R"({"request_id":"delete-1"})", true);
+    expect_true(parsed.status == dmxwb::MqttCommandParseStatus::ignored,
+        "retained Scene lifecycle command ignored");
 }
 
 void test_group_scene_publication_contract() {
@@ -338,6 +356,97 @@ void test_names_and_full_republish() {
 }
 
 
+void test_scene_lifecycle_controller_contract() {
+    TempDirectory temp;
+    if (!temp.valid()) return;
+    const auto config = make_config();
+    expect_true(prepare_runtime_files(temp, config), "Scene lifecycle runtime files prepared");
+
+    dmxwb::PersistenceRuntime runtime{temp.file("config.json"), temp.file("state.json")};
+    dmxwb::MqttController controller{runtime};
+    const auto t0 = dmxwb::PersistenceRuntime::time_point{};
+
+    auto fixture_color = dmxwb::parse_mqtt_command(
+        "/devices/dmxwb_fixture_10/controls/color/on", "12;34;56", false);
+    (void)controller.process_command(*fixture_color.command, t0);
+    auto fixture_power = dmxwb::parse_mqtt_command(
+        "/devices/dmxwb_fixture_10/controls/power/on", "1", false);
+    (void)controller.process_command(*fixture_power.command, t0 + std::chrono::milliseconds{1});
+
+    auto lifecycle = dmxwb::parse_mqtt_command(
+        dmxwb::kMqttSceneCreateTopic,
+        R"({"request_id":"create-201","name":"Created scene"})",
+        false);
+    auto update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{2});
+    expect_true(update.applied && update.snapshot == nullptr && runtime.config().revision == 10,
+        "Scene create lifecycle atomically persists config without DMX snapshot");
+    const auto created = std::find_if(
+        runtime.config().scenes.begin(), runtime.config().scenes.end(),
+        [](const dmxwb::SceneConfigRecord& scene) { return scene.id == 201; });
+    expect_true(created != runtime.config().scenes.end() && created->name == "Created scene",
+        "Scene create allocates monotonic stable ID and Name");
+    expect_true(created != runtime.config().scenes.end() && created->fixtures.size() == 3 &&
+        created->fixtures.front().rgbw == dmxwb::RgbwValues{12, 34, 56, 0} &&
+        created->fixtures.front().requested_power,
+        "Scene create captures current Fixture logical state");
+    const auto* result_pub = find_publication(update.publications, dmxwb::kMqttConfigResultTopic);
+    expect_true(result_pub != nullptr && !result_pub->retained &&
+        result_pub->payload.find("\"request_id\":\"create-201\"") != std::string::npos &&
+        result_pub->payload.find("\"ok\":true") != std::string::npos,
+        "Scene create reuses non-retained config/result correlation contract");
+    expect_true(find_publication(update.publications, "/devices/dmxwb_scene_201/meta") != nullptr,
+        "Scene create publishes retained Scene device metadata");
+
+    fixture_color = dmxwb::parse_mqtt_command(
+        "/devices/dmxwb_fixture_10/controls/color/on", "0;0;255", false);
+    (void)controller.process_command(*fixture_color.command, t0 + std::chrono::milliseconds{3});
+    lifecycle = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/201/overwrite", R"({"request_id":"overwrite-201"})", false);
+    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{4});
+    expect_true(update.applied && update.snapshot == nullptr && runtime.config().revision == 11,
+        "Scene overwrite lifecycle persists current state without physical output change");
+    const auto overwritten = std::find_if(
+        runtime.config().scenes.begin(), runtime.config().scenes.end(),
+        [](const dmxwb::SceneConfigRecord& scene) { return scene.id == 201; });
+    expect_true(overwritten != runtime.config().scenes.end() &&
+        overwritten->fixtures.front().rgbw == dmxwb::RgbwValues{0, 0, 255, 0},
+        "Scene overwrite replaces saved snapshot with current Fixture state");
+
+    fixture_color = dmxwb::parse_mqtt_command(
+        "/devices/dmxwb_fixture_10/controls/color/on", "255;0;0", false);
+    (void)controller.process_command(*fixture_color.command, t0 + std::chrono::milliseconds{5});
+    auto apply = dmxwb::parse_mqtt_command(
+        "/devices/dmxwb_scene_201/controls/apply/on", "1", false);
+    update = controller.process_command(*apply.command, t0 + std::chrono::milliseconds{6});
+    expect_true(update.applied && update.snapshot != nullptr,
+        "lifecycle-created Scene applies through one whole Controller snapshot");
+    expect_true(find_publication(update.publications,
+        "/devices/dmxwb_fixture_10/controls/color") != nullptr,
+        "lifecycle-created Scene Apply publishes factual Fixture state");
+
+    lifecycle = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/201/delete", R"({"request_id":"delete-201"})", false);
+    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{7});
+    expect_true(update.applied && update.snapshot == nullptr && runtime.config().revision == 12,
+        "Scene delete lifecycle atomically removes config without DMX mutation");
+    expect_true(std::none_of(
+        runtime.config().scenes.begin(), runtime.config().scenes.end(),
+        [](const dmxwb::SceneConfigRecord& scene) { return scene.id == 201; }),
+        "Scene delete removes stable ID from config");
+    const auto* cleanup = find_publication(update.publications, "/devices/dmxwb_scene_201/meta");
+    expect_true(cleanup != nullptr && cleanup->retained && cleanup->payload.empty(),
+        "Scene lifecycle delete clears retained Scene device topics");
+
+    lifecycle = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/999/delete", R"({"request_id":"missing-999"})", false);
+    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{8});
+    result_pub = find_publication(update.publications, dmxwb::kMqttConfigResultTopic);
+    expect_true(!update.applied && result_pub != nullptr &&
+        result_pub->payload.find("\"request_id\":\"missing-999\"") != std::string::npos &&
+        result_pub->payload.find("\"error_code\":\"not_found\"") != std::string::npos,
+        "missing Scene lifecycle operation returns correlated not_found result");
+}
+
 void test_config_removes_group_scene_retained_topics() {
     TempDirectory temp;
     if (!temp.valid()) return;
@@ -372,12 +481,13 @@ int main() {
     test_group_controller_and_factual_overlap_power();
     test_empty_group_and_scene_atomic_apply();
     test_names_and_full_republish();
+    test_scene_lifecycle_controller_contract();
     test_config_removes_group_scene_retained_topics();
 
     if (failures == 0) {
-        std::cout << "DMXWB DEV-008B1 MQTT Group/Scene tests: PASS\n";
+        std::cout << "DMXWB DEV-008B2 MQTT Group/Scene tests: PASS\n";
         return 0;
     }
-    std::cerr << "DMXWB DEV-008B1 MQTT Group/Scene tests: " << failures << " failure(s)\n";
+    std::cerr << "DMXWB DEV-008B2 MQTT Group/Scene tests: " << failures << " failure(s)\n";
     return 1;
 }

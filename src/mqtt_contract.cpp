@@ -17,6 +17,9 @@ constexpr std::string_view kGroupPrefix = "/devices/dmxwb_group_";
 constexpr std::string_view kScenePrefix = "/devices/dmxwb_scene_";
 constexpr std::string_view kControlsMarker = "/controls/";
 constexpr std::string_view kCommandSuffix = "/on";
+constexpr std::string_view kSceneLifecyclePrefix = "/dmxwb/scenes/";
+constexpr std::string_view kSceneOverwriteSuffix = "/overwrite";
+constexpr std::string_view kSceneDeleteSuffix = "/delete";
 
 enum class DeviceKind {
     fixture,
@@ -290,6 +293,49 @@ MqttCommandParseResult parse_mqtt_command(
     std::string_view topic,
     std::string_view payload,
     bool retained) {
+    if (topic == kMqttSceneCreateTopic) {
+        if (retained) {
+            return ignored_result();
+        }
+        MqttCommand command;
+        command.type = MqttCommandType::scene_create;
+        command.text = std::string{payload};
+        return accepted_result(std::move(command));
+    }
+
+    if (topic.starts_with(kSceneLifecyclePrefix)) {
+        MqttCommandType lifecycle_type = MqttCommandType::scene_overwrite;
+        std::string_view suffix;
+        if (topic.ends_with(kSceneOverwriteSuffix)) {
+            suffix = kSceneOverwriteSuffix;
+        } else if (topic.ends_with(kSceneDeleteSuffix)) {
+            lifecycle_type = MqttCommandType::scene_delete;
+            suffix = kSceneDeleteSuffix;
+        } else {
+            return ignored_result();
+        }
+        if (retained) {
+            return ignored_result();
+        }
+        const auto id_begin = kSceneLifecyclePrefix.size();
+        if (topic.size() <= id_begin + suffix.size()) {
+            return ignored_result();
+        }
+        const auto id_text = topic.substr(id_begin, topic.size() - id_begin - suffix.size());
+        if (id_text.find('/') != std::string_view::npos) {
+            return ignored_result();
+        }
+        std::uint64_t scene_id = 0;
+        if (!parse_u64_decimal(id_text, scene_id) || scene_id == 0) {
+            return rejected_result("scene lifecycle topic contains invalid stable ID");
+        }
+        MqttCommand command;
+        command.type = lifecycle_type;
+        command.scene_id = scene_id;
+        command.text = std::string{payload};
+        return accepted_result(std::move(command));
+    }
+
     if (topic == kMqttConfigSetTopic) {
         if (retained) {
             return ignored_result();

@@ -509,6 +509,103 @@ void append_utf8(std::string& output, std::uint32_t codepoint) {
     return true;
 }
 
+[[nodiscard]] bool parse_scene_lifecycle_slices(
+    std::string_view input,
+    bool require_name,
+    JsonSlice& request_id,
+    JsonSlice& name,
+    std::string& error) {
+    std::size_t position = 0;
+    skip_whitespace(input, position);
+    if (position >= input.size() || input[position] != '{') {
+        error = "scene lifecycle root must be a JSON object";
+        return false;
+    }
+    ++position;
+    skip_whitespace(input, position);
+    if (position < input.size() && input[position] == '}') {
+        error = "scene lifecycle object is empty";
+        return false;
+    }
+
+    while (position < input.size()) {
+        std::string key;
+        if (!parse_key_at(input, position, key, error)) {
+            return false;
+        }
+        skip_whitespace(input, position);
+        if (position >= input.size() || input[position] != ':') {
+            error = "expected ':' after scene lifecycle field name";
+            return false;
+        }
+        ++position;
+        skip_whitespace(input, position);
+        const std::size_t value_begin = position;
+        if (!scan_json_value(input, position, 1U, error)) {
+            return false;
+        }
+        const std::size_t value_end = position;
+
+        JsonSlice* destination = nullptr;
+        if (key == "request_id") {
+            destination = &request_id;
+        } else if (require_name && key == "name") {
+            destination = &name;
+        } else {
+            error = "scene lifecycle contains an unknown field: " + key;
+            return false;
+        }
+        if (destination->present) {
+            error = "scene lifecycle contains a duplicate field: " + key;
+            return false;
+        }
+        *destination = JsonSlice{value_begin, value_end, true};
+
+        skip_whitespace(input, position);
+        if (position < input.size() && input[position] == '}') {
+            ++position;
+            break;
+        }
+        if (position >= input.size() || input[position] != ',') {
+            error = "expected ',' or '}' in scene lifecycle object";
+            return false;
+        }
+        ++position;
+        skip_whitespace(input, position);
+    }
+
+    skip_whitespace(input, position);
+    if (position != input.size()) {
+        error = "trailing data after scene lifecycle object";
+        return false;
+    }
+    if (!request_id.present || (require_name && !name.present)) {
+        error = require_name
+            ? "scene create requires request_id and name"
+            : "scene action requires request_id";
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool decode_valid_request_id(
+    std::string_view payload,
+    const JsonSlice& slice,
+    std::string& request_id,
+    std::string& error) {
+    if (!decode_json_string(
+            payload.substr(slice.begin, slice.end - slice.begin),
+            request_id,
+            error) ||
+        request_id.empty() || request_id.size() > kMaxRequestIdBytes || !is_valid_utf8(request_id)) {
+        if (error.empty()) {
+            error = "request_id must be a non-empty valid UTF-8 string up to 256 bytes";
+        }
+        return false;
+    }
+    return true;
+}
+
 [[nodiscard]] bool parse_u64_json_integer(std::string_view raw, std::uint64_t& output) noexcept {
     if (raw.empty() || raw.front() == '-' || raw.find_first_of(".eE+") != std::string_view::npos) {
         return false;
@@ -637,6 +734,82 @@ MqttConfigSetParseResult parse_mqtt_config_set_request(std::string_view payload)
         std::move(request_id),
         expected_revision,
         std::move(*parsed_config.value)};
+    return result;
+}
+
+MqttSceneCreateParseResult parse_mqtt_scene_create_request(std::string_view payload) {
+    MqttSceneCreateParseResult result;
+    JsonSlice request_id_slice;
+    JsonSlice name_slice;
+    std::string error;
+    if (!parse_scene_lifecycle_slices(payload, true, request_id_slice, name_slice, error)) {
+        if (request_id_slice.present) {
+            std::string ignored_error;
+            (void)decode_json_string(
+                payload.substr(request_id_slice.begin, request_id_slice.end - request_id_slice.begin),
+                result.request_id,
+                ignored_error);
+            if (!is_valid_utf8(result.request_id)) {
+                result.request_id.clear();
+            }
+        }
+        result.error_code = "invalid_request";
+        result.message = std::move(error);
+        return result;
+    }
+
+    std::string request_id;
+    if (!decode_valid_request_id(payload, request_id_slice, request_id, error)) {
+        result.error_code = "invalid_request";
+        result.message = std::move(error);
+        return result;
+    }
+    result.request_id = request_id;
+
+    std::string name;
+    if (!decode_json_string(
+            payload.substr(name_slice.begin, name_slice.end - name_slice.begin),
+            name,
+            error) ||
+        !is_valid_utf8(name)) {
+        result.error_code = "invalid_request";
+        result.message = error.empty() ? "scene name must be valid UTF-8 text" : std::move(error);
+        return result;
+    }
+
+    result.request = MqttSceneCreateRequest{std::move(request_id), std::move(name)};
+    return result;
+}
+
+MqttSceneActionParseResult parse_mqtt_scene_action_request(std::string_view payload) {
+    MqttSceneActionParseResult result;
+    JsonSlice request_id_slice;
+    JsonSlice unused_name_slice;
+    std::string error;
+    if (!parse_scene_lifecycle_slices(payload, false, request_id_slice, unused_name_slice, error)) {
+        if (request_id_slice.present) {
+            std::string ignored_error;
+            (void)decode_json_string(
+                payload.substr(request_id_slice.begin, request_id_slice.end - request_id_slice.begin),
+                result.request_id,
+                ignored_error);
+            if (!is_valid_utf8(result.request_id)) {
+                result.request_id.clear();
+            }
+        }
+        result.error_code = "invalid_request";
+        result.message = std::move(error);
+        return result;
+    }
+
+    std::string request_id;
+    if (!decode_valid_request_id(payload, request_id_slice, request_id, error)) {
+        result.error_code = "invalid_request";
+        result.message = std::move(error);
+        return result;
+    }
+    result.request_id = request_id;
+    result.request = MqttSceneActionRequest{std::move(request_id)};
     return result;
 }
 
