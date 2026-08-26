@@ -1,6 +1,6 @@
 # DMXWB
 
-DMXWB — C++20-приложение, расширяющее контроллеры **серии Wiren Board 8 (WB8)** физическим DMX512 и будущим Art-Net/WB MQTT управлением.
+DMXWB — C++20-приложение, расширяющее контроллеры **серии Wiren Board 8 (WB8)** физическим DMX512, WB MQTT-интеграцией и будущим Art-Net управлением.
 
 DMXWB не заменяет Wiren Board и использует штатную Linux/MQTT/systemd/web инфраструктуру согласно `docs/TECHNICAL_SPEC.md`. Production artifacts собираются на ноутбуке; Docker не используется.
 
@@ -9,53 +9,186 @@ DMXWB не заменяет Wiren Board и использует штатную L
 Последний завершённый engineering gate:
 
 ```text
-DEV-006 — configuration and persistence
-80be996746ae87c99563e852c63c0c03a7aa37d1
+DEV-007 — MQTT system and Fixture integration
+a23f0d6628c8f18ecbb51be0a8a5b02b770a4bd8
 ```
 
 Подтверждены:
 
-- RGBW Fixture model и physical addressing из DEV-005;
-- канонические `config.json` / `state.json`;
-- persistence schema `version = 1` и config `revision`;
-- monotonic `fixture/group/scene` ID counters;
-- JSON parse/serialize и полная validation до apply;
-- восстановление stable Fixture IDs и logical state после restart;
-- atomic config/state write через temporary file + `fsync` + `rename`;
-- atomic config transaction с `expected_revision`;
-- corrupt config -> safe defaults без перезаписи повреждённого файла;
-- corrupt state -> рабочий config + safe Fixture state;
-- state dirty scheduling: 2 s debounce и максимум 10 s continuous dirty interval;
-- forced dirty-state flush для graceful shutdown;
-- persistence runtime отделён от `DmxOutput` и не выполняет file I/O в DMX thread.
+- physical DMX512 output через встроенный RS-485 WB8;
+- fixed physical profile `<=300 slots / 44 Hz`;
+- RGBW Fixture model, stable IDs и whole DMX snapshots;
+- canonical config/state persistence из DEV-006;
+- `libmosquitto` transport для localhost broker `127.0.0.1:1883`;
+- короткий MQTT callback: parse/enqueue без serial/file I/O;
+- FIFO Controller command processing;
+- system device `dmxwb` с `status` и `source`;
+- Fixture MQTT controls `name/power/red/green/blue/color/brightness/temperature/reset`;
+- Fixture metadata `hidden=true`, чтобы они не засоряли штатный WB web;
+- retained state/metadata и non-retained command contract;
+- retained `/on` commands игнорируются;
+- reconnect/resubscribe + full retained republish;
+- retained `status=off` при graceful stop и MQTT LWT `off`;
+- disk -> C++ model -> MQTT остаётся source-of-truth направлением;
+- MQTT loss/recovery не останавливает continuous physical DMX;
+- `/dmxwb/config/set` + `/dmxwb/config/result`;
+- config request envelope с `request_id`, `expected_revision` и полной proposed config;
+- config API переиспользует DEV-006 atomic transaction/validation;
+- stale/invalid config не меняет рабочую disk/in-memory model;
+- удалённые Fixture IDs очищают старые retained MQTT topics.
 
-DEV-006 host/integration validation:
+DEV-007 host validation:
 
 ```text
 dmxwb.unit                 PASS
 dmxwb.persistence          PASS
 dmxwb.persistence_storage  PASS
 dmxwb.persistence_runtime  PASS
+dmxwb.mqtt_contract        PASS
+dmxwb.mqtt_config          PASS
+dmxwb.mqtt_controller      PASS
+dmxwb.mqtt_client          PASS
+dmxwb.mqtt_runtime         PASS
+
+100% tests passed
+0 tests failed out of 9
 ```
 
-Bullseye ARM64 compatibility build:
+Bullseye ARM64 compatibility:
 
 ```text
-Compiler:       aarch64-linux-gnu-g++ 10.2.1
-Architecture:   AArch64
-Max glibc:      GLIBC_2.17
-Dependencies:   libpthread.so.0, libm.so.6, libc.so.6
-Artifact SHA256:
+Compiler:              aarch64-linux-gnu-g++ 10.2.1
+Cross libmosquitto:    2.0.11
+Architecture:          AArch64
+Max glibc:             GLIBC_2.17
+```
+
+Текущий diagnostic executable:
+
+```text
+artifacts/wb8-bullseye-arm64/dmxwb
+SHA256:
 01b9d3e4026f639135e1dea50b64cdba7c8150e95fe2b7c6193a633b3486e4d2
 ```
 
-Artifact SHA совпадает с DEV-006A/006B build: текущий diagnostic `main.cpp` ещё не вызывает `PersistenceRuntime`, поэтому linker не включает этот runtime API в executable. Сам persistence runtime подтверждён отдельным C++ integration test и Bullseye GCC10 compile.
+Он по-прежнему не является production MQTT daemon entrypoint, поэтому linker не включает MQTT runtime в этот diagnostic binary.
+
+Отдельный DEV-007 acceptance runtime:
+
+```text
+artifacts/wb8-bullseye-arm64/dmxwb-mqtt-acceptance
+NEEDED: libmosquitto.so.1
+Latest DEV-007C cross-build SHA256:
+ba7363035897265295cac3d3af00dd0ebe6abd86ad5efa33f278acec1767b6b8
+```
+
+Физический DEV-007B hardware acceptance был выполнен на WB8 до DEV-007C и зафиксирован в:
+
+```text
+docs/DEV007_MQTT_HARDWARE_REPORT.txt
+=== DMXWB DEV-007 MQTT + FIXTURE HARDWARE PASS ===
+```
 
 Следующий gate:
 
 ```text
-DEV-007 — MQTT system and Fixture integration
+DEV-008 — Groups and Scenes
 ```
+
+## MQTT contract
+
+Broker на WB8:
+
+```text
+127.0.0.1:1883
+```
+
+Системное устройство:
+
+```text
+/devices/dmxwb/controls/status
+/devices/dmxwb/controls/source
+/devices/dmxwb/controls/source/on
+```
+
+Fixture device:
+
+```text
+/devices/dmxwb_fixture_<stable_id>/
+```
+
+Controls:
+
+```text
+name
+power
+red
+green
+blue
+color
+brightness
+temperature
+reset
+```
+
+State и metadata публикуются retained. Команды `/on` принимаются только non-retained; retained commands игнорируются.
+
+После reconnect выполняются resubscribe и полная retained републикация актуального состояния. При broker loss физический `DmxOutput` продолжает работать независимо от MQTT network loop.
+
+MQTT callback только разбирает transport message и кладёт команду в очередь. Из callback не выполняются:
+
+```text
+Fixture model mutation
+persistence file I/O
+serial I/O
+DmxOutput operations
+```
+
+Эти действия выполняются Controller/runtime context.
+
+## MQTT configuration API
+
+Каноническая config state:
+
+```text
+/dmxwb/config
+```
+
+Изменение:
+
+```text
+/dmxwb/config/set
+```
+
+Минимальный envelope:
+
+```json
+{
+  "request_id": "opaque-token",
+  "expected_revision": 7,
+  "config": {
+    "...": "complete canonical AppConfig"
+  }
+}
+```
+
+Result:
+
+```text
+/dmxwb/config/result
+```
+
+Содержит:
+
+```text
+request_id
+ok
+revision
+error_code
+message
+```
+
+Новый config проходит тот же DEV-006 validation/atomic storage path. Ошибка schema/version/revision/disk commit не заменяет уже работающую configuration.
 
 ## Физический DMX profile
 
@@ -97,7 +230,7 @@ Power ON        -> saved state восстанавливается через т�
 Reset           -> ON, Brightness 100, Temperature 100, RGBW 255/255/255/255
 ```
 
-Stable Fixture ID не зависит от DMX-адреса или Name, не переиспользуется после удаления и с DEV-006 переживает restart через persistence.
+Stable Fixture ID не зависит от DMX-адреса или Name, не переиспользуется после удаления и переживает restart через persistence.
 
 ## Persistence
 
@@ -112,7 +245,7 @@ Stable Fixture ID не зависит от DMX-адреса или Name, не п
 
 Новый config сначала полностью парсится и валидируется. При transaction проверяется `expected_revision`; рабочая in-memory configuration заменяется только после успешного atomic disk commit.
 
-Runtime state записывается асинхронным persistence-контекстом:
+Runtime state записывается:
 
 ```text
 last change + 2 s
@@ -139,13 +272,11 @@ first dirty + 10 s
 -> RTS/DE OFF
 ```
 
-При close/stop/error исходная `serial_rs485` конфигурация восстанавливается. Legacy DEV-003 transport остаётся низкоуровневым compatibility fallback, но подтверждённый production profile `<=300 slots / 44 Hz` основан на fast path.
+При close/stop/error исходная `serial_rs485` конфигурация восстанавливается. Legacy DEV-003 transport остаётся compatibility fallback, но подтверждённый production profile `<=300 slots / 44 Hz` основан на fast path.
 
 Custom kernel patch на acceptance WB8 не требуется.
 
 ## Art-Net contract, зафиксированный до DEV-009
-
-По актуальной Art-Net 4 specification:
 
 - UDP 6454, IPv4;
 - ArtDmx data length — even `2..512`;
@@ -162,12 +293,10 @@ Custom kernel patch на acceptance WB8 не требуется.
 
 ## Инженерные reference-документы
 
-Отдельные reusable-документы сохраняют технические знания проекта и могут использоваться как база для других разработок:
+- [`docs/reference/WB8_RS485_DMX.md`](docs/reference/WB8_RS485_DMX.md) — physical DMX512 через встроенный RS-485 WB8;
+- [`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md) — Art-Net 4 integration contract.
 
-- [`docs/reference/WB8_RS485_DMX.md`](docs/reference/WB8_RS485_DMX.md) — исследование и реализация физического DMX512 через встроенный RS-485 WB8: transport, DE/BREAK/TEMT, timing, failure cases и hardware acceptance;
-- [`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md) — Art-Net 4 integration contract: ArtDmx, discovery/subscription, ArtSync, Sequence, conflict, Hold Last и связь network cadence с physical DMX.
-
-`docs/reference/` не заменяет `TECHNICAL_SPEC.md`: reference объясняет инженерные решения и исследования, а нормативные требования конкретно к DMXWB остаются в проектных документах.
+`docs/reference/` не заменяет `TECHNICAL_SPEC.md`.
 
 ## Hardware acceptance target
 
@@ -180,9 +309,10 @@ Kernel:           6.8.0-wb160
 glibc:            2.31
 DMX port:         /dev/ttyRS485-1 -> ttyS2
 Build compiler:   Bullseye aarch64-linux-gnu-g++ 10.2.1
+MQTT broker:      127.0.0.1:1883
 ```
 
-На текущем стенде `/dev/ttyRS485-1` постоянно отключён в WB Serial Device Driver Configuration; hardware helpers считают порт освобождённым и не должны каждый раз спрашивать `s/p/q`.
+На текущем стенде `/dev/ttyRS485-1` постоянно отключён в WB Serial Device Driver Configuration; hardware helpers считают порт освобождённым и не останавливают `wb-mqtt-serial` без отдельной необходимости.
 
 ## Build/test среда
 
@@ -212,9 +342,15 @@ bash tools/wb8/build_bullseye_arm64.sh
 
 ## Что ещё не реализовано
 
-До соответствующих roadmap gates намеренно отсутствуют MQTT runtime/integration, полноценные Groups/Scenes operations, Art-Net runtime/parser, production systemd service и Web UI.
+До соответствующих roadmap gates намеренно отсутствуют:
 
-Persistence data model/storage/runtime реализованы и integration-confirmed в DEV-006. Production Controller/MQTT wiring начинается в DEV-007.
+- полноценная Group/Scene runtime logic и MQTT contract;
+- Art-Net runtime/parser/source integration;
+- собственный Web UI;
+- production systemd daemon lifecycle и offline deployment bundle;
+- final 24h acceptance.
+
+MQTT system + Fixture integration и structural config API реализованы и подтверждены в DEV-007. Отдельный `dmxwb-mqtt-acceptance` остаётся engineering acceptance runtime, а production daemon/service wiring выполняется позже по roadmap.
 
 ## Источник истины
 
