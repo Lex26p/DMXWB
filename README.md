@@ -9,43 +9,52 @@ DMXWB не заменяет Wiren Board и использует штатную L
 Последний завершённый engineering gate:
 
 ```text
-DEV-005 — Fixture RGBW model and addressing
-8a6d6212179a85b880a5eed291afee30bffa6ba0
+DEV-006 — configuration and persistence
+80be996746ae87c99563e852c63c0c03a7aa37d1
 ```
 
 Подтверждены:
 
-- RGBW Fixture model со stable monotonic ID и Name;
-- requested/factual Power;
-- RGB/Color takeover с `W=0`;
-- Temperature `0..100` -> `RGB=255`, `W=0..255`;
-- Brightness scaling всех четырёх каналов;
-- Power OFF/ON restore;
-- Reset;
-- Fixture Count / Start Address;
-- sequential 4-channel RGBW addressing;
-- physical Fixture range только до slot 300;
-- immutable whole `DmxSnapshot` из actual Fixture state;
-- физический WB8 smoke через `FixtureCollection -> DmxSnapshot -> DmxOutput -> RS-485`.
+- RGBW Fixture model и physical addressing из DEV-005;
+- канонические `config.json` / `state.json`;
+- persistence schema `version = 1` и config `revision`;
+- monotonic `fixture/group/scene` ID counters;
+- JSON parse/serialize и полная validation до apply;
+- восстановление stable Fixture IDs и logical state после restart;
+- atomic config/state write через temporary file + `fsync` + `rename`;
+- atomic config transaction с `expected_revision`;
+- corrupt config -> safe defaults без перезаписи повреждённого файла;
+- corrupt state -> рабочий config + safe Fixture state;
+- state dirty scheduling: 2 s debounce и максимум 10 s continuous dirty interval;
+- forced dirty-state flush для graceful shutdown;
+- persistence runtime отделён от `DmxOutput` и не выполняет file I/O в DMX thread.
 
-DEV-005 ARM64 artifact:
-
-```text
-SHA256: ef595ec643c419254c6a9395a1c4f47c7b456e5e697872cbe217c5ab075ca30b
-```
-
-Hardware marker:
+DEV-006 host/integration validation:
 
 ```text
-=== DMXWB DEV-005 FIXTURE RGBW HARDWARE PASS ===
+dmxwb.unit                 PASS
+dmxwb.persistence          PASS
+dmxwb.persistence_storage  PASS
+dmxwb.persistence_runtime  PASS
 ```
 
-Report: `docs/DEV005_FIXTURE_HARDWARE_REPORT.txt`.
+Bullseye ARM64 compatibility build:
+
+```text
+Compiler:       aarch64-linux-gnu-g++ 10.2.1
+Architecture:   AArch64
+Max glibc:      GLIBC_2.17
+Dependencies:   libpthread.so.0, libm.so.6, libc.so.6
+Artifact SHA256:
+01b9d3e4026f639135e1dea50b64cdba7c8150e95fe2b7c6193a633b3486e4d2
+```
+
+Artifact SHA совпадает с DEV-006A/006B build: текущий diagnostic `main.cpp` ещё не вызывает `PersistenceRuntime`, поэтому linker не включает этот runtime API в executable. Сам persistence runtime подтверждён отдельным C++ integration test и Bullseye GCC10 compile.
 
 Следующий gate:
 
 ```text
-DEV-006 — configuration and persistence
+DEV-007 — MQTT system and Fixture integration
 ```
 
 ## Физический DMX profile
@@ -88,7 +97,30 @@ Power ON        -> saved state восстанавливается через т�
 Reset           -> ON, Brightness 100, Temperature 100, RGBW 255/255/255/255
 ```
 
-Stable Fixture ID не зависит от DMX-адреса или Name и не переиспользуется после удаления.
+Stable Fixture ID не зависит от DMX-адреса или Name, не переиспользуется после удаления и с DEV-006 переживает restart через persistence.
+
+## Persistence
+
+Канонические runtime paths:
+
+```text
+/etc/dmxwb/config.json
+/var/lib/dmxwb/state.json
+```
+
+`config.json` хранит структурную конфигурацию, revision и monotonic ID counters. `state.json` хранит Source и сохранённое logical Fixture state.
+
+Новый config сначала полностью парсится и валидируется. При transaction проверяется `expected_revision`; рабочая in-memory configuration заменяется только после успешного atomic disk commit.
+
+Runtime state записывается асинхронным persistence-контекстом:
+
+```text
+last change + 2 s
+OR
+first dirty + 10 s
+```
+
+Ошибка записи оставляет state dirty для следующей попытки. Graceful shutdown использует forced flush.
 
 ## Production DMX transport
 
@@ -180,9 +212,9 @@ bash tools/wb8/build_bullseye_arm64.sh
 
 ## Что ещё не реализовано
 
-До соответствующих roadmap gates намеренно отсутствуют persistence, MQTT runtime, Groups/Scenes, Art-Net runtime/parser, production systemd service и Web UI.
+До соответствующих roadmap gates намеренно отсутствуют MQTT runtime/integration, полноценные Groups/Scenes operations, Art-Net runtime/parser, production systemd service и Web UI.
 
-Fixture model и её physical mapping реализованы и hardware-confirmed в DEV-005; persistence для stable IDs/state начинается в DEV-006.
+Persistence data model/storage/runtime реализованы и integration-confirmed в DEV-006. Production Controller/MQTT wiring начинается в DEV-007.
 
 ## Источник истины
 

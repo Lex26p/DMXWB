@@ -1,172 +1,208 @@
 # PROJECT_STATE
 
-**Last updated:** 2026-08-24
+**Last updated:** 2026-08-26
 
 ## Repository base
 
 ```text
-8a6d6212179a85b880a5eed291afee30bffa6ba0
-Add Fixture model hardware acceptance DEV-005
+80be996746ae87c99563e852c63c0c03a7aa37d1
+Integrate DEV-006 persistence runtime
 ```
 
 ## Last confirmed engineering PASS
 
 ```text
-DEV-005 — Fixture RGBW model and addressing
+DEV-006 — configuration and persistence
 ```
 
-DEV-005 подтверждён Linux unit tests, Bullseye ARM64 target build и физическим hardware smoke на реальном WB8 через production `DmxOutput`.
+DEV-006 подтверждён native Linux unit/integration tests, strict warnings-as-errors, дополнительными Clang/sanitizer checks при подготовке handoff и Bullseye ARM64 GCC10 compatibility build. Hardware/RS-485 acceptance для этого gate не требовался: persistence не меняет уже подтверждённый physical DMX transport.
 
-## DEV-005 result
+## DEV-006 result
 
-### Fixture model
+### Canonical persistence model
 
-Реализованы и проверены:
+Реализованы два разных канонических документа:
 
-- stable monotonic Fixture ID;
-- изменяемый `Name`;
-- `requested_power` и factual Power;
+```text
+/etc/dmxwb/config.json
+/var/lib/dmxwb/state.json
+```
+
+`config.json` содержит структурную конфигурацию:
+
+- schema `version = 1`;
+- config `revision`;
+- DMX port;
+- Art-Net universe;
+- ordered Fixture records с stable ID/Name;
+- Group records с member Fixture IDs;
+- Scene records с Fixture snapshots;
+- monotonic `next_fixture_id`, `next_group_id`, `next_scene_id`.
+
+`state.json` содержит runtime logical state:
+
+- schema `version = 1`;
+- Source (`mqtt` / `artnet`);
+- Fixture stable ID;
+- `requested_power`;
 - сохранённые `R/G/B/W`;
-- `Brightness 0..100`;
-- `Temperature 0..100`;
-- actual RGBW после Power/Brightness;
-- individual RGB и Color takeover с `W = 0`;
-- Temperature -> `RGB = 255`, `W = round(percent * 255 / 100)`;
-- Power OFF без разрушения сохранённого состояния;
-- Power ON restore;
-- Reset -> ON, Brightness 100, Temperature 100, RGBW 255/255/255/255.
+- Brightness;
+- Temperature.
 
-### Fixture collection and addressing
+Art-Net transient DMX buffer в logical state persistence не входит.
+
+### Parse / serialize / validation
 
 Подтверждены:
 
-- `Fixture Count = 0` разрешён;
-- каждый Fixture занимает ровно 4 последовательных канала RGBW;
-- `fixture_start = start_address + index * 4`;
-- последний физический адрес не превышает `300`;
-- Start Address не меняет Fixture ID/Name/logical state;
-- при уменьшении Count удаляются последние Fixture;
-- удалённые ID не переиспользуются;
-- whole immutable `DmxSnapshot` строится полностью из actual Fixture state.
+- JSON round trip config/state;
+- strict schema/type validation;
+- unsupported version reject;
+- duplicate/invalid stable IDs reject;
+- Fixture addressing validation до physical slot 300;
+- Group member должен ссылаться на существующий Fixture;
+- Scene Fixture snapshot должен ссылаться на существующий Fixture;
+- monotonic next-ID counters должны быть больше существующих IDs;
+- revision mismatch отклоняется до disk/in-memory apply;
+- invalid proposed config не заменяет рабочую конфигурацию.
 
-Граничные проверки:
+JSON implementation compact и не добавляет новой runtime library dependency.
+
+### Stable IDs and restart restore
+
+`Fixture` / `FixtureCollection` получили контролируемый restore path:
+
+- persisted Fixture ID восстанавливается без перенумерации;
+- persisted `next_fixture_id` восстанавливается;
+- удалённые ID после restart не становятся доступными для reuse;
+- Name, Start Address и logical Fixture state восстанавливаются;
+- Source восстанавливается;
+- новый Fixture при config transaction получает safe default runtime state, если сохранённого state для его ID нет.
+
+Integration test создаёт реальные временные `config.json/state.json`, меняет state, сохраняет его и создаёт новый `PersistenceRuntime` как restart simulation. После restart подтверждаются те же stable IDs, Source и Fixture state.
+
+### Atomic file storage
+
+Atomic write реализован как:
 
 ```text
-Start 1,   Count 75 -> slots 1..300   PASS
-Start 2,   Count 75 -> last slot 301  REJECT
-Start 297, Count 1  -> slots 297..300 PASS
-Start 298, Count 1  -> last slot 301  REJECT
+serialize in memory
+-> write <target>.tmp
+-> fsync temporary file
+-> close
+-> rename temporary file over target
 ```
 
-### Host validation
+Подтверждено:
 
-DEV-005A:
+- старый корректный target остаётся рабочим до успешного rename;
+- simulated replace/write failure не заменяет старый файл;
+- temporary file очищается после failure;
+- failed state save не очищает dirty flag;
+- последующий retry может сохранить state.
+
+### Dirty state scheduling
+
+`StatePersistenceManager`:
 
 ```text
-Native Linux build + warnings-as-errors: PASS
-CTest:                                    PASS
-Fixture algorithm/addressing tests:       PASS
+debounce delay       = 2 s after last change
+max dirty interval   = 10 s after first unsaved change
 ```
 
-Unit tests покрывают initial state, RGB takeover, Color, Temperature 0/50/100, Brightness, Power restore, factual Power при Brightness=0, Reset, physical addressing boundaries, ID reuse protection и immutable whole-snapshot rebuild.
+При непрерывных изменениях deadline ограничивается первым dirty timestamp + 10 s.
 
-### WB8 target build
+`flush()` выполняет forced save dirty state; этот forced-save contract проверен integration test. Подключение реального signal/shutdown lifecycle к production Controller выполняется на этапе формирования полноценного daemon lifecycle, без переноса file I/O в DMX thread.
 
-DEV-005B production artifact:
+Persistence file I/O находится в отдельном persistence/runtime API и не вызывается из `DmxOutput` thread.
+
+### Corrupt / missing file behavior
+
+Config load failure или corrupt/invalid `config.json`:
+
+```text
+DMX Port          = /dev/ttyRS485-1
+Art-Net Universe  = 0
+Fixture Count     = 0
+Start Address     = 1
+```
+
+Повреждённый config автоматически не перезаписывается.
+
+State load failure или corrupt/invalid `state.json`:
+
+- valid config остаётся рабочим;
+- Source/Fixture runtime state создаются из safe defaults;
+- ошибка остаётся доступна через startup status.
+
+### Atomic config transaction
+
+`PersistenceRuntime::apply_config_transaction()`:
+
+1. проверяет `expected_revision`;
+2. полностью валидирует proposed config;
+3. строит complete replacement Fixture model/state;
+4. atomically commit-ит новый `config.json`;
+5. только после успешного disk commit заменяет рабочую in-memory configuration;
+6. отмечает state dirty для последующей записи согласованного `state.json`.
+
+Stale revision и disk failure не меняют рабочую in-memory configuration.
+
+## DEV-006 validation
+
+Последний user-run native Linux test:
+
+```text
+dmxwb.unit                 PASS
+dmxwb.persistence          PASS
+dmxwb.persistence_storage  PASS
+dmxwb.persistence_runtime  PASS
+
+100% tests passed
+0 tests failed out of 4
+```
+
+Подготовительный handoff также проверял новый persistence code с GNU/Clang warnings-as-errors и ASan/UBSan.
+
+### WB8 target compatibility build
 
 ```text
 Target: /mnt/c/Projects/DMXWB/artifacts/wb8-bullseye-arm64/dmxwb
 Architecture: ARM aarch64
 Compiler: Bullseye aarch64-linux-gnu-g++ 10.2.1
 Maximum required glibc: GLIBC_2.17
-Dynamic dependencies: libpthread.so.0, libc.so.6
-SHA256: ef595ec643c419254c6a9395a1c4f47c7b456e5e697872cbe217c5ab075ca30b
+Dynamic dependencies: libpthread.so.0, libm.so.6, libc.so.6
+SHA256: 01b9d3e4026f639135e1dea50b64cdba7c8150e95fe2b7c6193a633b3486e4d2
 ```
 
-### DEV-005B hardware acceptance
+Artifact SHA не изменился между DEV-006A/B/runtime: текущий diagnostic `main.cpp` не вызывает `PersistenceRuntime`, поэтому linker не включает этот API в executable. Bullseye build при этом компилирует весь `dmxwb_core`, включая persistence source files; runtime behavior доказан отдельным C++ integration test.
 
-Acceptance прошёл через новую production цепочку:
+## DEV-005 physical baseline remains confirmed
 
-```text
-Fixture
-  -> FixtureCollection::build_snapshot()
-  -> DmxSnapshot
-  -> DmxOutput
-  -> DmxTransport
-  -> /dev/ttyRS485-1
-  -> physical RGBW fixture
-```
+Persistence gate не менял physical DMX architecture. Остаются подтверждены:
 
-Старый diagnostic pattern generator не использовался для проверяемых Fixture states.
+- `kDmxMaxChannels = 512` — core/network data capacity;
+- `kDmxPhysicalMaxSlots = 300` — physical product limit;
+- `kDmxOutputRefreshHz = 44` — fixed production cadence;
+- whole snapshot only at physical frame boundary;
+- serial error -> close/reopen/recover latest snapshot;
+- fast WB8 transport = manual DE + hardware BREAK + physical TEMT;
+- Fixture -> FixtureCollection -> DmxSnapshot -> DmxOutput -> DmxTransport -> real RGBW fixture hardware chain.
 
-Проверенные состояния:
-
-```text
-red              -> 255/0/0/0         PASS
- green           -> 0/255/0/0         PASS
- blue            -> 0/0/255/0         PASS
- temperature-0   -> 255/255/255/0     PASS
- temperature-50  -> 255/255/255/128   PASS
- temperature-100 -> 255/255/255/255   PASS
- brightness-50   -> 127/127/127/127   PASS
-power-off         -> 0/0/0/0           PASS
-power-on-restore -> 127/127/127/127   PASS
-reset             -> 255/255/255/255   PASS
-final all-off    -> 0/0/0/0           PASS
-```
-
-Для каждого шага:
-
-```text
-snapshot_check:        PASS
-open_failures:         0
-send_failures:         0
-recoveries:            0
-missed_deadlines:      0
-active_refresh_hz:     44
-serial_open_after_stop: 0
-user observation:      PASS
-```
-
-Final marker:
-
-```text
-=== DMXWB DEV-005 FIXTURE RGBW HARDWARE PASS ===
-```
-
-Report:
+Последний physical Fixture report:
 
 ```text
 docs/DEV005_FIXTURE_HARDWARE_REPORT.txt
+=== DMXWB DEV-005 FIXTURE RGBW HARDWARE PASS ===
 ```
-
-Hardware acceptance выполнялся при `source_head = 5dc3b31e5c62011122b8246527045e3b19cb3418` с modified worktree, содержащим DEV-005B CLI/helper. Эти принятые изменения и hardware report затем зафиксированы commit `8a6d6212179a85b880a5eed291afee30bffa6ba0`.
-
-**Confirmed:** DEV-005 model и physical output соответствуют текущему `TECHNICAL_SPEC.md` и критериям `ROADMAP.md`.
 
 ## Current engineering gate
 
 ```text
-DEV-006 — configuration and persistence
+DEV-007 — MQTT system and Fixture integration
 ```
 
-DEV-006 должен добавить каноническую конфигурацию и runtime state без file I/O в DMX output thread.
-
-Ближайший scope:
-
-- `/etc/dmxwb/config.json`;
-- `/var/lib/dmxwb/state.json`;
-- version/revision;
-- monotonic fixture/group/scene counters;
-- parse/serialize и full validation before apply;
-- atomic tmp + fsync + rename;
-- dirty state, 2 s debounce, max 10 s dirty interval;
-- forced save on graceful shutdown;
-- safe defaults и corrupt state/config behavior;
-- stable IDs survive restart;
-- atomic config transaction.
-
-MQTT transport в DEV-006 не добавляется.
+Roadmap PASS target для DEV-007 — host/WB8 MQTT + DMX integration. Persistence уже является disk source of truth; retained MQTT не должен использоваться для восстановления модели.
 
 ## Build/test policy
 
@@ -191,51 +227,30 @@ Kernel:           6.8.0-wb160
 glibc:            2.31
 DMX port:         /dev/ttyRS485-1 -> ttyS2
 Fixture RGBW:     start channel 1
-Latest DEV-005 artifact SHA256:
-                  ef595ec643c419254c6a9395a1c4f47c7b456e5e697872cbe217c5ab075ca30b
 ```
 
 На текущем стенде `/dev/ttyRS485-1` постоянно отключён в WB Serial Device Driver Configuration. Hardware helpers считают порт освобождённым, не спрашивают `s/p/q` и не останавливают `wb-mqtt-serial` без отдельной необходимости.
 
-## Confirmed physical output core
-
-- `kDmxMaxChannels = 512` — core/network data capacity;
-- `kDmxPhysicalMaxSlots = 300` — physical product limit;
-- `kDmxOutputRefreshHz = 44` — fixed production cadence;
-- physical mailbox отвергает snapshot >300;
-- absolute 44 Hz frame-start grid;
-- no FIFO; frame boundary использует latest whole snapshot;
-- serial error -> close -> periodic reopen -> current snapshot;
-- fast WB8 transport = manual DE + hardware BREAK + physical TEMT;
-- legacy DEV-003 path остаётся low-level compatibility fallback.
-
-DEV-005 подтвердил, что application-level Fixture snapshot корректно проходит через этот production output core до реального RGBW fixture.
-
 ## Art-Net decisions confirmed from current official specification
 
-Перед DEV-009 перепроверена Art-Net 4 Protocol Release V1.4, Document Revision 1.4dp (23/10/2025).
-
-Decided:
+Перед DEV-009 уже зафиксированы:
 
 - one Art-Net Port-Address/output;
 - ArtDmx Length even `2..512`;
 - persistent `artnet_state[512]`;
 - physical output uses only channels `1..300`;
-- ArtDmx arrival never directly starts serial TX;
-- no ArtDmx FIFO; latest committed snapshot wins;
+- latest committed snapshot wins, без FIFO;
 - `ArtPollReply.RefreshRate = 44`;
-- output universe remains advertised/subscribed even when Source=MQTT;
-- ArtSync: async startup, staging in sync mode, release on next matching ArtSync, 4 s timeout back to async;
+- ArtSync staging/release + 4 s async fallback;
 - source identity = source IP + `Physical`;
-- Sequence 0 disables ordering; non-zero Sequence protects against stale/out-of-order updates without waiting for missing packets;
-- multiple source policy = `CONFLICT`, no HTP/LTP merge;
-- 3 s LOST diagnostic/source-lock timeout with Hold Last and no automatic source switch;
-- parser accepts required minimum packet size and ignores valid trailing extension bytes;
-- Port-Address 0 remains only a DMXWB compatibility exception;
-- production distribution requires registered Art-Net OEM Code and required Art-Net credit.
+- Sequence 0 disables ordering;
+- multiple source policy = `CONFLICT`, no merge;
+- 3 s LOST diagnostic/source-lock timeout with Hold Last;
+- Port-Address 0 — DMXWB compatibility exception;
+- production release требует registered Art-Net OEM Code и required credit.
 
 ## Next
 
 ```text
-DEV-006 — configuration and persistence
+DEV-007 — MQTT system and Fixture integration
 ```
