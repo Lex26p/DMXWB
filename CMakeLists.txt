@@ -46,6 +46,7 @@ add_library(dmxwb_core STATIC
     src/dmx_test_pattern.cpp
     src/monotonic_clock.cpp
     src/persistence.cpp
+    src/persistence_storage.cpp
     src/dmx_transport_linux.cpp
 )
 
@@ -90,6 +91,16 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_persistence_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_persistence_tests)
 
+    add_executable(dmxwb_persistence_storage_tests
+        tests/test_persistence_storage.cpp
+    )
+
+    target_link_libraries(dmxwb_persistence_storage_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_persistence_storage_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_persistence_storage_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_persistence_storage_tests)
+
     add_test(NAME dmxwb.unit COMMAND dmxwb_tests)
     add_test(NAME dmxwb.persistence COMMAND dmxwb_persistence_tests)
+    add_test(NAME dmxwb.persistence_storage COMMAND dmxwb_persistence_storage_tests)
 endif()
