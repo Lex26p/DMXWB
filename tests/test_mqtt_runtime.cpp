@@ -122,6 +122,25 @@ void test_runtime_orchestration() {
     expect_true(runtime.diagnostics().full_republishes == 1, "reconnect triggers full retained republish");
     expect_true(!transport.batches_.empty(), "full republish produced MQTT batch");
 
+    const auto batches_before_invalid_config = transport.batches_.size();
+    auto invalid_config = dmxwb::parse_mqtt_command(dmxwb::kMqttConfigSetTopic, "{}", false);
+    expect_true(invalid_config.accepted(), "malformed config payload is queued for Controller result");
+    if (invalid_config.accepted()) queue.push(*invalid_config.command);
+    runtime.step(dmxwb::PersistenceRuntime::time_point{} + std::chrono::microseconds{1});
+    expect_true(runtime.diagnostics().commands_rejected == 1, "invalid config transaction counted as rejected command");
+    expect_true(transport.batches_.size() == batches_before_invalid_config + 1,
+        "rejected config transaction still publishes result batch");
+    if (transport.batches_.size() > batches_before_invalid_config) {
+        bool found_result = false;
+        for (const auto& publication : transport.batches_.back()) {
+            if (publication.topic == dmxwb::kMqttConfigResultTopic && !publication.retained &&
+                publication.payload.find("\"ok\":false") != std::string::npos) {
+                found_result = true;
+            }
+        }
+        expect_true(found_result, "rejected config transaction publishes non-retained failure result");
+    }
+
     auto power = dmxwb::parse_mqtt_command(
         "/devices/dmxwb_fixture_10/controls/power/on", "1", false);
     expect_true(power.accepted(), "runtime Power command parses");

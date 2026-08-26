@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dmxwb/mqtt_config.hpp"
 #include "dmxwb/mqtt_contract.hpp"
 #include "dmxwb/persistence_runtime.hpp"
 
@@ -45,6 +46,9 @@ private:
     [[nodiscard]] MqttControllerUpdate apply_fixture_name(
         Fixture::Id fixture_id,
         std::string name,
+        time_point now);
+    [[nodiscard]] MqttControllerUpdate apply_config_set(
+        std::string_view payload,
         time_point now);
     [[nodiscard]] std::shared_ptr<const DmxSnapshot> build_next_snapshot();
     [[nodiscard]] std::vector<MqttPublication> build_state_confirmation(

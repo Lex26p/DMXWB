@@ -61,6 +61,19 @@ private:
     return config;
 }
 
+[[nodiscard]] std::string make_config_set_payload(
+    std::string_view request_id,
+    std::uint64_t expected_revision,
+    const dmxwb::AppConfig& config) {
+    std::string payload{"{\"request_id\":\""};
+    payload += request_id;
+    payload += "\",\"expected_revision\":" + std::to_string(expected_revision);
+    payload += ",\"config\":";
+    payload += dmxwb::serialize_config_json(config);
+    payload += '}';
+    return payload;
+}
+
 [[nodiscard]] bool contains_publication(
     const std::vector<dmxwb::MqttPublication>& publications,
     std::string_view topic,
@@ -258,6 +271,151 @@ void test_source_and_full_republish() {
     expect_true(all_retained, "full reconnect metadata/state publications are retained");
 }
 
+void test_config_set_atomic_success_and_restart() {
+    TempDirectory temp;
+    if (!temp.valid()) return;
+    const auto config_path = temp.file("config.json");
+    const auto state_path = temp.file("state.json");
+    const auto config = make_config();
+    auto state = dmxwb::make_default_state(config);
+    state.fixtures[0].requested_power = true;
+    state.fixtures[0].rgbw = dmxwb::RgbwValues{101, 102, 103, 0};
+    state.fixtures[0].brightness = 40;
+    (void)dmxwb::write_persistence_text_file_atomic(config_path, dmxwb::serialize_config_json(config));
+    (void)dmxwb::save_state_file_atomic(state_path, state, config);
+
+    dmxwb::PersistenceRuntime runtime{config_path, state_path};
+    dmxwb::MqttController controller{runtime};
+
+    auto proposed = config;
+    proposed.start_address = 5;
+    proposed.fixture_count = 2;
+    proposed.fixtures.push_back(dmxwb::FixtureConfigRecord{11, "Fixture 11"});
+    proposed.id_counters.next_fixture_id = 12;
+
+    const auto payload = make_config_set_payload("cfg-ok", 3, proposed);
+    const auto parsed = dmxwb::parse_mqtt_command(dmxwb::kMqttConfigSetTopic, payload, false);
+    expect_true(parsed.accepted(), "config/set success command reaches Controller queue contract");
+    if (!parsed.accepted()) return;
+
+    const auto update = controller.process_command(*parsed.command, dmxwb::PersistenceRuntime::time_point{});
+    expect_true(update.applied, "valid config/set atomically applies");
+    expect_true(runtime.config().revision == 4, "config/set increments canonical revision once");
+    expect_true(runtime.config().start_address == 5 && runtime.config().fixture_count == 2,
+        "config/set replaces structural Fixture configuration");
+    expect_true(update.snapshot != nullptr && update.snapshot->slot_count() == 12,
+        "config/set builds one whole snapshot for new addressing");
+    if (update.snapshot) {
+        expect_true(update.snapshot->channel(5) == std::optional<std::uint8_t>{40},
+            "existing Fixture state survives structural config transaction");
+        expect_true(update.snapshot->channel(9) == std::optional<std::uint8_t>{0},
+            "new Fixture starts physically OFF");
+    }
+
+    const auto* config_pub = find_publication(update.publications, dmxwb::kMqttConfigTopic);
+    const auto* result_pub = find_publication(update.publications, dmxwb::kMqttConfigResultTopic);
+    expect_true(config_pub != nullptr && config_pub->retained,
+        "successful config/set republishes retained canonical config");
+    expect_true(result_pub != nullptr && !result_pub->retained,
+        "successful config/set publishes non-retained result");
+    expect_true(result_pub != nullptr && result_pub->payload.find("\"request_id\":\"cfg-ok\"") != std::string::npos &&
+        result_pub->payload.find("\"ok\":true") != std::string::npos &&
+        result_pub->payload.find("\"revision\":4") != std::string::npos,
+        "successful config result correlates request and committed revision");
+
+    const auto flush = runtime.flush_state();
+    expect_true(flush.ok(), "config/set reconciled state flush succeeds");
+    dmxwb::PersistenceRuntime restarted{config_path, state_path};
+    expect_true(restarted.config().revision == 4 && restarted.config().fixture_count == 2,
+        "config/set canonical config survives restart");
+    expect_true(restarted.fixture_at(0) != nullptr && restarted.fixture_at(0)->saved_rgbw().red == 101,
+        "existing stable-ID state survives restart after config/set");
+    expect_true(restarted.fixture_at(1) != nullptr && !restarted.fixture_at(1)->requested_power(),
+        "new stable-ID Fixture safe default survives restart");
+}
+
+void test_config_set_revision_conflict_and_validation_reject() {
+    TempDirectory temp;
+    if (!temp.valid()) return;
+    const auto config_path = temp.file("config.json");
+    const auto state_path = temp.file("state.json");
+    const auto config = make_config();
+    const auto state = dmxwb::make_default_state(config);
+    (void)dmxwb::write_persistence_text_file_atomic(config_path, dmxwb::serialize_config_json(config));
+    (void)dmxwb::save_state_file_atomic(state_path, state, config);
+
+    dmxwb::PersistenceRuntime runtime{config_path, state_path};
+    dmxwb::MqttController controller{runtime};
+
+    auto proposed = config;
+    proposed.start_address = 9;
+    proposed.revision = 2;
+    auto stale = dmxwb::parse_mqtt_command(
+        dmxwb::kMqttConfigSetTopic,
+        make_config_set_payload("cfg-stale", 2, proposed),
+        false);
+    const auto stale_update = controller.process_command(*stale.command, dmxwb::PersistenceRuntime::time_point{});
+    expect_true(!stale_update.applied, "stale expected_revision rejects whole config transaction");
+    expect_true(runtime.config().revision == 3 && runtime.config().start_address == 1,
+        "revision conflict leaves in-memory config unchanged");
+    const auto* stale_result = find_publication(stale_update.publications, dmxwb::kMqttConfigResultTopic);
+    expect_true(stale_result != nullptr && !stale_result->retained &&
+        stale_result->payload.find("revision_conflict") != std::string::npos,
+        "revision conflict returns non-retained correlated result");
+
+    auto invalid = config;
+    invalid.start_address = 300;
+    auto invalid_command = dmxwb::parse_mqtt_command(
+        dmxwb::kMqttConfigSetTopic,
+        make_config_set_payload("cfg-invalid", 3, invalid),
+        false);
+    const auto invalid_update = controller.process_command(*invalid_command.command, dmxwb::PersistenceRuntime::time_point{});
+    expect_true(!invalid_update.applied, "invalid nested config rejected before disk mutation");
+    expect_true(runtime.config().revision == 3 && runtime.config().start_address == 1,
+        "invalid config leaves working config unchanged");
+    const auto* invalid_result = find_publication(invalid_update.publications, dmxwb::kMqttConfigResultTopic);
+    expect_true(invalid_result != nullptr && invalid_result->payload.find("\"request_id\":\"cfg-invalid\"") != std::string::npos &&
+        invalid_result->payload.find("\"ok\":false") != std::string::npos,
+        "invalid config returns request-correlated failure result");
+
+    dmxwb::PersistenceRuntime restarted{config_path, state_path};
+    expect_true(restarted.config().revision == 3 && restarted.config().start_address == 1,
+        "rejected config/set never replaced working disk config");
+}
+
+void test_config_set_fixture_removal_cleans_retained_topics() {
+    TempDirectory temp;
+    if (!temp.valid()) return;
+    const auto config_path = temp.file("config.json");
+    const auto state_path = temp.file("state.json");
+    auto config = make_config();
+    config.fixture_count = 2;
+    config.fixtures.push_back(dmxwb::FixtureConfigRecord{11, "Fixture 11"});
+    config.id_counters.next_fixture_id = 12;
+    const auto state = dmxwb::make_default_state(config);
+    (void)dmxwb::write_persistence_text_file_atomic(config_path, dmxwb::serialize_config_json(config));
+    (void)dmxwb::save_state_file_atomic(state_path, state, config);
+
+    dmxwb::PersistenceRuntime runtime{config_path, state_path};
+    dmxwb::MqttController controller{runtime};
+    auto proposed = config;
+    proposed.fixture_count = 1;
+    proposed.fixtures.pop_back();
+
+    auto command = dmxwb::parse_mqtt_command(
+        dmxwb::kMqttConfigSetTopic,
+        make_config_set_payload("cfg-remove", 3, proposed),
+        false);
+    const auto update = controller.process_command(*command.command, dmxwb::PersistenceRuntime::time_point{});
+    expect_true(update.applied, "Fixture removal config/set applies");
+    const auto* removed_meta = find_publication(update.publications, "/devices/dmxwb_fixture_11/meta");
+    const auto* removed_power = find_publication(update.publications, "/devices/dmxwb_fixture_11/controls/power");
+    expect_true(removed_meta != nullptr && removed_meta->retained && removed_meta->payload.empty(),
+        "removed Fixture device metadata retained topic is cleared");
+    expect_true(removed_power != nullptr && removed_power->retained && removed_power->payload.empty(),
+        "removed Fixture retained state topic is cleared");
+}
+
 void test_unknown_fixture_does_not_mutate_model() {
     TempDirectory temp;
     if (!temp.valid()) return;
@@ -286,6 +444,9 @@ int main() {
     test_factual_brightness_and_power_off();
     test_name_uses_atomic_config_transaction_and_survives_restart();
     test_source_and_full_republish();
+    test_config_set_atomic_success_and_restart();
+    test_config_set_revision_conflict_and_validation_reject();
+    test_config_set_fixture_removal_cleans_retained_topics();
     test_unknown_fixture_does_not_mutate_model();
 
     if (failures != 0) {

@@ -26,6 +26,8 @@ inline constexpr std::string_view kMqttDeviceCommandSubscription =
     "/devices/+/controls/+/on";
 
 inline constexpr std::string_view kMqttConfigTopic = "/dmxwb/config";
+inline constexpr std::string_view kMqttConfigSetTopic = "/dmxwb/config/set";
+inline constexpr std::string_view kMqttConfigResultTopic = "/dmxwb/config/result";
 inline constexpr std::string_view kMqttStateTopic = "/dmxwb/state";
 inline constexpr std::string_view kMqttStatusTopic = "/dmxwb/status";
 
@@ -33,6 +35,7 @@ inline constexpr std::string_view kMqttStatusTopic = "/dmxwb/status";
 // преобразует libmosquitto callbacks в эти команды и передаст их Controller.
 enum class MqttCommandType {
     set_source,
+    set_config,
     fixture_name,
     fixture_power,
     fixture_red,
@@ -114,6 +117,7 @@ enum class MqttApplicationStatus {
 
 [[nodiscard]] std::vector<MqttPublication> build_fixture_metadata_publications(const Fixture& fixture);
 [[nodiscard]] std::vector<MqttPublication> build_fixture_state_publications(const Fixture& fixture);
+[[nodiscard]] std::vector<MqttPublication> build_fixture_retained_cleanup_publications(Fixture::Id fixture_id);
 
 // Internal/web snapshots уже сериализованы владельцами данных. Эта функция
 // только сопоставляет канонические payload с retained MQTT topics.

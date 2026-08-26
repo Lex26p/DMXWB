@@ -49,6 +49,9 @@ void MqttRuntimeCoordinator::step(time_point now) {
         auto update = controller_.process_command(*command, now);
         if (!update.applied) {
             ++diagnostics_.commands_rejected;
+            if (transport_.connected() && !update.publications.empty()) {
+                publish_batch(update.publications, false);
+            }
             continue;
         }
 

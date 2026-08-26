@@ -219,6 +219,16 @@ MqttCommandParseResult parse_mqtt_command(
     std::string_view topic,
     std::string_view payload,
     bool retained) {
+    if (topic == kMqttConfigSetTopic) {
+        if (retained) {
+            return ignored_result();
+        }
+        MqttCommand command;
+        command.type = MqttCommandType::set_config;
+        command.text = std::string{payload};
+        return accepted_result(std::move(command));
+    }
+
     if (topic == kMqttSystemSourceCommandTopic) {
         if (retained) {
             return ignored_result();
@@ -448,6 +458,22 @@ std::vector<MqttPublication> build_fixture_state_publications(const Fixture& fix
         output,
         fixture_control_topic(fixture.id(), "temperature"),
         std::to_string(fixture.temperature()));
+    return output;
+}
+
+std::vector<MqttPublication> build_fixture_retained_cleanup_publications(Fixture::Id fixture_id) {
+    std::vector<MqttPublication> output;
+    const auto prefix = fixture_device_prefix(fixture_id);
+    append_publication(output, prefix + "/meta", "");
+
+    constexpr std::string_view controls[] = {
+        "name", "power", "red", "green", "blue", "color", "brightness", "temperature", "reset"};
+    for (const auto control : controls) {
+        append_publication(output, prefix + "/controls/" + std::string{control} + "/meta", "");
+        if (control != "reset") {
+            append_publication(output, prefix + "/controls/" + std::string{control}, "");
+        }
+    }
     return output;
 }
 

@@ -165,6 +165,34 @@ void test_color_name_reset_and_retained() {
         "retained Fixture /on command ignored before execution");
 }
 
+void test_config_set_command_contract() {
+    const std::string payload{"{\"request_id\":\"r1\",\"expected_revision\":1,\"config\":{}}"};
+    auto parsed = dmxwb::parse_mqtt_command(dmxwb::kMqttConfigSetTopic, payload, false);
+    expect_true(
+        parsed.accepted() && parsed.command->type == dmxwb::MqttCommandType::set_config,
+        "non-retained /dmxwb/config/set is queued as Controller command");
+    expect_true(parsed.accepted() && parsed.command->text == payload,
+        "config/set callback preserves raw payload for Controller parsing");
+
+    parsed = dmxwb::parse_mqtt_command(dmxwb::kMqttConfigSetTopic, payload, true);
+    expect_true(parsed.status == dmxwb::MqttCommandParseStatus::ignored,
+        "retained /dmxwb/config/set is ignored before Controller");
+}
+
+void test_fixture_retained_cleanup() {
+    const auto publications = dmxwb::build_fixture_retained_cleanup_publications(42);
+    expect_true(publications.size() == 18, "Fixture removal clears device/control metadata and retained states");
+    bool all_retained_empty = true;
+    for (const auto& publication : publications) {
+        all_retained_empty = all_retained_empty && publication.retained && publication.payload.empty();
+    }
+    expect_true(all_retained_empty, "Fixture cleanup uses empty retained MQTT publications");
+    expect_true(find_publication(publications, "/devices/dmxwb_fixture_42/meta") != nullptr,
+        "Fixture cleanup removes device metadata");
+    expect_true(find_publication(publications, "/devices/dmxwb_fixture_42/controls/reset/meta") != nullptr,
+        "Fixture cleanup removes stateless Reset metadata");
+}
+
 void test_command_queue_fifo() {
     dmxwb::MqttCommandQueue queue;
     dmxwb::MqttCommand first;
@@ -272,6 +300,8 @@ int main() {
     test_source_command_parser();
     test_fixture_command_parser();
     test_color_name_reset_and_retained();
+    test_config_set_command_contract();
+    test_fixture_retained_cleanup();
     test_command_queue_fifo();
     test_system_publications();
     test_fixture_metadata_hidden();

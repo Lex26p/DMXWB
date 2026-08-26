@@ -245,9 +245,18 @@ void MqttClient::handle_connect(struct mosquitto* mosq, int rc) {
         nullptr,
         kMqttDeviceCommandSubscription.data(),
         kMqttQos);
-    if (command_result != MOSQ_ERR_SUCCESS) {
+    const int config_result = mosquitto_subscribe(
+        mosq,
+        nullptr,
+        kMqttConfigSetTopic.data(),
+        kMqttQos);
+    if (command_result != MOSQ_ERR_SUCCESS || config_result != MOSQ_ERR_SUCCESS) {
         connected_.store(false, std::memory_order_release);
-        set_error(std::string{"MQTT command subscribe: "} + mosquitto_strerror(command_result));
+        if (command_result != MOSQ_ERR_SUCCESS) {
+            set_error(std::string{"MQTT command subscribe: "} + mosquitto_strerror(command_result));
+        } else {
+            set_error(std::string{"MQTT config subscribe: "} + mosquitto_strerror(config_result));
+        }
         (void)mosquitto_disconnect(mosq);
         return;
     }

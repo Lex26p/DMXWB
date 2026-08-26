@@ -27,6 +27,9 @@ int main() {
     expect_true(
         mosquitto_sub_topic_check("/devices/dmxwb_fixture_+/controls/+/on") != MOSQ_ERR_SUCCESS,
         "partial-level wildcard regression is rejected by libmosquitto");
+    expect_true(
+        mosquitto_sub_topic_check(dmxwb::kMqttConfigSetTopic.data()) == MOSQ_ERR_SUCCESS,
+        "config/set exact subscription is valid MQTT syntax");
 
     expect_true(!client.running(), "MQTT client initially stopped");
     expect_true(!client.connected(), "MQTT client initially disconnected");

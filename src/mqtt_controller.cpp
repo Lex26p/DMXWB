@@ -1,6 +1,7 @@
 #include "dmxwb/mqtt_controller.hpp"
 
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 
 namespace dmxwb {
@@ -38,6 +39,10 @@ MqttControllerUpdate MqttController::process_command(
                 serialize_state_json(runtime_.capture_state()),
                 build_status_json(MqttApplicationStatus::running)));
         return result;
+    }
+
+    if (command.type == MqttCommandType::set_config) {
+        return apply_config_set(command.text, now);
     }
 
     if (command.type == MqttCommandType::fixture_name) {
@@ -143,6 +148,7 @@ bool MqttController::apply_fixture_command(Fixture& fixture, const MqttCommand& 
             fixture.reset();
             return true;
         case MqttCommandType::set_source:
+        case MqttCommandType::set_config:
         case MqttCommandType::fixture_name:
             return false;
     }
@@ -182,6 +188,85 @@ MqttControllerUpdate MqttController::apply_fixture_name(
     MqttControllerUpdate result;
     result.applied = true;
     result.publications = build_state_confirmation(updated, true);
+    return result;
+}
+
+MqttControllerUpdate MqttController::apply_config_set(
+    std::string_view payload,
+    time_point now) {
+    const auto parsed = parse_mqtt_config_set_request(payload);
+    if (!parsed.ok()) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            parsed.request_id,
+            false,
+            runtime_.config().revision,
+            parsed.error_code.empty() ? std::string_view{"invalid_request"} : std::string_view{parsed.error_code},
+            parsed.message));
+        result.error = parsed.message;
+        return result;
+    }
+
+    const auto request = *parsed.request;
+    std::unordered_set<Fixture::Id> previous_fixture_ids;
+    previous_fixture_ids.reserve(runtime_.config().fixtures.size());
+    for (const auto& fixture : runtime_.config().fixtures) {
+        previous_fixture_ids.insert(fixture.id);
+    }
+
+    auto committed = runtime_.apply_config_transaction(
+        request.expected_revision,
+        request.proposed_config,
+        now);
+    if (!committed.ok()) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            request.request_id,
+            false,
+            runtime_.config().revision,
+            mqtt_config_file_error_code_name(committed.error.code),
+            committed.error.message));
+        result.error = committed.error.message;
+        return result;
+    }
+
+    MqttControllerUpdate result;
+    result.applied = true;
+    result.snapshot = build_next_snapshot();
+    if (!result.snapshot) {
+        result.error = "configuration committed but whole MQTT DMX snapshot could not be built";
+    }
+
+    for (const auto& fixture : runtime_.config().fixtures) {
+        previous_fixture_ids.erase(fixture.id);
+    }
+    for (const auto removed_id : previous_fixture_ids) {
+        append_publications(
+            result.publications,
+            build_fixture_retained_cleanup_publications(removed_id));
+    }
+
+    for (std::size_t index = 0; index < runtime_.fixtures().fixture_count(); ++index) {
+        const auto* fixture = runtime_.fixtures().fixture_at(index);
+        if (fixture == nullptr) {
+            continue;
+        }
+        append_publications(result.publications, build_fixture_metadata_publications(*fixture));
+        append_publications(result.publications, build_fixture_state_publications(*fixture));
+    }
+
+    append_publications(
+        result.publications,
+        build_internal_snapshot_publications(
+            serialize_config_json(runtime_.config()),
+            serialize_state_json(runtime_.capture_state()),
+            build_status_json(MqttApplicationStatus::running)));
+    result.publications.push_back(build_mqtt_config_result_publication(
+        request.request_id,
+        true,
+        runtime_.config().revision,
+        "none",
+        "configuration applied"));
     return result;
 }
 
