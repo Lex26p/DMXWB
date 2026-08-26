@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 ROOTFS="${DMXWB_WB8_ROOTFS:-/opt/dmxwb/wb8-bullseye-cross-arm64}"
 MARKER="${ROOTFS}/.dmxwb-bullseye-cross-arm64-ready"
+MOSQUITTO_PC="${ROOTFS}/usr/lib/aarch64-linux-gnu/pkgconfig/libmosquitto.pc"
 CHROOT_SOURCE="${ROOTFS}/work/dmxwb"
 OUTPUT_DIR="${REPO_ROOT}/artifacts/wb8-bullseye-arm64"
 OUTPUT_BIN="${OUTPUT_DIR}/dmxwb"
@@ -17,12 +18,26 @@ if [[ ! -f "${MARKER}" ]]; then
     exit 1
 fi
 
-for command_name in cmake tar readelf file sha256sum; do
+for command_name in cmake tar readelf file sha256sum pkg-config; do
     if ! command -v "${command_name}" >/dev/null 2>&1; then
         echo "Missing host command: ${command_name}" >&2
         exit 1
     fi
 done
+
+if ! pkg-config --exists libmosquitto; then
+    echo "Host libmosquitto development package is missing." >&2
+    echo "Install it in local Linux/WSL, for example:" >&2
+    echo "  sudo apt-get update && sudo apt-get install -y pkg-config libmosquitto-dev" >&2
+    exit 1
+fi
+
+if [[ ! -f "${MOSQUITTO_PC}" ]]; then
+    echo "Bullseye ARM64 libmosquitto dependency is missing from cross rootfs." >&2
+    echo "Run:" >&2
+    echo "  bash tools/wb8/ensure_bullseye_mosquitto_arm64.sh" >&2
+    exit 1
+fi
 
 echo "=== Native Linux verification ==="
 rm -rf "${HOST_BUILD}"
@@ -50,7 +65,11 @@ tar \
 
 sudo chroot "${ROOTFS}" /bin/bash -lc '
     set -euo pipefail
+    export PKG_CONFIG_PATH=
+    export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
     cd /work/dmxwb
+    pkg-config --print-errors --exists libmosquitto
+    printf "cross libmosquitto: "; pkg-config --modversion libmosquitto
     rm -rf build-wb8
     cmake -S . -B build-wb8 \
         -DCMAKE_SYSTEM_NAME=Linux \

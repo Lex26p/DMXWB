@@ -37,6 +37,8 @@ function(dmxwb_enable_portable_gnu_runtime target)
 endfunction()
 
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 
 add_library(dmxwb_core STATIC
     src/app_info.cpp
@@ -46,6 +48,7 @@ add_library(dmxwb_core STATIC
     src/dmx_test_pattern.cpp
     src/monotonic_clock.cpp
     src/mqtt_contract.cpp
+    src/mqtt_controller.cpp
     src/persistence.cpp
     src/persistence_storage.cpp
     src/persistence_runtime.cpp
@@ -64,11 +67,28 @@ target_compile_features(dmxwb_core PUBLIC cxx_std_20)
 target_compile_definitions(dmxwb_core PRIVATE DMXWB_VERSION="${PROJECT_VERSION}")
 dmxwb_enable_warnings(dmxwb_core)
 
+add_library(dmxwb_mqtt_transport STATIC
+    src/mqtt_client.cpp
+)
+
+target_include_directories(dmxwb_mqtt_transport
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(dmxwb_mqtt_transport
+    PUBLIC
+        dmxwb_core
+        PkgConfig::MOSQUITTO
+)
+target_compile_features(dmxwb_mqtt_transport PUBLIC cxx_std_20)
+dmxwb_enable_warnings(dmxwb_mqtt_transport)
+
 add_executable(dmxwb
     src/main.cpp
 )
 
-target_link_libraries(dmxwb PRIVATE dmxwb_core)
+target_link_libraries(dmxwb PRIVATE dmxwb_core dmxwb_mqtt_transport)
 target_compile_features(dmxwb PRIVATE cxx_std_20)
 dmxwb_enable_warnings(dmxwb)
 dmxwb_enable_portable_gnu_runtime(dmxwb)
@@ -120,9 +140,29 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_mqtt_contract_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_contract_tests)
 
+    add_executable(dmxwb_mqtt_controller_tests
+        tests/test_mqtt_controller.cpp
+    )
+
+    target_link_libraries(dmxwb_mqtt_controller_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_mqtt_controller_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_mqtt_controller_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_controller_tests)
+
+    add_executable(dmxwb_mqtt_client_tests
+        tests/test_mqtt_client.cpp
+    )
+
+    target_link_libraries(dmxwb_mqtt_client_tests PRIVATE dmxwb_mqtt_transport)
+    target_compile_features(dmxwb_mqtt_client_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_mqtt_client_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_client_tests)
+
     add_test(NAME dmxwb.unit COMMAND dmxwb_tests)
     add_test(NAME dmxwb.persistence COMMAND dmxwb_persistence_tests)
     add_test(NAME dmxwb.persistence_storage COMMAND dmxwb_persistence_storage_tests)
     add_test(NAME dmxwb.persistence_runtime COMMAND dmxwb_persistence_runtime_tests)
     add_test(NAME dmxwb.mqtt_contract COMMAND dmxwb_mqtt_contract_tests)
+    add_test(NAME dmxwb.mqtt_controller COMMAND dmxwb_mqtt_controller_tests)
+    add_test(NAME dmxwb.mqtt_client COMMAND dmxwb_mqtt_client_tests)
 endif()
