@@ -9,8 +9,8 @@ DMXWB не заменяет Wiren Board и использует штатную L
 Последний завершённый engineering gate:
 
 ```text
-DEV-007 — MQTT system and Fixture integration
-a23f0d6628c8f18ecbb51be0a8a5b02b770a4bd8
+DEV-008 — Groups and Scenes
+3044afa53861b61af6fede49427124161f938368
 ```
 
 Подтверждены:
@@ -35,23 +35,38 @@ a23f0d6628c8f18ecbb51be0a8a5b02b770a4bd8
 - config request envelope с `request_id`, `expected_revision` и полной proposed config;
 - config API переиспользует DEV-006 atomic transaction/validation;
 - stale/invalid config не меняет рабочую disk/in-memory model;
-- удалённые Fixture IDs очищают старые retained MQTT topics.
+- удалённые Fixture IDs очищают старые retained MQTT topics;
+- Group model со stable monotonic IDs, multiple membership и empty Groups;
+- Group commands реально изменяют member Fixtures без отдельного mixing layer;
+- factual Group Power = OR(member actual Power);
+- Group Power ON восстанавливает индивидуальные saved states участников;
+- Scene stable IDs и lifecycle create/overwrite/apply/rename/delete;
+- Scene snapshot хранит Fixture state по stable ID, а не по DMX address;
+- Scene Apply не переключает Source и публикует один whole DMX snapshot;
+- MQTT Group devices `/devices/dmxwb_group_<id>/`;
+- MQTT Scene devices `/devices/dmxwb_scene_<id>/`;
+- retained Group/Scene commands игнорируются, metadata скрыта через `hidden=true`;
+- `/dmxwb/scenes/create`, `/overwrite`, `/delete` работают через Controller queue;
+- удалённые Group/Scene devices очищают retained MQTT topics;
+- Scene IDs не переиспользуются после удаления.
 
-DEV-007 host validation:
+DEV-008 host validation:
 
 ```text
 dmxwb.unit                 PASS
 dmxwb.persistence          PASS
 dmxwb.persistence_storage  PASS
 dmxwb.persistence_runtime  PASS
+dmxwb.group_scene          PASS
 dmxwb.mqtt_contract        PASS
 dmxwb.mqtt_config          PASS
 dmxwb.mqtt_controller      PASS
+dmxwb.mqtt_group_scene     PASS
 dmxwb.mqtt_client          PASS
 dmxwb.mqtt_runtime         PASS
 
 100% tests passed
-0 tests failed out of 9
+0 tests failed out of 11
 ```
 
 Bullseye ARM64 compatibility:
@@ -73,26 +88,31 @@ SHA256:
 
 Он по-прежнему не является production MQTT daemon entrypoint, поэтому linker не включает MQTT runtime в этот diagnostic binary.
 
-Отдельный DEV-007 acceptance runtime:
+Текущий engineering acceptance runtime:
 
 ```text
 artifacts/wb8-bullseye-arm64/dmxwb-mqtt-acceptance
 NEEDED: libmosquitto.so.1
-Latest DEV-007C cross-build SHA256:
-ba7363035897265295cac3d3af00dd0ebe6abd86ad5efa33f278acec1767b6b8
+Latest DEV-008B2 cross-build SHA256:
+e623a1d5d29b06934d17403b4302a2d10a5813a43ca24d1064c35c26d0f3ca66
 ```
 
-Физический DEV-007B hardware acceptance был выполнен на WB8 до DEV-007C и зафиксирован в:
+Физический DEV-008 hardware acceptance выполнен на двух RGBW Fixtures с
+Start Address `1` и `5` и зафиксирован в:
 
 ```text
-docs/DEV007_MQTT_HARDWARE_REPORT.txt
-=== DMXWB DEV-007 MQTT + FIXTURE HARDWARE PASS ===
+docs/DEV008_GROUP_SCENE_HARDWARE_REPORT.txt
+=== DMXWB DEV-008 GROUP + SCENE HARDWARE PASS ===
 ```
+
+Подтверждены multiple Group membership, factual Group Power, индивидуальный
+Power restore, Scene lifecycle, retained cleanup и визуально атомарный Scene Apply
+на двух реальных DMX addresses.
 
 Следующий gate:
 
 ```text
-DEV-008 — Groups and Scenes
+DEV-009 — Art-Net protocol core
 ```
 
 ## MQTT contract
@@ -145,6 +165,78 @@ DmxOutput operations
 ```
 
 Эти действия выполняются Controller/runtime context.
+
+## MQTT Group/Scene contract
+
+Group device:
+
+```text
+/devices/dmxwb_group_<stable_id>/
+```
+
+Controls:
+
+```text
+name
+power
+red
+green
+blue
+color
+brightness
+temperature
+reset
+```
+
+Group `power` state — factual OR по member Fixtures. Остальные Group control
+states отражают последние команды, отправленные через эту Group. Один Fixture
+может входить в несколько Groups; последняя применённая команда определяет
+состояние конкретного Fixture.
+
+Scene device:
+
+```text
+/devices/dmxwb_scene_<stable_id>/
+```
+
+Controls:
+
+```text
+name
+apply
+```
+
+Scene lifecycle для собственного web:
+
+```text
+/dmxwb/scenes/create
+/dmxwb/scenes/<scene_id>/overwrite
+/dmxwb/scenes/<scene_id>/delete
+```
+
+Lifecycle commands всегда non-retained и содержат `request_id`. Реализация DEV-008
+использует JSON envelope:
+
+```json
+{"request_id":"create-1","name":"Scene name"}
+```
+
+для create и:
+
+```json
+{"request_id":"request-1"}
+```
+
+для overwrite/delete. Correlated structural result публикуется non-retained через
+существующий `/dmxwb/config/result`.
+
+Scene Apply сначала изменяет все существующие Fixtures из snapshot по stable ID,
+затем формирует один whole MQTT DMX snapshot. Новые Fixtures не затрагиваются,
+удалённые Fixture IDs игнорируются, Source не переключается.
+
+Group/Scene metadata скрыта из штатного WB web (`hidden=true`). После reconnect
+выполняется полная retained републикация; удаление Group/Scene очищает устаревшие
+retained topics.
 
 ## MQTT configuration API
 
@@ -344,13 +436,12 @@ bash tools/wb8/build_bullseye_arm64.sh
 
 До соответствующих roadmap gates намеренно отсутствуют:
 
-- полноценная Group/Scene runtime logic и MQTT contract;
-- Art-Net runtime/parser/source integration;
+- Art-Net protocol core/runtime/source integration;
 - собственный Web UI;
 - production systemd daemon lifecycle и offline deployment bundle;
 - final 24h acceptance.
 
-MQTT system + Fixture integration и structural config API реализованы и подтверждены в DEV-007. Отдельный `dmxwb-mqtt-acceptance` остаётся engineering acceptance runtime, а production daemon/service wiring выполняется позже по roadmap.
+MQTT Fixture/Group/Scene integration, structural config API и Scene lifecycle реализованы и подтверждены в DEV-007/DEV-008. Отдельный `dmxwb-mqtt-acceptance` остаётся engineering acceptance runtime, а production daemon/service wiring выполняется позже по roadmap.
 
 ## Источник истины
 

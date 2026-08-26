@@ -5,19 +5,258 @@
 ## Repository base
 
 ```text
-a23f0d6628c8f18ecbb51be0a8a5b02b770a4bd8
-Implement DEV-007C MQTT configuration API
+3044afa53861b61af6fede49427124161f938368
+Complete DEV-008B Group and Scene integration
 ```
 
 ## Last confirmed engineering PASS
 
 ```text
-DEV-007 — MQTT system and Fixture integration
+DEV-008 — Groups and Scenes
 ```
 
-DEV-007 подтверждён host unit/integration tests, Bullseye ARM64 GCC10 cross-build и реальным WB8 MQTT + physical DMX hardware acceptance.
+DEV-008 подтверждён host unit/integration tests, Bullseye ARM64 GCC10 cross-build
+и реальным WB8 Group/Scene + physical DMX hardware acceptance на двух адресах.
 
-Roadmap PASS condition выполнен: управление реальным Fixture через WB MQTT подтверждено физически, а MQTT broker loss/recovery не остановил continuous DMX loop.
+Roadmap PASS condition выполнен: Scene Apply изменяет несколько реальных Fixtures
+одним логическим DMX snapshot без последовательного visual перебора.
+
+## DEV-008 result
+
+### Group model
+
+Реализованы:
+
+- stable monotonic Group ID без reuse;
+- изменяемый Name;
+- members только по stable Fixture ID;
+- multiple Group membership;
+- empty Group;
+- controls `Power/Red/Green/Blue/Color/Brightness/Temperature/Reset`;
+- last-command-wins на уровне конкретного Fixture;
+- Group Power OFF сохраняет индивидуальные saved RGBW/Brightness;
+- Group Power ON восстанавливает индивидуальное сохранённое состояние участников;
+- factual Group Power = OR(member actual Power);
+- остальные Group states сохраняют последнюю уставку, отправленную через Group;
+- удаление Fixture очищает memberships, пустая Group остаётся.
+
+### Scene model
+
+Реализованы stable monotonic Scene IDs и:
+
+```text
+Create from current state
+Apply
+Overwrite from current state
+Rename
+Delete
+```
+
+Scene хранит snapshot по stable Fixture IDs:
+
+```text
+fixture_id
+R/G/B/W
+Brightness
+requested_power
+```
+
+Scene Apply:
+
+1. изменяет все существующие matching Fixtures в canonical model;
+2. игнорирует удалённые Fixture IDs;
+3. не трогает Fixtures, появившиеся после сохранения Scene;
+4. не переключает Source;
+5. только после всех mutations строит один whole DmxSnapshot;
+6. затем публикует MQTT states.
+
+### MQTT Group/Scene devices
+
+Group:
+
+```text
+/devices/dmxwb_group_<id>/
+```
+
+Controls:
+
+```text
+name
+power
+red
+green
+blue
+color
+brightness
+temperature
+reset
+```
+
+Scene:
+
+```text
+/devices/dmxwb_scene_<id>/
+```
+
+Controls:
+
+```text
+name
+apply
+```
+
+Все metadata Group/Scene controls публикуются retained с `hidden=true`.
+Live commands non-retained; retained commands игнорируются.
+
+Fixture change обновляет factual Power затронутых Groups. Group command
+републикует member Fixture states и Group states, включая overlapping Groups.
+
+Reconnect full republish включает Fixture/Group/Scene metadata/state.
+Удаление Fixture/Group/Scene очищает stale retained topics.
+
+### Scene MQTT lifecycle
+
+Topics:
+
+```text
+/dmxwb/scenes/create
+/dmxwb/scenes/<scene_id>/overwrite
+/dmxwb/scenes/<scene_id>/delete
+```
+
+Команды non-retained и содержат `request_id`.
+
+DEV-008 implementation envelope:
+
+```json
+{"request_id":"create-1","name":"Scene name"}
+```
+
+для create и:
+
+```json
+{"request_id":"request-1"}
+```
+
+для overwrite/delete.
+
+Lifecycle выполняется в Controller context через canonical PersistenceRuntime.
+Результат коррелируется существующим non-retained `/dmxwb/config/result` и
+содержит `request_id`, `ok`, актуальную `revision`, `error_code`, `message`.
+
+Scene delete очищает retained Scene MQTT topics. Следующий create использует
+новый monotonic Scene ID и не переиспользует удалённый.
+
+### DEV-008 host validation
+
+Последний user-run clean Linux test:
+
+```text
+dmxwb.unit                 PASS
+dmxwb.persistence          PASS
+dmxwb.persistence_storage  PASS
+dmxwb.persistence_runtime  PASS
+dmxwb.group_scene          PASS
+dmxwb.mqtt_contract        PASS
+dmxwb.mqtt_config          PASS
+dmxwb.mqtt_controller      PASS
+dmxwb.mqtt_group_scene     PASS
+dmxwb.mqtt_client          PASS
+dmxwb.mqtt_runtime         PASS
+
+100% tests passed
+0 tests failed out of 11
+```
+
+### DEV-008 WB8 target build
+
+```text
+Compiler:              Bullseye aarch64-linux-gnu-g++ 10.2.1
+Cross libmosquitto:    2.0.11
+Architecture:          AArch64
+Maximum required glibc: GLIBC_2.17
+```
+
+Diagnostic artifact:
+
+```text
+artifacts/wb8-bullseye-arm64/dmxwb
+SHA256:
+01b9d3e4026f639135e1dea50b64cdba7c8150e95fe2b7c6193a633b3486e4d2
+```
+
+DEV-008 acceptance runtime:
+
+```text
+artifacts/wb8-bullseye-arm64/dmxwb-mqtt-acceptance
+NEEDED: libmosquitto.so.1
+SHA256:
+e623a1d5d29b06934d17403b4302a2d10a5813a43ca24d1064c35c26d0f3ca66
+```
+
+### DEV-008 hardware acceptance
+
+Report:
+
+```text
+docs/DEV008_GROUP_SCENE_HARDWARE_REPORT.txt
+```
+
+Target:
+
+```text
+Controller:              Wiren Board rev. 8.5.1 (T507)
+OS:                      Debian 11 Bullseye / wb-2606 stable
+Kernel:                  6.8.0-wb160
+DMX port:                /dev/ttyRS485-1
+Fixture A Start Address: 1
+Fixture B Start Address: 5
+Physical refresh:        44 Hz
+```
+
+Подтверждены:
+
+```text
+retained_group_command_ignored: PASS
+retained_scene_lifecycle_ignored: PASS
+group_pair_red_user: PASS
+multiple_group_membership_user: PASS
+factual_group_power_overlap: PASS
+factual_group_power_all_off: PASS
+group_power_restore_user: PASS
+scene_create_mqtt_lifecycle: PASS
+scene_preapply_blue_user: PASS
+scene_atomic_apply_user: PASS
+scene_overwrite_mqtt_lifecycle: PASS
+scene_overwrite_apply_user: PASS
+scene_delete_mqtt_lifecycle: PASS
+scene_retained_cleanup: PASS
+scene_id_monotonic_no_reuse: PASS
+scene_2_retained_cleanup: PASS
+final_all_off_user: PASS
+software_result: PASS
+dev008_runtime_diagnostics: PASS
+graceful_off_status: PASS
+dev008_group_scene_hardware_result: PASS
+```
+
+Physical runtime diagnostics:
+
+```text
+dmx_frames_sent: 3594
+dmx_open_failures: 0
+dmx_send_failures: 0
+dmx_recoveries: 0
+dmx_missed_deadlines: 0
+dmx_active_refresh_hz: 44
+dmx_serial_open_after_stop: 0
+```
+
+Final marker:
+
+```text
+=== DMXWB DEV-008 GROUP + SCENE HARDWARE PASS ===
+```
 
 ## DEV-007 result
 
@@ -459,12 +698,15 @@ Broker restart acceptance подтвердил независимость physic
 ## Current engineering gate
 
 ```text
-DEV-008 — Groups and Scenes
+DEV-009 — Art-Net protocol core
 ```
 
-Цель DEV-008 по roadmap — реализовать Group/Scene logic поверх уже подтверждённых Fixture/MQTT/persistence слоёв.
+Цель DEV-009 — deterministic socket-free Art-Net 4 parser/state machine:
+ArtDmx/ArtPoll/ArtPollReply/ArtSync, one 15-bit Port-Address, 512 network
+channels -> 300 physical projection, Sequence handling, ArtSync staging,
+Targeted ArtPoll и documented CONFLICT multiple-source policy.
 
-До DEV-008 не переносится работа Art-Net; Art-Net protocol core начинается только в DEV-009.
+Real UDP runtime, network recovery и Source switching остаются DEV-010.
 
 ## Build/test policy
 
@@ -488,7 +730,7 @@ WB release:       wb-2606 stable
 Kernel:           6.8.0-wb160
 glibc:            2.31
 DMX port:         /dev/ttyRS485-1 -> ttyS2
-Fixture RGBW:     start channel 1
+Fixture RGBW:     DEV-008 acceptance starts 1 and 5
 MQTT broker:      localhost:1883
 ```
 
@@ -515,5 +757,5 @@ MQTT broker:      localhost:1883
 ## Next
 
 ```text
-DEV-008 — Groups and Scenes
+DEV-009 — Art-Net protocol core
 ```
