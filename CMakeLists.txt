@@ -180,6 +180,15 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_mqtt_controller_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_controller_tests)
 
+    add_executable(dmxwb_mqtt_group_scene_tests
+        tests/test_mqtt_group_scene.cpp
+    )
+
+    target_link_libraries(dmxwb_mqtt_group_scene_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_mqtt_group_scene_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_mqtt_group_scene_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_group_scene_tests)
+
     add_executable(dmxwb_mqtt_client_tests
         tests/test_mqtt_client.cpp
     )
@@ -206,6 +215,7 @@ if(BUILD_TESTING)
     add_test(NAME dmxwb.mqtt_contract COMMAND dmxwb_mqtt_contract_tests)
     add_test(NAME dmxwb.mqtt_config COMMAND dmxwb_mqtt_config_tests)
     add_test(NAME dmxwb.mqtt_controller COMMAND dmxwb_mqtt_controller_tests)
+    add_test(NAME dmxwb.mqtt_group_scene COMMAND dmxwb_mqtt_group_scene_tests)
     add_test(NAME dmxwb.mqtt_client COMMAND dmxwb_mqtt_client_tests)
     add_test(NAME dmxwb.mqtt_runtime COMMAND dmxwb_mqtt_runtime_tests)
 endif()

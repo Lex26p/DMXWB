@@ -13,8 +13,22 @@ namespace dmxwb {
 namespace {
 
 constexpr std::string_view kFixturePrefix = "/devices/dmxwb_fixture_";
+constexpr std::string_view kGroupPrefix = "/devices/dmxwb_group_";
+constexpr std::string_view kScenePrefix = "/devices/dmxwb_scene_";
 constexpr std::string_view kControlsMarker = "/controls/";
 constexpr std::string_view kCommandSuffix = "/on";
+
+enum class DeviceKind {
+    fixture,
+    group,
+    scene,
+};
+
+struct ParsedDeviceCommandTopic final {
+    DeviceKind kind{DeviceKind::fixture};
+    std::uint64_t id{0};
+    std::string_view control;
+};
 
 [[nodiscard]] MqttCommandParseResult ignored_result() {
     return {MqttCommandParseStatus::ignored, std::nullopt, {}};
@@ -125,7 +139,53 @@ constexpr std::string_view kCommandSuffix = "/on";
 }
 
 [[nodiscard]] std::string fixture_device_prefix(Fixture::Id id) {
-    return std::string{"/devices/dmxwb_fixture_"} + std::to_string(id);
+    return std::string{kFixturePrefix} + std::to_string(id);
+}
+
+[[nodiscard]] std::string group_device_prefix(GroupId id) {
+    return std::string{kGroupPrefix} + std::to_string(id);
+}
+
+[[nodiscard]] std::string scene_device_prefix(SceneId id) {
+    return std::string{kScenePrefix} + std::to_string(id);
+}
+
+[[nodiscard]] std::optional<ParsedDeviceCommandTopic> parse_device_command_topic(
+    std::string_view topic) noexcept {
+    if (!topic.ends_with(kCommandSuffix)) {
+        return std::nullopt;
+    }
+
+    DeviceKind kind = DeviceKind::fixture;
+    std::string_view prefix;
+    if (topic.starts_with(kFixturePrefix)) {
+        kind = DeviceKind::fixture;
+        prefix = kFixturePrefix;
+    } else if (topic.starts_with(kGroupPrefix)) {
+        kind = DeviceKind::group;
+        prefix = kGroupPrefix;
+    } else if (topic.starts_with(kScenePrefix)) {
+        kind = DeviceKind::scene;
+        prefix = kScenePrefix;
+    } else {
+        return std::nullopt;
+    }
+
+    const auto marker = topic.find(kControlsMarker, prefix.size());
+    if (marker == std::string_view::npos) {
+        return std::nullopt;
+    }
+    std::uint64_t id = 0;
+    if (!parse_u64_decimal(topic.substr(prefix.size(), marker - prefix.size()), id) || id == 0) {
+        return ParsedDeviceCommandTopic{kind, 0, {}};
+    }
+
+    const auto control_begin = marker + kControlsMarker.size();
+    if (topic.size() <= control_begin + kCommandSuffix.size()) {
+        return std::nullopt;
+    }
+    const auto control_size = topic.size() - control_begin - kCommandSuffix.size();
+    return ParsedDeviceCommandTopic{kind, id, topic.substr(control_begin, control_size)};
 }
 
 void append_json_string(std::string& output, std::string_view value) {
@@ -206,11 +266,22 @@ void append_publication(
     output.push_back(MqttPublication{std::move(topic), std::move(payload), retained});
 }
 
+[[nodiscard]] std::string control_topic(std::string prefix, std::string_view control) {
+    prefix += "/controls/";
+    prefix += control;
+    return prefix;
+}
+
 [[nodiscard]] std::string fixture_control_topic(Fixture::Id id, std::string_view control) {
-    auto topic = fixture_device_prefix(id);
-    topic += "/controls/";
-    topic += control;
-    return topic;
+    return control_topic(fixture_device_prefix(id), control);
+}
+
+[[nodiscard]] std::string group_control_topic(GroupId id, std::string_view control) {
+    return control_topic(group_device_prefix(id), control);
+}
+
+[[nodiscard]] std::string scene_control_topic(SceneId id, std::string_view control) {
+    return control_topic(scene_device_prefix(id), control);
 }
 
 }  // namespace
@@ -245,43 +316,57 @@ MqttCommandParseResult parse_mqtt_command(
         return accepted_result(std::move(command));
     }
 
-    if (!topic.starts_with(kFixturePrefix) || !topic.ends_with(kCommandSuffix)) {
+    const auto parsed_topic = parse_device_command_topic(topic);
+    if (!parsed_topic.has_value()) {
         return ignored_result();
     }
     if (retained) {
         return ignored_result();
     }
-
-    const auto marker = topic.find(kControlsMarker, kFixturePrefix.size());
-    if (marker == std::string_view::npos) {
-        return ignored_result();
+    if (parsed_topic->id == 0) {
+        return rejected_result("DMXWB device topic contains invalid stable ID");
     }
-    const auto id_text = topic.substr(kFixturePrefix.size(), marker - kFixturePrefix.size());
-    std::uint64_t fixture_id = 0;
-    if (!parse_u64_decimal(id_text, fixture_id) || fixture_id == 0) {
-        return rejected_result("fixture topic contains invalid stable ID");
-    }
-
-    const auto control_begin = marker + kControlsMarker.size();
-    const auto control_size = topic.size() - control_begin - kCommandSuffix.size();
-    if (control_size == 0) {
-        return ignored_result();
-    }
-    const auto control = topic.substr(control_begin, control_size);
 
     MqttCommand command;
-    command.fixture_id = fixture_id;
+    const auto control = parsed_topic->control;
+
+    if (parsed_topic->kind == DeviceKind::scene) {
+        command.scene_id = parsed_topic->id;
+        if (control == "name") {
+            if (!is_valid_utf8(payload)) {
+                return rejected_result("scene name must be valid UTF-8");
+            }
+            command.type = MqttCommandType::scene_name;
+            command.text = std::string{payload};
+            return accepted_result(std::move(command));
+        }
+        if (control == "apply") {
+            if (payload != "1") {
+                return rejected_result("scene apply command must be 1");
+            }
+            command.type = MqttCommandType::scene_apply;
+            return accepted_result(std::move(command));
+        }
+        return ignored_result();
+    }
+
+    const bool fixture = parsed_topic->kind == DeviceKind::fixture;
+    if (fixture) {
+        command.fixture_id = parsed_topic->id;
+    } else {
+        command.group_id = parsed_topic->id;
+    }
 
     if (control == "name") {
         if (!is_valid_utf8(payload)) {
-            return rejected_result("fixture name must be valid UTF-8");
+            return rejected_result(fixture ? "fixture name must be valid UTF-8" : "group name must be valid UTF-8");
         }
-        command.type = MqttCommandType::fixture_name;
+        command.type = fixture ? MqttCommandType::fixture_name : MqttCommandType::group_name;
         command.text = std::string{payload};
         return accepted_result(std::move(command));
     }
     if (control == "power") {
-        command.type = MqttCommandType::fixture_power;
+        command.type = fixture ? MqttCommandType::fixture_power : MqttCommandType::group_power;
         if (payload == "0") {
             command.boolean_value = false;
         } else if (payload == "1") {
@@ -292,7 +377,7 @@ MqttCommandParseResult parse_mqtt_command(
         return accepted_result(std::move(command));
     }
     if (control == "color") {
-        command.type = MqttCommandType::fixture_color;
+        command.type = fixture ? MqttCommandType::fixture_color : MqttCommandType::group_color;
         if (!parse_color(payload, command.color)) {
             return rejected_result("color command must be R;G;B with each component in 0..255");
         }
@@ -302,29 +387,29 @@ MqttCommandParseResult parse_mqtt_command(
         if (payload != "1") {
             return rejected_result("reset command must be 1");
         }
-        command.type = MqttCommandType::fixture_reset;
+        command.type = fixture ? MqttCommandType::fixture_reset : MqttCommandType::group_reset;
         return accepted_result(std::move(command));
     }
 
     std::uint8_t maximum = 255;
     if (control == "red") {
-        command.type = MqttCommandType::fixture_red;
+        command.type = fixture ? MqttCommandType::fixture_red : MqttCommandType::group_red;
     } else if (control == "green") {
-        command.type = MqttCommandType::fixture_green;
+        command.type = fixture ? MqttCommandType::fixture_green : MqttCommandType::group_green;
     } else if (control == "blue") {
-        command.type = MqttCommandType::fixture_blue;
+        command.type = fixture ? MqttCommandType::fixture_blue : MqttCommandType::group_blue;
     } else if (control == "brightness") {
-        command.type = MqttCommandType::fixture_brightness;
+        command.type = fixture ? MqttCommandType::fixture_brightness : MqttCommandType::group_brightness;
         maximum = 100;
     } else if (control == "temperature") {
-        command.type = MqttCommandType::fixture_temperature;
+        command.type = fixture ? MqttCommandType::fixture_temperature : MqttCommandType::group_temperature;
         maximum = 100;
     } else {
         return ignored_result();
     }
 
     if (!parse_uint8_range(payload, maximum, command.value)) {
-        return rejected_result("numeric fixture command is outside the allowed range");
+        return rejected_result("numeric DMXWB command is outside the allowed range");
     }
     return accepted_result(std::move(command));
 }
@@ -474,6 +559,94 @@ std::vector<MqttPublication> build_fixture_retained_cleanup_publications(Fixture
             append_publication(output, prefix + "/controls/" + std::string{control}, "");
         }
     }
+    return output;
+}
+
+std::vector<MqttPublication> build_group_metadata_publications(const GroupConfigRecord& group) {
+    const auto prefix = group_device_prefix(group.id);
+    std::vector<MqttPublication> output;
+    output.reserve(10);
+    append_publication(output, prefix + "/meta", make_device_meta(group.name));
+
+    const auto add = [&](std::string_view control, std::string payload) {
+        append_publication(output, prefix + "/controls/" + std::string{control} + "/meta", std::move(payload));
+    };
+    add("name", make_control_meta("text", false, true, "Name", "Имя"));
+    add("power", make_control_meta("switch", false, true, "Power", "Питание"));
+    add("red", make_control_meta("range", false, true, "Red", "Красный", 0U, 255U));
+    add("green", make_control_meta("range", false, true, "Green", "Зелёный", 0U, 255U));
+    add("blue", make_control_meta("range", false, true, "Blue", "Синий", 0U, 255U));
+    add("color", make_control_meta("rgb", false, true, "Color", "Цвет"));
+    add("brightness", make_control_meta("range", false, true, "Brightness", "Яркость", 0U, 100U));
+    add("temperature", make_control_meta("range", false, true, "Temperature", "Температура", 0U, 100U));
+    add("reset", make_control_meta("pushbutton", false, true, "Reset", "Сброс"));
+    return output;
+}
+
+std::vector<MqttPublication> build_group_state_publications(
+    const GroupConfigRecord& group,
+    const GroupControlState& state) {
+    std::vector<MqttPublication> output;
+    output.reserve(8);
+    append_publication(output, group_control_topic(group.id, "name"), group.name);
+    append_publication(output, group_control_topic(group.id, "power"), state.actual_power ? "1" : "0");
+    append_publication(output, group_control_topic(group.id, "red"), std::to_string(state.red));
+    append_publication(output, group_control_topic(group.id, "green"), std::to_string(state.green));
+    append_publication(output, group_control_topic(group.id, "blue"), std::to_string(state.blue));
+    append_publication(
+        output,
+        group_control_topic(group.id, "color"),
+        std::to_string(state.red) + ";" + std::to_string(state.green) + ";" + std::to_string(state.blue));
+    append_publication(output, group_control_topic(group.id, "brightness"), std::to_string(state.brightness));
+    append_publication(output, group_control_topic(group.id, "temperature"), std::to_string(state.temperature));
+    return output;
+}
+
+std::vector<MqttPublication> build_group_retained_cleanup_publications(GroupId group_id) {
+    std::vector<MqttPublication> output;
+    const auto prefix = group_device_prefix(group_id);
+    append_publication(output, prefix + "/meta", "");
+    constexpr std::string_view controls[] = {
+        "name", "power", "red", "green", "blue", "color", "brightness", "temperature", "reset"};
+    for (const auto control : controls) {
+        append_publication(output, prefix + "/controls/" + std::string{control} + "/meta", "");
+        if (control != "reset") {
+            append_publication(output, prefix + "/controls/" + std::string{control}, "");
+        }
+    }
+    return output;
+}
+
+std::vector<MqttPublication> build_scene_metadata_publications(const SceneConfigRecord& scene) {
+    const auto prefix = scene_device_prefix(scene.id);
+    std::vector<MqttPublication> output;
+    output.reserve(3);
+    append_publication(output, prefix + "/meta", make_device_meta(scene.name));
+    append_publication(
+        output,
+        prefix + "/controls/name/meta",
+        make_control_meta("text", false, true, "Name", "Имя"));
+    append_publication(
+        output,
+        prefix + "/controls/apply/meta",
+        make_control_meta("pushbutton", false, true, "Apply", "Применить"));
+    return output;
+}
+
+std::vector<MqttPublication> build_scene_state_publications(const SceneConfigRecord& scene) {
+    std::vector<MqttPublication> output;
+    output.reserve(1);
+    append_publication(output, scene_control_topic(scene.id, "name"), scene.name);
+    return output;
+}
+
+std::vector<MqttPublication> build_scene_retained_cleanup_publications(SceneId scene_id) {
+    std::vector<MqttPublication> output;
+    const auto prefix = scene_device_prefix(scene_id);
+    append_publication(output, prefix + "/meta", "");
+    append_publication(output, prefix + "/controls/name/meta", "");
+    append_publication(output, prefix + "/controls/name", "");
+    append_publication(output, prefix + "/controls/apply/meta", "");
     return output;
 }
 

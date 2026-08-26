@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmxwb/fixture.hpp"
+#include "dmxwb/group_scene.hpp"
 #include "dmxwb/persistence.hpp"
 
 #include <cstddef>
@@ -19,9 +20,9 @@ inline constexpr std::uint16_t kMqttBrokerPort = 1883;
 inline constexpr std::string_view kMqttSystemDeviceId = "dmxwb";
 inline constexpr std::string_view kMqttSystemSourceCommandTopic =
     "/devices/dmxwb/controls/source/on";
-// MQTT '+' wildcard must occupy a complete topic level. A partial filter such
-// as "dmxwb_fixture_+" is invalid. Subscribe once to all WB device command
-// topics and let parse_mqtt_command() keep only DMXWB system/Fixture commands.
+// MQTT '+' wildcard occupies one complete topic level. All DMXWB Fixture,
+// Group and Scene device commands fit this one subscription; the parser then
+// accepts only the supported DMXWB device prefixes/controls.
 inline constexpr std::string_view kMqttDeviceCommandSubscription =
     "/devices/+/controls/+/on";
 
@@ -31,8 +32,6 @@ inline constexpr std::string_view kMqttConfigResultTopic = "/dmxwb/config/result
 inline constexpr std::string_view kMqttStateTopic = "/dmxwb/state";
 inline constexpr std::string_view kMqttStatusTopic = "/dmxwb/status";
 
-// Типы команд намеренно не зависят от MQTT broker/transport. DEV-007B
-// преобразует libmosquitto callbacks в эти команды и передаст их Controller.
 enum class MqttCommandType {
     set_source,
     set_config,
@@ -45,11 +44,24 @@ enum class MqttCommandType {
     fixture_brightness,
     fixture_temperature,
     fixture_reset,
+    group_name,
+    group_power,
+    group_red,
+    group_green,
+    group_blue,
+    group_color,
+    group_brightness,
+    group_temperature,
+    group_reset,
+    scene_name,
+    scene_apply,
 };
 
 struct MqttCommand final {
     MqttCommandType type{MqttCommandType::set_source};
     Fixture::Id fixture_id{0};
+    GroupId group_id{0};
+    SceneId scene_id{0};
     PersistedSource source{PersistedSource::mqtt};
     std::string text;
     std::uint8_t value{0};
@@ -80,9 +92,8 @@ struct MqttCommandParseResult final {
     std::string_view payload,
     bool retained);
 
-// MQTT callback помещает сюда только полностью разобранные команды. Controller
-// извлекает их последовательно; callback остаётся коротким и не касается serial
-// или файлов persistence.
+// MQTT callback помещает сюда только полностью разобранные live commands.
+// Controller извлекает их последовательно; callback не касается serial/files.
 class MqttCommandQueue final {
 public:
     void push(MqttCommand command);
@@ -118,6 +129,16 @@ enum class MqttApplicationStatus {
 [[nodiscard]] std::vector<MqttPublication> build_fixture_metadata_publications(const Fixture& fixture);
 [[nodiscard]] std::vector<MqttPublication> build_fixture_state_publications(const Fixture& fixture);
 [[nodiscard]] std::vector<MqttPublication> build_fixture_retained_cleanup_publications(Fixture::Id fixture_id);
+
+[[nodiscard]] std::vector<MqttPublication> build_group_metadata_publications(const GroupConfigRecord& group);
+[[nodiscard]] std::vector<MqttPublication> build_group_state_publications(
+    const GroupConfigRecord& group,
+    const GroupControlState& state);
+[[nodiscard]] std::vector<MqttPublication> build_group_retained_cleanup_publications(GroupId group_id);
+
+[[nodiscard]] std::vector<MqttPublication> build_scene_metadata_publications(const SceneConfigRecord& scene);
+[[nodiscard]] std::vector<MqttPublication> build_scene_state_publications(const SceneConfigRecord& scene);
+[[nodiscard]] std::vector<MqttPublication> build_scene_retained_cleanup_publications(SceneId scene_id);
 
 // Internal/web snapshots уже сериализованы владельцами данных. Эта функция
 // только сопоставляет канонические payload с retained MQTT topics.
