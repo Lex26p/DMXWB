@@ -1,5 +1,7 @@
 #include "dmxwb/mqtt_client.hpp"
 
+#include <mosquitto.h>
+
 #include <iostream>
 #include <string_view>
 
@@ -18,6 +20,13 @@ void expect_true(bool condition, std::string_view name) {
 int main() {
     dmxwb::MqttCommandQueue queue;
     dmxwb::MqttClient client{queue};
+
+    expect_true(
+        mosquitto_sub_topic_check(dmxwb::kMqttDeviceCommandSubscription.data()) == MOSQ_ERR_SUCCESS,
+        "DMXWB command subscription is valid MQTT syntax");
+    expect_true(
+        mosquitto_sub_topic_check("/devices/dmxwb_fixture_+/controls/+/on") != MOSQ_ERR_SUCCESS,
+        "partial-level wildcard regression is rejected by libmosquitto");
 
     expect_true(!client.running(), "MQTT client initially stopped");
     expect_true(!client.connected(), "MQTT client initially disconnected");

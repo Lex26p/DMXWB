@@ -6,10 +6,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 ROOTFS="${DMXWB_WB8_ROOTFS:-/opt/dmxwb/wb8-bullseye-cross-arm64}"
 MARKER="${ROOTFS}/.dmxwb-bullseye-cross-arm64-ready"
-MOSQUITTO_PC="${ROOTFS}/usr/lib/aarch64-linux-gnu/pkgconfig/libmosquitto.pc"
 CHROOT_SOURCE="${ROOTFS}/work/dmxwb"
 OUTPUT_DIR="${REPO_ROOT}/artifacts/wb8-bullseye-arm64"
 OUTPUT_BIN="${OUTPUT_DIR}/dmxwb"
+OUTPUT_MQTT_ACCEPTANCE="${OUTPUT_DIR}/dmxwb-mqtt-acceptance"
 HOST_BUILD="${REPO_ROOT}/build-linux-wb8"
 
 if [[ ! -f "${MARKER}" ]]; then
@@ -18,24 +18,21 @@ if [[ ! -f "${MARKER}" ]]; then
     exit 1
 fi
 
-for command_name in cmake tar readelf file sha256sum pkg-config; do
+for command_name in cmake tar readelf file sha256sum; do
     if ! command -v "${command_name}" >/dev/null 2>&1; then
         echo "Missing host command: ${command_name}" >&2
         exit 1
     fi
 done
 
-if ! pkg-config --exists libmosquitto; then
-    echo "Host libmosquitto development package is missing." >&2
-    echo "Install it in local Linux/WSL, for example:" >&2
-    echo "  sudo apt-get update && sudo apt-get install -y pkg-config libmosquitto-dev" >&2
-    exit 1
-fi
-
-if [[ ! -f "${MOSQUITTO_PC}" ]]; then
-    echo "Bullseye ARM64 libmosquitto dependency is missing from cross rootfs." >&2
-    echo "Run:" >&2
-    echo "  bash tools/wb8/ensure_bullseye_mosquitto_arm64.sh" >&2
+if ! sudo chroot "${ROOTFS}" /bin/bash -lc '
+    set -e
+    export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+    pkg-config --exists libmosquitto
+    printf "cross libmosquitto: "; pkg-config --modversion libmosquitto
+' ; then
+    echo "Bullseye ARM64 libmosquitto dependency is missing." >&2
+    echo "Run tools/wb8/ensure_bullseye_mosquitto_arm64.sh first." >&2
     exit 1
 fi
 
@@ -65,11 +62,8 @@ tar \
 
 sudo chroot "${ROOTFS}" /bin/bash -lc '
     set -euo pipefail
-    export PKG_CONFIG_PATH=
     export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
     cd /work/dmxwb
-    pkg-config --print-errors --exists libmosquitto
-    printf "cross libmosquitto: "; pkg-config --modversion libmosquitto
     rm -rf build-wb8
     cmake -S . -B build-wb8 \
         -DCMAKE_SYSTEM_NAME=Linux \
@@ -79,44 +73,61 @@ sudo chroot "${ROOTFS}" /bin/bash -lc '
         -DBUILD_TESTING=OFF \
         -DDMXWB_WARNINGS_AS_ERRORS=ON \
         -DDMXWB_STATIC_GNU_RUNTIME=ON
-    cmake --build build-wb8 -j2 --target dmxwb
+    cmake --build build-wb8 -j2 --target dmxwb dmxwb_mqtt_acceptance
 '
 
 mkdir -p "${OUTPUT_DIR}"
 sudo cp "${CHROOT_SOURCE}/build-wb8/dmxwb" "${OUTPUT_BIN}"
-sudo chown "$(id -u):$(id -g)" "${OUTPUT_BIN}"
-chmod 0755 "${OUTPUT_BIN}"
+sudo cp "${CHROOT_SOURCE}/build-wb8/dmxwb-mqtt-acceptance" "${OUTPUT_MQTT_ACCEPTANCE}"
+sudo chown "$(id -u):$(id -g)" "${OUTPUT_BIN}" "${OUTPUT_MQTT_ACCEPTANCE}"
+chmod 0755 "${OUTPUT_BIN}" "${OUTPUT_MQTT_ACCEPTANCE}"
 
-echo
-echo "Target artifact: ${OUTPUT_BIN}"
-file "${OUTPUT_BIN}"
+verify_artifact() {
+    local artifact="$1"
+    local require_mosquitto="$2"
 
-if ! readelf -h "${OUTPUT_BIN}" | grep -q 'Machine:.*AArch64'; then
-    echo "Unexpected target architecture; expected ELF AArch64." >&2
-    readelf -h "${OUTPUT_BIN}" >&2 || true
-    exit 1
-fi
+    echo
+    echo "Target artifact: ${artifact}"
+    file "${artifact}"
 
-if readelf -d "${OUTPUT_BIN}" | grep -Eq 'libstdc\+\+|libgcc_s'; then
-    echo "GNU C++ runtime is still dynamically required; portable runtime link failed." >&2
-    readelf -d "${OUTPUT_BIN}" | grep NEEDED || true
-    exit 1
-fi
+    if ! readelf -h "${artifact}" | grep -q 'Machine:.*AArch64'; then
+        echo "Unexpected target architecture; expected ELF AArch64." >&2
+        readelf -h "${artifact}" >&2 || true
+        exit 1
+    fi
 
-MAX_GLIBC="$(readelf --version-info "${OUTPUT_BIN}" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sort -V | tail -n1 || true)"
-if [[ -z "${MAX_GLIBC}" ]]; then
-    echo "Could not determine GLIBC requirement." >&2
-    exit 1
-fi
+    if readelf -d "${artifact}" | grep -Eq 'libstdc\+\+|libgcc_s'; then
+        echo "GNU C++ runtime is still dynamically required; portable runtime link failed." >&2
+        readelf -d "${artifact}" | grep NEEDED || true
+        exit 1
+    fi
 
-if [[ "$(printf '%s\n%s\n' "${MAX_GLIBC}" 'GLIBC_2.31' | sort -V | tail -n1)" != 'GLIBC_2.31' ]]; then
-    echo "Binary requires ${MAX_GLIBC}, newer than Bullseye GLIBC_2.31." >&2
-    exit 1
-fi
+    local max_glibc
+    max_glibc="$(readelf --version-info "${artifact}" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sort -V | tail -n1 || true)"
+    if [[ -z "${max_glibc}" ]]; then
+        echo "Could not determine GLIBC requirement." >&2
+        exit 1
+    fi
+    if [[ "$(printf '%s\n%s\n' "${max_glibc}" 'GLIBC_2.31' | sort -V | tail -n1)" != 'GLIBC_2.31' ]]; then
+        echo "Binary requires ${max_glibc}, newer than Bullseye GLIBC_2.31." >&2
+        exit 1
+    fi
 
-echo "Maximum required glibc symbol version: ${MAX_GLIBC}"
-echo "Dynamic dependencies:"
-readelf -d "${OUTPUT_BIN}" | grep NEEDED || true
-sha256sum "${OUTPUT_BIN}"
+    if [[ "${require_mosquitto}" == "yes" ]] && \
+       ! readelf -d "${artifact}" | grep -Fq 'libmosquitto.so.1'; then
+        echo "MQTT acceptance binary does not dynamically require libmosquitto.so.1." >&2
+        readelf -d "${artifact}" | grep NEEDED || true
+        exit 1
+    fi
+
+    echo "Maximum required glibc symbol version: ${max_glibc}"
+    echo "Dynamic dependencies:"
+    readelf -d "${artifact}" | grep NEEDED || true
+    sha256sum "${artifact}"
+}
+
+verify_artifact "${OUTPUT_BIN}" no
+verify_artifact "${OUTPUT_MQTT_ACCEPTANCE}" yes
+
 echo "WB8 laptop cross build completed."
 echo "Run tools/wb8/verify_on_target.sh for target CLI verification when required by the current gate."

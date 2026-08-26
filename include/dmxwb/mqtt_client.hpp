@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmxwb/mqtt_contract.hpp"
+#include "dmxwb/mqtt_runtime.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -30,7 +31,7 @@ struct MqttClientDiagnostics final {
 // Thin libmosquitto transport. Network callbacks only parse/enqueue Commands
 // and set reconnect/resync flags. Fixture model, persistence and DmxOutput are
 // deliberately owned by the Controller/main context, never by this callback.
-class MqttClient final {
+class MqttClient final : public MqttRuntimeTransport {
 public:
     explicit MqttClient(MqttCommandQueue& command_queue);
     ~MqttClient();
@@ -46,15 +47,15 @@ public:
     void stop() noexcept;
 
     [[nodiscard]] bool running() const noexcept;
-    [[nodiscard]] bool connected() const noexcept;
+    [[nodiscard]] bool connected() const noexcept override;
 
     [[nodiscard]] bool publish(const MqttPublication& publication);
-    [[nodiscard]] bool publish_all(std::span<const MqttPublication> publications);
+    [[nodiscard]] bool publish_all(std::span<const MqttPublication> publications) override;
 
     // on_connect sets this flag after subscriptions are recreated. The
     // Controller/main context consumes it and publishes the complete current
     // metadata/state from its own model.
-    [[nodiscard]] bool take_full_republish_request() noexcept;
+    [[nodiscard]] bool take_full_republish_request() noexcept override;
 
     [[nodiscard]] MqttClientDiagnostics diagnostics() const;
 

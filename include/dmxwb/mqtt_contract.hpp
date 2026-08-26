@@ -19,8 +19,11 @@ inline constexpr std::uint16_t kMqttBrokerPort = 1883;
 inline constexpr std::string_view kMqttSystemDeviceId = "dmxwb";
 inline constexpr std::string_view kMqttSystemSourceCommandTopic =
     "/devices/dmxwb/controls/source/on";
-inline constexpr std::string_view kMqttFixtureCommandSubscription =
-    "/devices/dmxwb_fixture_+/controls/+/on";
+// MQTT '+' wildcard must occupy a complete topic level. A partial filter such
+// as "dmxwb_fixture_+" is invalid. Subscribe once to all WB device command
+// topics and let parse_mqtt_command() keep only DMXWB system/Fixture commands.
+inline constexpr std::string_view kMqttDeviceCommandSubscription =
+    "/devices/+/controls/+/on";
 
 inline constexpr std::string_view kMqttConfigTopic = "/dmxwb/config";
 inline constexpr std::string_view kMqttStateTopic = "/dmxwb/state";

@@ -1,0 +1,96 @@
+=== DMXWB DEV-007 MQTT + Fixture hardware acceptance ===
+generated_utc: 2026-08-26T13:08:55Z
+source_head: 283526b7873501e665aaef1a0905f383e1a6c518
+source_worktree: modified
+artifact_sha256: b0f741c779fed9681b636b20fddc8e295270d80606883ea78eb925e752ca7341
+target: root@10.200.200.1
+port: /dev/ttyRS485-1
+fixture_start_address: 1
+fixed_refresh_hz: 44
+
+--- target identity ---
+model: Wiren Board rev. 8.5.1 (T507)
+Linux wirenboard-A35WDYWM 6.8.0-wb160 #1 SMP Wed Jul  8 12:40:57 UTC 2026 aarch64 GNU/Linux
+RELEASE_NAME=wb-2606
+SUITE=stable
+TARGET=wb8/bullseye
+REPO_PREFIX=libmosquitto: 	libmosquitto.so.1 (libc6,AArch64) => /lib/aarch64-linux-gnu/libmosquitto.so.1
+run_a_pid: 107165
+retained_source_command_ignored: PASS
+retained_fixture_command_ignored: PASS
+red_user_observation: PASS
+brightness_user_observation: PASS
+saved_state_while_off: PASS
+power_off_user_observation: PASS
+power_restore_user_observation: PASS
+blue_user_observation: PASS
+process_survives_broker_down: PASS
+dmx_continues_broker_down_user: PASS
+full_republish_after_reconnect: PASS
+DEV-007 MQTT acceptance runtime
+  config_path: /tmp/dmxwb-dev007-mqtt/config.json
+  state_path: /tmp/dmxwb-dev007-mqtt/state.json
+  dmx_port: /dev/ttyRS485-1
+  fixture_count: 1
+  source: mqtt
+runtime_started: PASS
+mqtt_successful_connections: 2
+mqtt_disconnects: 2
+mqtt_commands_accepted: 7
+mqtt_commands_ignored: 2
+mqtt_commands_rejected: 2
+mqtt_publish_failures: 0
+mqtt_callback_failures: 0
+runtime_commands_processed: 7
+runtime_commands_rejected: 0
+runtime_dmx_snapshots_published: 8
+runtime_dmx_publish_failures: 0
+runtime_full_republishes: 2
+runtime_mqtt_publish_failures: 0
+runtime_state_save_failures: 0
+state_flush_action: not_dirty
+dmx_frames_sent: 2560
+dmx_open_failures: 0
+dmx_send_failures: 0
+dmx_recoveries: 0
+dmx_missed_deadlines: 0
+dmx_active_refresh_hz: 44
+dmx_serial_open_after_stop: 0
+software_result: PASS
+run_a_software_acceptance: PASS
+graceful_off_status: PASS
+mqtt_lwt_off: PASS
+final_all_off_user_observation: PASS
+DEV-007 MQTT acceptance runtime
+  config_path: /tmp/dmxwb-dev007-mqtt/config.json
+  state_path: /tmp/dmxwb-dev007-mqtt/state.json
+  dmx_port: /dev/ttyRS485-1
+  fixture_count: 1
+  source: mqtt
+runtime_started: PASS
+mqtt_successful_connections: 1
+mqtt_disconnects: 1
+mqtt_commands_accepted: 1
+mqtt_commands_ignored: 0
+mqtt_commands_rejected: 0
+mqtt_publish_failures: 0
+mqtt_callback_failures: 0
+runtime_commands_processed: 1
+runtime_commands_rejected: 0
+runtime_dmx_snapshots_published: 2
+runtime_dmx_publish_failures: 0
+runtime_full_republishes: 1
+runtime_mqtt_publish_failures: 0
+runtime_state_save_failures: 0
+state_flush_action: not_dirty
+dmx_frames_sent: 354
+dmx_open_failures: 0
+dmx_send_failures: 0
+dmx_recoveries: 0
+dmx_missed_deadlines: 0
+dmx_active_refresh_hz: 44
+dmx_serial_open_after_stop: 0
+software_result: PASS
+final_run_software_acceptance: PASS
+dev007_mqtt_hardware_result: PASS
+=== DMXWB DEV-007 MQTT + FIXTURE HARDWARE PASS ===

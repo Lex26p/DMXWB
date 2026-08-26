@@ -90,6 +90,10 @@ std::vector<MqttPublication> MqttController::build_full_republish(
     return output;
 }
 
+std::shared_ptr<const DmxSnapshot> MqttController::build_current_snapshot() {
+    return build_next_snapshot();
+}
+
 DmxSnapshot::Generation MqttController::next_generation() const noexcept {
     return generation_;
 }

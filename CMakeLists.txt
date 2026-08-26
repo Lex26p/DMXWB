@@ -69,6 +69,7 @@ dmxwb_enable_warnings(dmxwb_core)
 
 add_library(dmxwb_mqtt_transport STATIC
     src/mqtt_client.cpp
+    src/mqtt_runtime.cpp
 )
 
 target_include_directories(dmxwb_mqtt_transport
@@ -92,6 +93,16 @@ target_link_libraries(dmxwb PRIVATE dmxwb_core dmxwb_mqtt_transport)
 target_compile_features(dmxwb PRIVATE cxx_std_20)
 dmxwb_enable_warnings(dmxwb)
 dmxwb_enable_portable_gnu_runtime(dmxwb)
+
+add_executable(dmxwb_mqtt_acceptance
+    src/mqtt_acceptance_main.cpp
+)
+
+target_link_libraries(dmxwb_mqtt_acceptance PRIVATE dmxwb_mqtt_transport)
+target_compile_features(dmxwb_mqtt_acceptance PRIVATE cxx_std_20)
+dmxwb_enable_warnings(dmxwb_mqtt_acceptance)
+dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_acceptance)
+set_target_properties(dmxwb_mqtt_acceptance PROPERTIES OUTPUT_NAME "dmxwb-mqtt-acceptance")
 
 include(CTest)
 if(BUILD_TESTING)
@@ -158,6 +169,15 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_mqtt_client_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_client_tests)
 
+    add_executable(dmxwb_mqtt_runtime_tests
+        tests/test_mqtt_runtime.cpp
+    )
+
+    target_link_libraries(dmxwb_mqtt_runtime_tests PRIVATE dmxwb_mqtt_transport)
+    target_compile_features(dmxwb_mqtt_runtime_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_mqtt_runtime_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_runtime_tests)
+
     add_test(NAME dmxwb.unit COMMAND dmxwb_tests)
     add_test(NAME dmxwb.persistence COMMAND dmxwb_persistence_tests)
     add_test(NAME dmxwb.persistence_storage COMMAND dmxwb_persistence_storage_tests)
@@ -165,4 +185,5 @@ if(BUILD_TESTING)
     add_test(NAME dmxwb.mqtt_contract COMMAND dmxwb_mqtt_contract_tests)
     add_test(NAME dmxwb.mqtt_controller COMMAND dmxwb_mqtt_controller_tests)
     add_test(NAME dmxwb.mqtt_client COMMAND dmxwb_mqtt_client_tests)
+    add_test(NAME dmxwb.mqtt_runtime COMMAND dmxwb_mqtt_runtime_tests)
 endif()

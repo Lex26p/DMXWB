@@ -33,6 +33,9 @@ public:
     [[nodiscard]] std::vector<MqttPublication> build_full_republish(
         MqttApplicationStatus status = MqttApplicationStatus::running) const;
 
+    // Полный текущий MQTT snapshot нужен startup/re-entry orchestration.
+    [[nodiscard]] std::shared_ptr<const DmxSnapshot> build_current_snapshot();
+
     [[nodiscard]] DmxSnapshot::Generation next_generation() const noexcept;
 
 private:

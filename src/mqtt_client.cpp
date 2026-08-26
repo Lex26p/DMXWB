@@ -240,19 +240,14 @@ void MqttClient::handle_connect(struct mosquitto* mosq, int rc) {
         return;
     }
 
-    const int system_result = mosquitto_subscribe(
+    const int command_result = mosquitto_subscribe(
         mosq,
         nullptr,
-        kMqttSystemSourceCommandTopic.data(),
+        kMqttDeviceCommandSubscription.data(),
         kMqttQos);
-    const int fixture_result = mosquitto_subscribe(
-        mosq,
-        nullptr,
-        kMqttFixtureCommandSubscription.data(),
-        kMqttQos);
-    if (system_result != MOSQ_ERR_SUCCESS || fixture_result != MOSQ_ERR_SUCCESS) {
+    if (command_result != MOSQ_ERR_SUCCESS) {
         connected_.store(false, std::memory_order_release);
-        set_error("MQTT subscribe failed after connect");
+        set_error(std::string{"MQTT command subscribe: "} + mosquitto_strerror(command_result));
         (void)mosquitto_disconnect(mosq);
         return;
     }
