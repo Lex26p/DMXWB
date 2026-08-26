@@ -51,6 +51,11 @@ public:
     void set_color(std::uint8_t red, std::uint8_t green, std::uint8_t blue) noexcept;
     [[nodiscard]] bool set_brightness(std::uint8_t percent) noexcept;
     [[nodiscard]] bool set_temperature(std::uint8_t percent) noexcept;
+    [[nodiscard]] bool restore_state(
+        bool requested_power,
+        RgbwValues saved_rgbw,
+        std::uint8_t brightness,
+        std::uint8_t temperature) noexcept;
     void reset() noexcept;
 
 private:
@@ -75,6 +80,7 @@ public:
 
     [[nodiscard]] std::size_t fixture_count() const noexcept;
     [[nodiscard]] std::size_t start_address() const noexcept;
+    [[nodiscard]] Fixture::Id next_fixture_id() const noexcept;
 
     [[nodiscard]] Fixture* fixture_at(std::size_t zero_based_index) noexcept;
     [[nodiscard]] const Fixture* fixture_at(std::size_t zero_based_index) const noexcept;
@@ -82,6 +88,10 @@ public:
     [[nodiscard]] bool set_fixture_count(std::size_t count);
     [[nodiscard]] bool set_start_address(std::size_t start_address) noexcept;
     [[nodiscard]] bool reconfigure(std::size_t count, std::size_t start_address);
+    [[nodiscard]] bool restore(
+        std::vector<Fixture> fixtures,
+        std::size_t start_address,
+        Fixture::Id next_fixture_id);
 
     [[nodiscard]] std::optional<std::size_t> fixture_start_address(
         std::size_t zero_based_index) const noexcept;

@@ -1,6 +1,7 @@
 #include "dmxwb/fixture.hpp"
 
 #include <limits>
+#include <unordered_set>
 #include <utility>
 
 namespace dmxwb {
@@ -100,6 +101,22 @@ bool Fixture::set_temperature(std::uint8_t percent) noexcept {
     return true;
 }
 
+bool Fixture::restore_state(
+    bool requested_power,
+    RgbwValues saved_rgbw,
+    std::uint8_t brightness,
+    std::uint8_t temperature) noexcept {
+    if (brightness > 100 || temperature > 100) {
+        return false;
+    }
+
+    requested_power_ = requested_power;
+    saved_ = saved_rgbw;
+    brightness_ = brightness;
+    temperature_ = temperature;
+    return true;
+}
+
 void Fixture::reset() noexcept {
     requested_power_ = true;
     saved_ = RgbwValues{255, 255, 255, 255};
@@ -125,6 +142,10 @@ std::size_t FixtureCollection::fixture_count() const noexcept {
 
 std::size_t FixtureCollection::start_address() const noexcept {
     return start_address_;
+}
+
+Fixture::Id FixtureCollection::next_fixture_id() const noexcept {
+    return next_fixture_id_;
 }
 
 Fixture* FixtureCollection::fixture_at(std::size_t zero_based_index) noexcept {
@@ -172,6 +193,28 @@ bool FixtureCollection::reconfigure(std::size_t count, std::size_t start_address
     }
 
     start_address_ = start_address;
+    return true;
+}
+
+bool FixtureCollection::restore(
+    std::vector<Fixture> fixtures,
+    std::size_t start_address,
+    Fixture::Id next_fixture_id) {
+    if (!is_valid_configuration(fixtures.size(), start_address) || next_fixture_id == 0) {
+        return false;
+    }
+
+    std::unordered_set<Fixture::Id> ids;
+    ids.reserve(fixtures.size());
+    for (const auto& fixture : fixtures) {
+        if (fixture.id() == 0 || fixture.id() >= next_fixture_id || !ids.insert(fixture.id()).second) {
+            return false;
+        }
+    }
+
+    fixtures_ = std::move(fixtures);
+    start_address_ = start_address;
+    next_fixture_id_ = next_fixture_id;
     return true;
 }
 
