@@ -1,0 +1,47 @@
+=== DMXWB DEV-010A QLC+ Art-Net network acceptance ===
+generated_utc: 2026-08-27T11:13:02Z
+source_head: 9daf66ce086f6e01897104d7e70b8c81fb29bf97
+source_worktree: modified
+artifact_sha256: bb1b32a276bf2963085ba568b3fa75c414b65fff5e5c79741b2cda50f15b0951
+target: root@10.200.200.1
+qlc_plus_pc_ip: 10.200.200.2
+artnet_port_address: 0
+development_oem_placeholder: 0xFFFF
+physical_dmx_connected: no
+source_switching_connected: no
+wb8_interface: dbg0
+wb8_ipv4: 10.200.200.1
+wb8_mac: 1a:55:89:a2:69:43
+route_to_qlc: 10.200.200.2 dev dbg0 src 10.200.200.1 uid 0 
+udp_6454_open: PASS
+qlc_nodes_tree_discovery_user: PASS
+poll_reply_unicast_sent: PASS (39)
+artdmx_first_pattern: PASS (17 34 51 68 0 0 0 0)
+artnet_source_active: PASS
+real_network_source_lost_after_3s: PASS
+real_network_hold_last: PASS (17 34 51 68 0 0 0 0)
+artdmx_recovery_pattern: PASS (101 102 103 104 0 0 0 0)
+same_runtime_recovery_to_active: PASS
+--- final runtime diagnostics ---
+final_source_state: ACTIVE
+final_sync_mode: ASYNC
+final_bind_attempts: 1
+final_bind_failures: 0
+final_transport_recoveries: 0
+final_datagrams_received: 612
+final_core_rejections: 0
+final_conflicts: 0
+final_source_lost_events: 1
+final_snapshots_published: 403
+final_poll_replies_scheduled: 209
+final_poll_replies_sent: 209
+final_poll_replies_dropped: 0
+final_poll_replies_not_built: 0
+final_receive_errors: 0
+final_send_errors: 0
+final_transport_open_before_shutdown: 1
+final_transport_open_after_shutdown: 0
+runtime_error_counters_zero: PASS
+runtime_required_events: PASS
+dev010a_qlcplus_network_result: PASS
+=== DMXWB DEV-010A QLC+ ART-NET NETWORK PASS ===
