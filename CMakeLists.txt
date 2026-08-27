@@ -44,6 +44,7 @@ add_library(dmxwb_core STATIC
     src/app_info.cpp
     src/artnet_core.cpp
     src/artnet_runtime.cpp
+    src/artnet_source_coordinator.cpp
     src/artnet_transport_linux.cpp
     src/dmx_output.cpp
     src/dmx_source_router.cpp
@@ -194,6 +195,15 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_artnet_runtime_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_artnet_runtime_tests)
 
+    add_executable(dmxwb_artnet_source_coordinator_tests
+        tests/test_artnet_source_coordinator.cpp
+    )
+
+    target_link_libraries(dmxwb_artnet_source_coordinator_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_artnet_source_coordinator_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_artnet_source_coordinator_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_artnet_source_coordinator_tests)
+
     add_executable(dmxwb_artnet_transport_linux_tests
         tests/test_artnet_transport_linux.cpp
     )
@@ -265,6 +275,7 @@ if(BUILD_TESTING)
     add_test(NAME dmxwb.dmx_source_router COMMAND dmxwb_dmx_source_router_tests)
     add_test(NAME dmxwb.artnet_core COMMAND dmxwb_artnet_core_tests)
     add_test(NAME dmxwb.artnet_runtime COMMAND dmxwb_artnet_runtime_tests)
+    add_test(NAME dmxwb.artnet_source_coordinator COMMAND dmxwb_artnet_source_coordinator_tests)
     add_test(NAME dmxwb.artnet_transport_linux COMMAND dmxwb_artnet_transport_linux_tests)
     add_test(NAME dmxwb.mqtt_contract COMMAND dmxwb_mqtt_contract_tests)
     add_test(NAME dmxwb.mqtt_config COMMAND dmxwb_mqtt_config_tests)

@@ -41,6 +41,7 @@ ArtNetRuntime::ArtNetRuntime(
       core_(std::move(core)),
       transport_(transport),
       delay_source_(delay_source),
+      artnet_output_active_(config_.poll_reply_identity.artnet_output_active),
       latest_snapshot_(std::shared_ptr<const DmxSnapshot>{}) {}
 
 ArtNetRuntime::~ArtNetRuntime() {
@@ -76,7 +77,7 @@ void ArtNetRuntime::shutdown() noexcept {
 }
 
 void ArtNetRuntime::set_artnet_output_active(bool active) noexcept {
-    config_.poll_reply_identity.artnet_output_active = active;
+    artnet_output_active_.store(active, std::memory_order_release);
 }
 
 std::shared_ptr<const DmxSnapshot> ArtNetRuntime::latest_physical_snapshot() const noexcept {
@@ -222,6 +223,8 @@ void ArtNetRuntime::send_due_poll_replies(time_point now) noexcept {
             (static_cast<unsigned int>(config_.poll_reply_identity.poll_reply_counter) + 1U) & 0xffffU);
         auto reply_identity = config_.poll_reply_identity;
         reply_identity.ip = iterator->local_ip;
+        reply_identity.artnet_output_active =
+            artnet_output_active_.load(std::memory_order_acquire);
         const auto reply = build_art_poll_reply(core_.port_address(), reply_identity);
         if (!reply.has_value()) {
             ++diagnostics_.poll_replies_not_built;

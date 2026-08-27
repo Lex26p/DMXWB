@@ -150,6 +150,7 @@ private:
     std::optional<time_point> next_bind_attempt_;
     bool transport_failure_seen_{false};
     std::uint64_t last_published_revision_{0};
+    std::atomic<bool> artnet_output_active_{false};
 
 #if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
     std::atomic<std::shared_ptr<const DmxSnapshot>> latest_snapshot_;
