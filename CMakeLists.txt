@@ -43,6 +43,7 @@ pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 add_library(dmxwb_core STATIC
     src/app_info.cpp
     src/artnet_core.cpp
+    src/artnet_runtime.cpp
     src/dmx_output.cpp
     src/fixture.cpp
     src/group_scene.cpp
@@ -163,6 +164,15 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_artnet_core_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_artnet_core_tests)
 
+    add_executable(dmxwb_artnet_runtime_tests
+        tests/test_artnet_runtime.cpp
+    )
+
+    target_link_libraries(dmxwb_artnet_runtime_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_artnet_runtime_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_artnet_runtime_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_artnet_runtime_tests)
+
     add_executable(dmxwb_mqtt_contract_tests
         tests/test_mqtt_contract.cpp
     )
@@ -223,6 +233,7 @@ if(BUILD_TESTING)
     add_test(NAME dmxwb.persistence_runtime COMMAND dmxwb_persistence_runtime_tests)
     add_test(NAME dmxwb.group_scene COMMAND dmxwb_group_scene_tests)
     add_test(NAME dmxwb.artnet_core COMMAND dmxwb_artnet_core_tests)
+    add_test(NAME dmxwb.artnet_runtime COMMAND dmxwb_artnet_runtime_tests)
     add_test(NAME dmxwb.mqtt_contract COMMAND dmxwb_mqtt_contract_tests)
     add_test(NAME dmxwb.mqtt_config COMMAND dmxwb_mqtt_config_tests)
     add_test(NAME dmxwb.mqtt_controller COMMAND dmxwb_mqtt_controller_tests)
