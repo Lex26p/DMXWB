@@ -1,0 +1,134 @@
+=== DMXWB DEV-010C1 WB8 NETWORK INTERFACE DOWN / UP RECOVERY ===
+generated_utc: 2026-08-27T14:59:47Z
+source_head: 80aefbbcf7d0810626ff4f4d62a82ab4ae0815df
+source_worktree: modified
+artifact_sha256: a1e08ea8429c6b9d0d5fd44565dce7ad9c080e0b558915df3ba1d922cf986c62
+target: root@10.200.200.1
+qlc_plus_pc_ip: 10.200.200.2
+external_controller: QLC+ 5
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+fixture_channels_rgbw: 1/2/3/4
+artnet_port_address: 0
+development_oem_placeholder: 0xFFFF
+planned_interface_down_seconds: 7
+safety_fallback_up_seconds: 20
+fixed_refresh_hz: 44
+wb8_interface: dbg0
+wb8_ipv4: 10.200.200.1
+wb8_mac: 1a:55:89:a2:69:43
+route_to_qlc: 10.200.200.2 dev dbg0 src 10.200.200.1 uid 0 
+link_before: 6: dbg0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000\    link/ether 1a:55:89:a2:69:43 brd ff:ff:ff:ff:ff:ff
+addr_before: 6: dbg0    inet 10.200.200.1/30 brd 10.200.200.3 scope global noprefixroute dbg0\       valid_lft forever preferred_lft forever
+pre_outage_ping: PASS
+unified_runtime_started: PASS
+runtime_pid_before_outage: 161086
+runtime_starttime_before_outage: 1397925
+initial_source_mqtt: PASS
+artnet_snapshot_before_interface_outage: PASS
+source_artnet_selected: PASS
+green_physical_before_interface_outage_user: PASS
+dmx_frames_before_interface_outage: 669
+interface_cycle_user_ready: PASS
+safety_fallback_service_armed: PASS (dmxwb-dev010c1-iface-35723-fallback.service)
+primary_interface_cycle_service_started: PASS (dmxwb-dev010c1-iface-35723.service)
+interface_unreachable_during_down: PASS
+interface_reachable_after_automatic_up: PASS (poll 4)
+interface_stable_after_automatic_up: PASS (4 consecutive ping)
+link_after: 6: dbg0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000\    link/ether 1a:55:89:a2:69:43 brd ff:ff:ff:ff:ff:ff
+addr_after: 6: dbg0    inet 10.200.200.1/30 brd 10.200.200.3 scope global noprefixroute dbg0\       valid_lft forever preferred_lft forever
+primary_interface_cycle_service_result: PASS (success)
+--- interface cycle log ---
+cycle_started_utc: 2026-08-24T19:44:56Z
+interface: dbg0
+initial_operstate: up
+before_down_utc: 2026-08-24T19:44:59Z
+before_down_operstate: up
+interface_down_commanded_utc: 2026-08-24T19:44:59Z
+after_down_operstate: down
+interface_up_commanded_utc: 2026-08-24T19:45:06Z
+after_up_operstate: up
+primary_cancelled_safety_fallback_utc: 2026-08-24T19:45:07Z
+cycle_completed_utc: 2026-08-24T19:45:07Z
+primary_interface_down_up_log: PASS
+primary_cancelled_safety_fallback: PASS
+safety_fallback_not_used_for_pass: PASS
+same_runtime_process_after_interface_cycle: PASS (pid 161086, starttime 1397925)
+source_stays_artnet_and_recovers_active: PASS
+physical_dmx_continues_through_interface_outage: PASS (669 -> 1916, delta=1247)
+physical_hold_last_during_interface_outage_user: PASS
+same_runtime_process_after_fresh_artdmx: PASS (pid 161086, starttime 1397925)
+fresh_artdmx_red_after_interface_recovery_user: PASS
+final_explicit_return_to_mqtt: PASS
+final_mqtt_off_physical_user: PASS
+--- final runtime diagnostics ---
+final_selected_source: mqtt
+final_mqtt_successful_connections: 1
+final_mqtt_disconnects: 1
+final_mqtt_callback_failures: 0
+final_mqtt_runtime_commands_processed: 4
+final_mqtt_runtime_dmx_publish_failures: 0
+final_mqtt_runtime_state_save_failures: 0
+final_artnet_source_state: ACTIVE
+final_artnet_sync_mode: ASYNC
+final_artnet_bind_attempts: 1
+final_artnet_bind_failures: 0
+final_artnet_transport_recoveries: 0
+final_artnet_datagrams_received: 220
+final_artnet_receive_errors: 0
+final_artnet_send_errors: 0
+final_artnet_core_rejections: 0
+final_artnet_conflicts: 0
+final_artnet_source_lost_events: 2
+final_artnet_snapshots_published: 194
+final_artnet_poll_replies_sent: 26
+final_artnet_route_failures: 0
+final_router_mqtt_snapshots_received: 3
+final_router_artnet_snapshots_received: 192
+final_router_source_switches: 2
+final_router_source_switches_without_snapshot: 0
+final_router_physical_snapshots_published: 164
+final_router_physical_publish_failures: 0
+final_router_artnet_output_active: 0
+final_dmx_sink_ever_started: 1
+final_dmx_sink_start_failures: 0
+final_dmx_sink_publish_failures: 0
+final_dmx_sink_unexpected_stops: 0
+final_dmx_frames_sent: 4413
+final_dmx_open_failures: 0
+final_dmx_send_failures: 0
+final_dmx_recoveries: 0
+final_dmx_missed_deadlines: 0
+final_dmx_active_refresh_hz: 44
+final_dmx_serial_open_after_stop: 0
+final_artnet_transport_open_before_shutdown: 1
+final_artnet_transport_open_after_shutdown: 0
+state_flush_action: not_dirty
+software_result: PASS
+final_artnet_source_active_after_interface_recovery: PASS
+artnet_source_lost_events: PASS (2)
+source_switch_count: PASS (2)
+router_artnet_snapshots: PASS (192)
+physical_dmx_frames: PASS (4413)
+artnet_transport_recoveries_observed: 0
+final_mqtt_callback_failures: PASS (0)
+final_mqtt_runtime_dmx_publish_failures: PASS (0)
+final_mqtt_runtime_state_save_failures: PASS (0)
+final_artnet_bind_failures: PASS (0)
+final_artnet_receive_errors: PASS (0)
+final_artnet_send_errors: PASS (0; outage did not coincide with a pending PollReply)
+final_artnet_core_rejections: PASS (0)
+final_artnet_conflicts: PASS (0)
+final_artnet_route_failures: PASS (0)
+final_router_physical_publish_failures: PASS (0)
+final_dmx_sink_start_failures: PASS (0)
+final_dmx_sink_publish_failures: PASS (0)
+final_dmx_sink_unexpected_stops: PASS (0)
+final_dmx_open_failures: PASS (0)
+final_dmx_send_failures: PASS (0)
+final_dmx_missed_deadlines: PASS (0)
+final_dmx_serial_open_after_stop: PASS (0)
+fixed_44hz_physical_output: PASS
+artnet_transport_lifecycle: PASS
+dev010c1_interface_down_up_recovery_result: PASS
+=== DMXWB DEV-010C1 WB8 INTERFACE DOWN UP RECOVERY PASS ===
