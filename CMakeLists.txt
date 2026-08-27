@@ -46,6 +46,7 @@ add_library(dmxwb_core STATIC
     src/artnet_runtime.cpp
     src/artnet_transport_linux.cpp
     src/dmx_output.cpp
+    src/dmx_source_router.cpp
     src/fixture.cpp
     src/group_scene.cpp
     src/dmx_snapshot.cpp
@@ -166,6 +167,15 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_group_scene_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_group_scene_tests)
 
+    add_executable(dmxwb_dmx_source_router_tests
+        tests/test_dmx_source_router.cpp
+    )
+
+    target_link_libraries(dmxwb_dmx_source_router_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_dmx_source_router_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_dmx_source_router_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_dmx_source_router_tests)
+
     add_executable(dmxwb_artnet_core_tests
         tests/test_artnet_core.cpp
     )
@@ -252,6 +262,7 @@ if(BUILD_TESTING)
     add_test(NAME dmxwb.persistence_storage COMMAND dmxwb_persistence_storage_tests)
     add_test(NAME dmxwb.persistence_runtime COMMAND dmxwb_persistence_runtime_tests)
     add_test(NAME dmxwb.group_scene COMMAND dmxwb_group_scene_tests)
+    add_test(NAME dmxwb.dmx_source_router COMMAND dmxwb_dmx_source_router_tests)
     add_test(NAME dmxwb.artnet_core COMMAND dmxwb_artnet_core_tests)
     add_test(NAME dmxwb.artnet_runtime COMMAND dmxwb_artnet_runtime_tests)
     add_test(NAME dmxwb.artnet_transport_linux COMMAND dmxwb_artnet_transport_linux_tests)

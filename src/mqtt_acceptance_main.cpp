@@ -52,18 +52,6 @@ void print_usage() {
     return options;
 }
 
-class DmxOutputSink final : public dmxwb::MqttDmxSnapshotSink {
-public:
-    explicit DmxOutputSink(dmxwb::DmxOutput& output) : output_(output) {}
-
-    [[nodiscard]] bool publish_snapshot(const dmxwb::DmxSnapshot& snapshot) override {
-        return output_.publish_snapshot(snapshot);
-    }
-
-private:
-    dmxwb::DmxOutput& output_;
-};
-
 [[nodiscard]] std::string_view save_action_name(dmxwb::StateSaveAction action) noexcept {
     switch (action) {
         case dmxwb::StateSaveAction::not_dirty: return "not_dirty";
@@ -98,16 +86,20 @@ int main(int argc, char* argv[]) {
     dmxwb::DmxOutput output{dmxwb::DmxOutputConfig{
         persistence.config().dmx_port,
         std::chrono::milliseconds{250}}};
-    DmxOutputSink dmx_sink{output};
+    dmxwb::DmxSourceRouter dmx_router{
+        persistence.source(),
+        [&output](const dmxwb::DmxSnapshot& snapshot) {
+            return output.publish_snapshot(snapshot);
+        }};
     dmxwb::MqttRuntimeCoordinator runtime{
         persistence,
         command_queue,
         controller,
         mqtt,
-        dmx_sink};
+        dmx_router};
 
     if (!runtime.publish_initial_snapshot()) {
-        std::cerr << "Cannot publish initial MQTT DMX snapshot\n";
+        std::cerr << "Cannot route initial MQTT DMX snapshot\n";
         return 1;
     }
     if (!output.start()) {
@@ -141,6 +133,7 @@ int main(int argc, char* argv[]) {
     const auto mqtt_diag = mqtt.diagnostics();
     const auto dmx_diag = output.diagnostics();
     const auto& runtime_diag = runtime.diagnostics();
+    const auto router_diag = dmx_router.diagnostics();
 
     std::cout
         << "mqtt_successful_connections: " << mqtt_diag.successful_connections << '\n'
@@ -157,6 +150,17 @@ int main(int argc, char* argv[]) {
         << "runtime_full_republishes: " << runtime_diag.full_republishes << '\n'
         << "runtime_mqtt_publish_failures: " << runtime_diag.mqtt_publish_failures << '\n'
         << "runtime_state_save_failures: " << runtime_diag.state_save_failures << '\n'
+        << "source_router_mqtt_snapshots_received: " << router_diag.mqtt_snapshots_received << '\n'
+        << "source_router_artnet_snapshots_received: " << router_diag.artnet_snapshots_received << '\n'
+        << "source_router_source_switches: " << router_diag.source_switches << '\n'
+        << "source_router_source_switches_without_snapshot: "
+        << router_diag.source_switches_without_snapshot << '\n'
+        << "source_router_physical_snapshots_published: "
+        << router_diag.physical_snapshots_published << '\n'
+        << "source_router_physical_publish_failures: "
+        << router_diag.physical_publish_failures << '\n'
+        << "source_router_artnet_output_active: "
+        << (router_diag.artnet_output_active ? 1 : 0) << '\n'
         << "state_flush_action: " << save_action_name(flush_result.action) << '\n'
         << "dmx_frames_sent: " << dmx_diag.frames_sent << '\n'
         << "dmx_open_failures: " << dmx_diag.open_failures << '\n'
@@ -172,6 +176,7 @@ int main(int argc, char* argv[]) {
         mqtt_diag.callback_failures == 0 &&
         runtime_diag.dmx_publish_failures == 0 &&
         runtime_diag.state_save_failures == 0 &&
+        router_diag.physical_publish_failures == 0 &&
         dmx_diag.frames_sent > 0 &&
         dmx_diag.open_failures == 0 &&
         dmx_diag.send_failures == 0 &&

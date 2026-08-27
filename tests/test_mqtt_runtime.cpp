@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -69,13 +70,16 @@ public:
     std::vector<std::vector<dmxwb::MqttPublication>> batches_;
 };
 
-class FakeDmx final : public dmxwb::MqttDmxSnapshotSink {
+class FakePhysical final {
 public:
-    [[nodiscard]] bool publish_snapshot(const dmxwb::DmxSnapshot& snapshot) override {
-        if (fail_) return false;
+    [[nodiscard]] bool publish(const dmxwb::DmxSnapshot& snapshot) {
+        if (fail_) {
+            return false;
+        }
         snapshots_.push_back(snapshot);
         return true;
     }
+
     bool fail_{false};
     std::vector<dmxwb::DmxSnapshot> snapshots_;
 };
@@ -107,13 +111,23 @@ void test_runtime_orchestration() {
     dmxwb::MqttCommandQueue queue;
     dmxwb::MqttController controller{persistence};
     FakeTransport transport;
-    FakeDmx dmx;
-    dmxwb::MqttRuntimeCoordinator runtime{persistence, queue, controller, transport, dmx};
+    FakePhysical physical;
+    dmxwb::DmxSourceRouter router{
+        persistence.source(),
+        [&physical](const dmxwb::DmxSnapshot& snapshot) {
+            return physical.publish(snapshot);
+        }};
+    dmxwb::MqttRuntimeCoordinator runtime{
+        persistence,
+        queue,
+        controller,
+        transport,
+        router};
 
-    expect_true(runtime.publish_initial_snapshot(), "MQTT source startup snapshot publishes");
-    expect_true(dmx.snapshots_.size() == 1, "one startup whole snapshot");
-    if (!dmx.snapshots_.empty()) {
-        expect_true(dmx.snapshots_.back().channel(1) == std::optional<std::uint8_t>{0},
+    expect_true(runtime.publish_initial_snapshot(), "MQTT source startup snapshot routes");
+    expect_true(physical.snapshots_.size() == 1, "one startup whole physical snapshot");
+    if (!physical.snapshots_.empty()) {
+        expect_true(physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{0},
             "startup Fixture is physically off");
     }
 
@@ -146,9 +160,9 @@ void test_runtime_orchestration() {
     expect_true(power.accepted(), "runtime Power command parses");
     if (power.accepted()) queue.push(*power.command);
     runtime.step(dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{1});
-    expect_true(dmx.snapshots_.size() == 2, "Fixture command publishes one whole DMX snapshot");
-    if (dmx.snapshots_.size() >= 2) {
-        expect_true(dmx.snapshots_.back().channel(1) == std::optional<std::uint8_t>{255},
+    expect_true(physical.snapshots_.size() == 2, "Fixture command publishes one whole physical MQTT snapshot");
+    if (physical.snapshots_.size() >= 2) {
+        expect_true(physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{255},
             "Power ON reaches physical MQTT snapshot");
     }
 
@@ -156,14 +170,18 @@ void test_runtime_orchestration() {
         "/devices/dmxwb/controls/source/on", "artnet", false);
     if (artnet.accepted()) queue.push(*artnet.command);
     runtime.step(dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{2});
-    const auto before_inactive_change = dmx.snapshots_.size();
+    const auto before_inactive_change = physical.snapshots_.size();
+    expect_true(router.selected_source() == dmxwb::PersistedSource::artnet,
+        "source command switches router to ART-NET");
+    expect_true(before_inactive_change == 2,
+        "MQTT to ART-NET without ArtDmx preserves current physical output");
 
     auto red = dmxwb::parse_mqtt_command(
         "/devices/dmxwb_fixture_10/controls/red/on", "17", false);
     if (red.accepted()) queue.push(*red.command);
     runtime.step(dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{3});
-    expect_true(dmx.snapshots_.size() == before_inactive_change,
-        "inactive MQTT source updates model without touching physical DMX");
+    expect_true(physical.snapshots_.size() == before_inactive_change,
+        "inactive MQTT source updates router cache without touching physical DMX");
     expect_true(persistence.fixture_at(0) != nullptr && persistence.fixture_at(0)->saved_rgbw().red == 17,
         "inactive MQTT command still updates logical Fixture state");
 
@@ -171,10 +189,10 @@ void test_runtime_orchestration() {
         "/devices/dmxwb/controls/source/on", "mqtt", false);
     if (mqtt.accepted()) queue.push(*mqtt.command);
     runtime.step(dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{4});
-    expect_true(dmx.snapshots_.size() == before_inactive_change + 1,
-        "ART-NET to MQTT re-entry publishes latest whole MQTT snapshot");
-    if (!dmx.snapshots_.empty()) {
-        expect_true(dmx.snapshots_.back().channel(1) == std::optional<std::uint8_t>{17},
+    expect_true(physical.snapshots_.size() == before_inactive_change + 1,
+        "ART-NET to MQTT re-entry publishes cached latest whole MQTT snapshot");
+    if (!physical.snapshots_.empty()) {
+        expect_true(physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{17},
             "re-entry snapshot contains background MQTT changes");
     }
 
@@ -183,7 +201,7 @@ void test_runtime_orchestration() {
         "/devices/dmxwb_fixture_10/controls/power/on", "0", false);
     if (off.accepted()) queue.push(*off.command);
     runtime.step(dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{5});
-    expect_true(dmx.snapshots_.back().channel(1) == std::optional<std::uint8_t>{0},
+    expect_true(physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{0},
         "broker loss does not prevent DMX update of already queued command");
 
     const auto flush = runtime.flush_state();
@@ -191,8 +209,22 @@ void test_runtime_orchestration() {
 
     const auto& diagnostics = runtime.diagnostics();
     expect_true(diagnostics.commands_processed == 5, "runtime processed all accepted commands sequentially");
-    expect_true(diagnostics.dmx_publish_failures == 0, "runtime has no DMX publish failure");
+    expect_true(diagnostics.dmx_snapshots_published == 4,
+        "runtime counts only snapshots that actually reached physical source router output");
+    expect_true(diagnostics.dmx_publish_failures == 0, "runtime has no DMX route/publish failure");
     expect_true(diagnostics.state_save_failures == 0, "runtime has no persistence save failure");
+
+    const auto router_diagnostics = router.diagnostics();
+    expect_true(router_diagnostics.mqtt_snapshots_received == 4,
+        "router receives selected and background MQTT whole snapshots");
+    expect_true(router_diagnostics.source_switches == 2,
+        "router observes both explicit source switches");
+    expect_true(router_diagnostics.source_switches_without_snapshot == 1,
+        "MQTT to empty ART-NET performs Hold Last instead of zero frame");
+    expect_true(router_diagnostics.physical_snapshots_published == 4,
+        "router physical publish count matches runtime diagnostics");
+    expect_true(router_diagnostics.physical_publish_failures == 0,
+        "router has no physical publish failure");
 }
 
 }  // namespace

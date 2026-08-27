@@ -9,16 +9,18 @@ MqttRuntimeCoordinator::MqttRuntimeCoordinator(
     MqttCommandQueue& command_queue,
     MqttController& controller,
     MqttRuntimeTransport& transport,
-    MqttDmxSnapshotSink& dmx_sink)
+    DmxSourceRouter& dmx_router)
     : persistence_(persistence),
       command_queue_(command_queue),
       controller_(controller),
       transport_(transport),
-      dmx_sink_(dmx_sink) {}
+      dmx_router_(dmx_router) {}
 
 bool MqttRuntimeCoordinator::publish_initial_snapshot() {
-    if (persistence_.source() != PersistedSource::mqtt) {
-        return true;
+    const auto source_result = dmx_router_.select_source(persistence_.source());
+    record_route_result(source_result);
+    if (!source_result.ok()) {
+        return false;
     }
 
     auto snapshot = controller_.build_current_snapshot();
@@ -26,12 +28,10 @@ bool MqttRuntimeCoordinator::publish_initial_snapshot() {
         ++diagnostics_.dmx_publish_failures;
         return false;
     }
-    if (!dmx_sink_.publish_snapshot(*snapshot)) {
-        ++diagnostics_.dmx_publish_failures;
-        return false;
-    }
-    ++diagnostics_.dmx_snapshots_published;
-    return true;
+
+    const auto route_result = dmx_router_.publish_mqtt_snapshot(*snapshot);
+    record_route_result(route_result);
+    return route_result.ok();
 }
 
 void MqttRuntimeCoordinator::step(time_point now) {
@@ -80,17 +80,12 @@ const MqttRuntimeDiagnostics& MqttRuntimeCoordinator::diagnostics() const noexce
 void MqttRuntimeCoordinator::publish_controller_update(
     const MqttCommand& command,
     MqttControllerUpdate update) {
-    if (persistence_.source() == PersistedSource::mqtt) {
-        if (update.snapshot) {
-            if (dmx_sink_.publish_snapshot(*update.snapshot)) {
-                ++diagnostics_.dmx_snapshots_published;
-            } else {
-                ++diagnostics_.dmx_publish_failures;
-            }
-        } else if (command.type == MqttCommandType::set_source &&
-                   command.source == PersistedSource::mqtt) {
-            publish_current_mqtt_snapshot();
-        }
+    if (update.snapshot) {
+        record_route_result(dmx_router_.publish_mqtt_snapshot(*update.snapshot));
+    }
+
+    if (command.type == MqttCommandType::set_source) {
+        record_route_result(dmx_router_.select_source(command.source));
     }
 
     if (transport_.connected() && !update.publications.empty()) {
@@ -98,17 +93,15 @@ void MqttRuntimeCoordinator::publish_controller_update(
     }
 }
 
-void MqttRuntimeCoordinator::publish_current_mqtt_snapshot() {
-    auto snapshot = controller_.build_current_snapshot();
-    if (!snapshot) {
+void MqttRuntimeCoordinator::record_route_result(
+    const DmxSourceRouteResult& result) noexcept {
+    if (!result.ok()) {
         ++diagnostics_.dmx_publish_failures;
         return;
     }
-    if (!dmx_sink_.publish_snapshot(*snapshot)) {
-        ++diagnostics_.dmx_publish_failures;
-        return;
+    if (result.physical_published) {
+        ++diagnostics_.dmx_snapshots_published;
     }
-    ++diagnostics_.dmx_snapshots_published;
 }
 
 void MqttRuntimeCoordinator::publish_batch(
