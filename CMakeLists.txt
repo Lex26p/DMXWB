@@ -121,6 +121,16 @@ dmxwb_enable_warnings(dmxwb_artnet_acceptance)
 dmxwb_enable_portable_gnu_runtime(dmxwb_artnet_acceptance)
 set_target_properties(dmxwb_artnet_acceptance PROPERTIES OUTPUT_NAME "dmxwb-artnet-acceptance")
 
+add_executable(dmxwb_dev010_source_acceptance
+    src/dev010_source_acceptance_main.cpp
+)
+
+target_link_libraries(dmxwb_dev010_source_acceptance PRIVATE dmxwb_mqtt_transport)
+target_compile_features(dmxwb_dev010_source_acceptance PRIVATE cxx_std_20)
+dmxwb_enable_warnings(dmxwb_dev010_source_acceptance)
+dmxwb_enable_portable_gnu_runtime(dmxwb_dev010_source_acceptance)
+set_target_properties(dmxwb_dev010_source_acceptance PROPERTIES OUTPUT_NAME "dmxwb-dev010-source-acceptance")
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(dmxwb_tests
