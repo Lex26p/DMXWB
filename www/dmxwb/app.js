@@ -22,7 +22,7 @@ import {
   structuralGroupDrafts,
   structuralSettings,
   updateConfigDraft,
-} from "./model.js?v=011f2";;
+} from "./model.js?v=011g1a";;
 import {
   MQTT_CONFIG_RESULT_TOPIC,
   MQTT_CONFIG_SET_TOPIC,
@@ -39,7 +39,7 @@ import {
   parseGroupStateTopic,
   sceneCommandTopic,
   sceneLifecycleTopic,
-} from "./mqtt-client.js?v=011f2";;
+} from "./mqtt-client.js?v=011g1a";;
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -1194,26 +1194,14 @@ function renderSourceControls(source) {
 
 function renderDiagnostics() {
   const diagnostics = diagnosticSummary(model);
-  const values = [
-    ["Application", diagnostics.application],
-    ["DMX", diagnostics.dmx],
-    ["MQTT", diagnostics.mqtt],
-    ["Art-Net", diagnostics.artnet],
-  ];
-
   elements.diagnosticGrid.replaceChildren(
-    ...values.map(([label, value]) => {
-      const card = document.createElement("article");
-      card.className = "metric-card";
-
-      const caption = document.createElement("span");
-      caption.textContent = label;
-
-      const strong = document.createElement("strong");
-      strong.textContent =
-        typeof value === "object" ? "snapshot" : String(value);
-
-      card.append(caption, strong);
+    ...diagnostics.map((diagnostic) => {
+      const card=document.createElement("article"); card.className="metric-card"; card.dataset.diagnostic=diagnostic.key;
+      card.classList.toggle("metric-card--ok", diagnostic.severity === "ok");
+      card.classList.toggle("metric-card--error", diagnostic.severity === "error");
+      const caption=document.createElement("span"); caption.textContent=diagnostic.label;
+      const strong=document.createElement("strong"); strong.textContent=diagnostic.value; card.append(caption,strong);
+      if (diagnostic.detail) { const detail=document.createElement("small"); detail.className="metric-card__detail"; detail.textContent=diagnostic.detail; card.append(detail); }
       return card;
     }),
   );

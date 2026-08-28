@@ -366,6 +366,11 @@ h2 {
   white-space: nowrap;
 }
 
+.metric-card__detail { display:block; margin-top:4px; color:#7b8795; font-size:0.75rem; line-height:1.35; }
+.metric-card--ok { border-color:#b8ddca; }
+.metric-card--error { border-color:#efb6ae; }
+.metric-card--error strong { color:#b42318; }
+
 .segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -966,6 +971,11 @@ h2 {
     border-color: #2c394b;
     background: #172131;
   }
+
+  .metric-card__detail { color:#97a6b9; }
+  .metric-card--ok { border-color:#2f684d; }
+  .metric-card--error { border-color:#87483f; }
+  .metric-card--error strong { color:#ff9b8e; }
 
   .muted,
   .field-note,

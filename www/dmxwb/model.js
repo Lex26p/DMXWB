@@ -531,12 +531,62 @@ export function structuralSettings(model) {
   };
 }
 
+function diagnosticText(value, fallback = "—") {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+}
+function diagnosticBoolean(value, yes, no) {
+  if (value === true) return yes;
+  if (value === false) return no;
+  return null;
+}
+function diagnosticInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+function joinDiagnosticParts(parts) {
+  return parts.filter((part) => part !== null && part !== "").join(" · ");
+}
+function summarizeDmx(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {value: diagnosticText(value), detail: "", severity: "neutral"};
+  const refresh=diagnosticInteger(value.active_refresh_hz ?? value.refresh_hz);
+  const frames=diagnosticInteger(value.frames_sent), missed=diagnosticInteger(value.missed_deadlines);
+  const openFailures=diagnosticInteger(value.open_failures), sendFailures=diagnosticInteger(value.send_failures), recoveries=diagnosticInteger(value.recoveries);
+  const running=diagnosticBoolean(value.running ?? value.serial_open,"running","stopped");
+  const errors=(openFailures??0)+(sendFailures??0)+(missed??0);
+  return {value:joinDiagnosticParts([running,refresh===null?null:`${refresh} Hz`])||"snapshot",detail:joinDiagnosticParts([frames===null?null:`frames ${frames}`,missed===null?null:`missed ${missed}`,recoveries===null?null:`recoveries ${recoveries}`]),severity:errors>0?"error":"ok"};
+}
+function summarizeMqtt(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {value: diagnosticText(value), detail: "", severity: "neutral"};
+  const connected=diagnosticBoolean(value.connected,"connected","offline");
+  const connections=diagnosticInteger(value.successful_connections), disconnects=diagnosticInteger(value.disconnects), callbackFailures=diagnosticInteger(value.callback_failures), commands=diagnosticInteger(value.commands_processed), publishFailures=diagnosticInteger(value.publish_failures);
+  const errors=(callbackFailures??0)+(publishFailures??0);
+  return {value:connected??"snapshot",detail:joinDiagnosticParts([connections===null?null:`connections ${connections}`,disconnects===null?null:`disconnects ${disconnects}`,commands===null?null:`commands ${commands}`]),severity:connected==="offline"||errors>0?"error":connected==="connected"?"ok":"neutral"};
+}
+function summarizeArtNet(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {value: diagnosticText(value), detail: "", severity: "neutral"};
+  const state=diagnosticText(value.source_state??value.state,"snapshot"), sync=diagnosticText(value.sync_mode,"");
+  const rx=diagnosticInteger(value.datagrams_received??value.packets_received), conflicts=diagnosticInteger(value.conflicts), receiveErrors=diagnosticInteger(value.receive_errors), sendErrors=diagnosticInteger(value.send_errors), bindFailures=diagnosticInteger(value.bind_failures);
+  const outputActive=diagnosticBoolean(value.output_active,"output active","output idle");
+  const errors=(conflicts??0)+(receiveErrors??0)+(sendErrors??0)+(bindFailures??0);
+  return {value:joinDiagnosticParts([state,sync])||"snapshot",detail:joinDiagnosticParts([outputActive,rx===null?null:`rx ${rx}`,conflicts===null?null:`conflicts ${conflicts}`]),severity:errors>0?"error":"ok"};
+}
+function summarizeConfiguration(value, revision) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const state=diagnosticText(value.state??value.status??value.result,"snapshot"), statusRevision=diagnosticInteger(value.revision);
+    return {value:state,detail:statusRevision===null?(revision===null?"":`revision ${revision}`):`revision ${statusRevision}`,severity:state==="ok"||state==="loaded"?"ok":state==="fallback"||state==="error"?"error":"neutral"};
+  }
+  const text=diagnosticText(value);
+  return {value:text,detail:revision===null?"":`revision ${revision}`,severity:text==="ok"||text==="loaded"?"ok":text==="fallback"||text==="error"?"error":"neutral"};
+}
 export function diagnosticSummary(model) {
-  const status = model.status ?? {};
-  return {
-    application: status.application ?? "—",
-    dmx: status.dmx ?? "—",
-    mqtt: status.mqtt ?? "—",
-    artnet: status.artnet ?? "—",
-  };
+  const status=model.status??{}; const revision=model.config?finiteInteger(model.config.revision,0):null; const lastError=diagnosticText(status.last_error,"нет");
+  return [
+    {key:"application",label:"Application",value:diagnosticText(status.application),detail:"",severity:status.application==="running"?"ok":status.application==="error"||status.application==="off"?"error":"neutral"},
+    {key:"dmx",label:"DMX",...summarizeDmx(status.dmx)},
+    {key:"mqtt",label:"MQTT",...summarizeMqtt(status.mqtt)},
+    {key:"artnet",label:"Art-Net",...summarizeArtNet(status.artnet)},
+    {key:"configuration",label:"Configuration",...summarizeConfiguration(status.configuration,revision)},
+    {key:"last_error",label:"Last error",value:lastError,detail:"",severity:lastError==="нет"?"ok":"error"},
+  ];
 }
