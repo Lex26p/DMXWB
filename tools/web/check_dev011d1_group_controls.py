@@ -38,9 +38,9 @@ for token in [
         fail(f"index.html missing {token}")
 
 for token in [
-    'MQTT_GROUP_STATE_TOPIC_FILTER',
-    '"/devices/dmxwb_group_+/controls/+"',
     "groupCommandTopic",
+    "groupStateTopics",
+    "GROUP_STATE_CONTROLS",
     "parseGroupStateTopic",
     "/devices/${prefix}_${id}/controls/${control}/on",
 ]:
@@ -68,6 +68,18 @@ if "model.groupStates" not in group_view:
 if "fixtureRuntimeItems(model)" in group_view.split("export function sceneItems", 1)[0]:
     fail("Group runtime state is incorrectly synthesized from Fixture runtime")
 
+if "dmxwb_group_+" in mqtt or "MQTT_GROUP_STATE_TOPIC_FILTER" in mqtt:
+    fail("invalid partial-level MQTT wildcard for Group topics")
+
+for token in [
+    "const added = [];",
+    "this.subscriptions.has(normalized)",
+    "this.#sendSubscriptions(added)",
+    "#sendSubscriptions(topics = [...this.subscriptions])",
+]:
+    if token not in mqtt:
+        fail(f"MQTT client missing incremental subscribe safeguard {token}")
+
 for token in [
     "groupPublishers",
     "groupPublisher",
@@ -78,7 +90,7 @@ for token in [
     "data-group-name",
     "data-group-reset",
     "groupRuntimeComplete",
-    "MQTT_GROUP_STATE_TOPIC_FILTER",
+    "groupStateTopics",
     "setGroupControlState",
     "parseGroupStateTopic",
     "LIVE_PUBLISH_INTERVAL_MS = 40",
@@ -102,11 +114,46 @@ for forbidden in [
 if ".group-list" not in styles or ".group-members" not in styles:
     fail("styles.css missing Group layout")
 
+render_start = app.find("function render() {")
+render_end = app.find("\nfunction parseSnapshot(", render_start)
+if render_start < 0 or render_end < 0:
+    fail("cannot locate render() for listener regression check")
+if "addEventListener" in app[render_start:render_end]:
+    fail("event listeners must never be registered inside render()")
+
+for token in [
+    "scheduleRender",
+    "requestAnimationFrame",
+    "LIVE_CONFIRMATION_TIMEOUT_MS",
+    "pendingConfirmations",
+    "setPendingConfirmation",
+    "pendingAllowsFactualValue",
+    "clearPendingConfirmations",
+]:
+    if token not in app:
+        fail(f"app.js missing live interaction stability token {token}")
+
+if app.count('elements.groupList.addEventListener("input"') != 1:
+    fail("Group input listener must be registered exactly once")
+if app.count('elements.groupList.addEventListener("change"') != 1:
+    fail("Group change listener must be registered exactly once")
+if app.count('elements.fixtureList.addEventListener("input"') != 1:
+    fail("Fixture input listener must be registered exactly once")
+if app.count('elements.fixtureList.addEventListener("change"') != 1:
+    fail("Fixture change listener must be registered exactly once")
+
+if ".final(liveInput.value)" not in app:
+    fail("final slider publication contract disappeared")
+
 print("dev011d1_group_command_contract: PASS")
 print("dev011d1_group_factual_state_subscription: PASS")
+print("dev011d1_incremental_subscription_no_retained_loop: PASS")
 print("dev011d1_group_power_not_synthesized_in_browser: PASS")
 print("dev011d1_group_member_mapping: PASS")
 print("dev011d1_group_slider_throttle_25hz_and_final_publish: PASS")
+print("dev011d1_event_listeners_registered_once: PASS")
+print("dev011d1_render_burst_coalescing: PASS")
+print("dev011d1_pending_factual_confirmation_guard: PASS")
 print("dev011d1_group_no_command_replay_storage: PASS")
 print("dev011d1_group_mqtt_only_controls: PASS")
 print("=== DMXWB DEV-011D1 GROUP WEB CONTROLS STATIC PASS ===")

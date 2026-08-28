@@ -13,19 +13,19 @@ import {
   setStateSnapshot,
   setStatusSnapshot,
   structuralSettings,
-} from "./model.js?v=011d1";
+} from "./model.js?v=011d2fix3";
 import {
   MQTT_CONFIG_TOPIC,
-  MQTT_GROUP_STATE_TOPIC_FILTER,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
   MQTT_SYSTEM_SOURCE_COMMAND_TOPIC,
   MqttWebSocketClient,
   fixtureCommandTopic,
   groupCommandTopic,
+  groupStateTopics,
   mqttTransportDescriptor,
   parseGroupStateTopic,
-} from "./mqtt-client.js?v=011d1";
+} from "./mqtt-client.js?v=011d2fix3";
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -33,6 +33,69 @@ let groupStructureKey = "";
 const fixturePublishers = new Map();
 const groupPublishers = new Map();
 const LIVE_PUBLISH_INTERVAL_MS = 40; // 25/s, inside the required 20–30/s window.
+const LIVE_CONFIRMATION_TIMEOUT_MS = 2000;
+const pendingConfirmations = new Map();
+let renderFramePending = false;
+
+function pendingKey(kind, id, control) {
+  return `${kind}:${id}:${control}`;
+}
+
+function clearPendingConfirmations() {
+  for (const entry of pendingConfirmations.values()) {
+    window.clearTimeout(entry.timer);
+  }
+  pendingConfirmations.clear();
+}
+
+function setPendingConfirmation(kind, id, control, expected) {
+  const key = pendingKey(kind, id, control);
+  const previous = pendingConfirmations.get(key);
+  if (previous) {
+    window.clearTimeout(previous.timer);
+  }
+
+  const timer = window.setTimeout(() => {
+    const current = pendingConfirmations.get(key);
+    if (current?.timer !== timer) {
+      return;
+    }
+    pendingConfirmations.delete(key);
+    scheduleRender();
+  }, LIVE_CONFIRMATION_TIMEOUT_MS);
+
+  pendingConfirmations.set(key, {
+    expected: String(expected),
+    timer,
+  });
+}
+
+function pendingAllowsFactualValue(kind, id, control, factual) {
+  const key = pendingKey(kind, id, control);
+  const pending = pendingConfirmations.get(key);
+  if (!pending) {
+    return true;
+  }
+
+  if (pending.expected !== String(factual)) {
+    return false;
+  }
+
+  window.clearTimeout(pending.timer);
+  pendingConfirmations.delete(key);
+  return true;
+}
+
+function scheduleRender() {
+  if (renderFramePending) {
+    return;
+  }
+  renderFramePending = true;
+  window.requestAnimationFrame(() => {
+    renderFramePending = false;
+    render();
+  });
+}
 
 const elements = {
   navButtons: [...document.querySelectorAll("[data-section-target]")],
@@ -178,7 +241,7 @@ function createThrottledPublisher(topicFactory) {
     pendingValue = null;
     // Always publish the final value, even if an identical throttled value
     // was sent immediately before it.
-    send(value);
+    return send(value);
   };
 
   return { schedule, final };
@@ -331,6 +394,13 @@ function fixtureStructureSignature(fixtures) {
 
 function rebuildFixtureCards(fixtures) {
   fixturePublishers.clear();
+  for (const key of [...pendingConfirmations.keys()]) {
+    if (key.startsWith("fixture:")) {
+      const pending = pendingConfirmations.get(key);
+      window.clearTimeout(pending.timer);
+      pendingConfirmations.delete(key);
+    }
+  }
   elements.fixtureList.replaceChildren();
 
   if (fixtures.length === 0) {
@@ -350,11 +420,36 @@ function rebuildFixtureCards(fixtures) {
   }
 }
 
-function setInteractiveValue(input, value) {
+function setInteractiveValue(
+  input,
+  value,
+  { kind = null, id = null, control = null } = {},
+) {
   if (input.dataset.interacting === "1" || document.activeElement === input) {
     return;
   }
+
+  if (
+    kind !== null &&
+    id !== null &&
+    control !== null &&
+    !pendingAllowsFactualValue(kind, id, control, value)
+  ) {
+    return;
+  }
+
   input.value = String(value);
+}
+
+function setInteractiveChecked(input, checked, kind, id, control) {
+  if (
+    input.dataset.interacting === "1" ||
+    document.activeElement === input ||
+    !pendingAllowsFactualValue(kind, id, control, checked ? "1" : "0")
+  ) {
+    return;
+  }
+  input.checked = checked;
 }
 
 function updateFixtureCards(fixtures) {
@@ -389,7 +484,13 @@ function updateFixtureCards(fixtures) {
       continue;
     }
 
-    power.checked = runtime.requestedPower;
+    setInteractiveChecked(
+      power,
+      runtime.requestedPower,
+      "fixture",
+      fixture.id,
+      "power",
+    );
 
     const values = {
       red: runtime.red,
@@ -406,14 +507,23 @@ function updateFixtureCards(fixtures) {
       const output = card.querySelector(
         `[data-control-value="${control}"]`,
       );
-      setInteractiveValue(input, value);
-      output.textContent = String(value);
+      setInteractiveValue(input, value, {
+        kind: "fixture",
+        id: fixture.id,
+        control,
+      });
+      output.textContent = input.value;
     }
 
     const color = card.querySelector('[data-fixture-control="color"]');
     setInteractiveValue(
       color,
       rgbHex(runtime.red, runtime.green, runtime.blue),
+      {
+        kind: "fixture",
+        id: fixture.id,
+        control: "color",
+      },
     );
   }
 }
@@ -543,6 +653,13 @@ function groupStructureSignature(groups) {
 
 function rebuildGroupCards(groups) {
   groupPublishers.clear();
+  for (const key of [...pendingConfirmations.keys()]) {
+    if (key.startsWith("group:")) {
+      const pending = pendingConfirmations.get(key);
+      window.clearTimeout(pending.timer);
+      pendingConfirmations.delete(key);
+    }
+  }
   elements.groupList.replaceChildren();
 
   if (groups.length === 0) {
@@ -609,7 +726,13 @@ function updateGroupCards(groups) {
       continue;
     }
 
-    power.checked = runtime.actualPower;
+    setInteractiveChecked(
+      power,
+      runtime.actualPower,
+      "group",
+      group.id,
+      "power",
+    );
 
     const values = {
       red: runtime.red,
@@ -626,14 +749,23 @@ function updateGroupCards(groups) {
       const output = card.querySelector(
         `[data-group-control-value="${control}"]`,
       );
-      setInteractiveValue(input, value);
-      output.textContent = String(value);
+      setInteractiveValue(input, value, {
+        kind: "group",
+        id: group.id,
+        control,
+      });
+      output.textContent = input.value;
     }
 
     const color = card.querySelector('[data-group-control="color"]');
     setInteractiveValue(
       color,
       rgbHex(runtime.red, runtime.green, runtime.blue),
+      {
+        kind: "group",
+        id: group.id,
+        control: "color",
+      },
     );
   }
 }
@@ -714,6 +846,97 @@ function renderSettings() {
 
 function render() {
   
+const descriptor = mqttTransportDescriptor(window.location);
+  const revision = configRevision(model);
+  const source = selectedSource(model);
+  const fixtures = fixtureViewModels(model);
+  const groups = groupViewModels(model);
+  const scenes = sceneItems(model);
+
+  elements.mqttEndpoint.textContent = descriptor.url;
+  elements.configRevision.textContent =
+    revision === null ? "нет snapshot" : `revision ${revision}`;
+  elements.stateStatus.textContent = model.state ? "получен" : "нет snapshot";
+  elements.sourceBadge.textContent =
+    source === null ? "Source: —" : `Source: ${source}`;
+
+  elements.fixtureCountBadge.textContent =
+    `${fixtures.length} светильников · ${groups.length} групп`;
+  elements.sceneCountBadge.textContent = `${scenes.length} сцен`;
+
+  renderConnection();
+  renderSourceControls(source);
+  renderFixtureControls(fixtures);
+  renderGroupControls(groups);
+  renderDiagnostics();
+  renderSettings();
+}
+
+function parseSnapshot(payload) {
+  const value = JSON.parse(payload);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("MQTT snapshot must be a JSON object");
+  }
+  return value;
+}
+
+function applyMqttMessage(topic, payload) {
+  if (
+    topic === MQTT_CONFIG_TOPIC ||
+    topic === MQTT_STATE_TOPIC ||
+    topic === MQTT_STATUS_TOPIC
+  ) {
+    const snapshot = parseSnapshot(payload);
+
+    if (topic === MQTT_CONFIG_TOPIC) {
+      model = setConfigSnapshot(model, snapshot);
+      const groups = Array.isArray(snapshot.groups) ? snapshot.groups : [];
+      mqttClient.subscribe(
+        groups.flatMap((group) => {
+          try {
+            return groupStateTopics(group.id);
+          } catch {
+            return [];
+          }
+        }),
+      );
+    } else if (topic === MQTT_STATE_TOPIC) {
+      model = setStateSnapshot(model, snapshot);
+    } else {
+      model = setStatusSnapshot(model, snapshot);
+    }
+
+    scheduleRender();
+    return;
+  }
+
+  const groupState = parseGroupStateTopic(topic);
+  if (groupState) {
+    model = setGroupControlState(
+      model,
+      groupState.groupId,
+      groupState.control,
+      payload,
+    );
+    scheduleRender();
+  }
+}
+
+for (const button of elements.navButtons) {
+  button.addEventListener("click", () => {
+    activateSection(button.dataset.sectionTarget);
+  });
+}
+
+for (const button of elements.sourceButtons) {
+  button.addEventListener("click", () => {
+    publishCommand(
+      MQTT_SYSTEM_SOURCE_COMMAND_TOPIC,
+      button.dataset.sourceCommand,
+    );
+  });
+}
+
 elements.groupList.addEventListener("pointerdown", (event) => {
   const input = event.target.closest("[data-group-control]");
   if (input) {
@@ -776,22 +999,33 @@ elements.groupList.addEventListener("change", (event) => {
     if (control === "color") {
       const rgb = hexRgb(liveInput.value);
       if (rgb) {
-        groupPublisher(groupId, control).final(
-          `${rgb.red};${rgb.green};${rgb.blue}`,
-        );
+        const expected = `${rgb.red};${rgb.green};${rgb.blue}`;
+        if (groupPublisher(groupId, control).final(expected)) {
+          setPendingConfirmation("group", groupId, "color", liveInput.value);
+          setPendingConfirmation("group", groupId, "red", rgb.red);
+          setPendingConfirmation("group", groupId, "green", rgb.green);
+          setPendingConfirmation("group", groupId, "blue", rgb.blue);
+        }
       }
     } else {
-      groupPublisher(groupId, control).final(liveInput.value);
+      if (groupPublisher(groupId, control).final(liveInput.value)) {
+        setPendingConfirmation(
+          "group",
+          groupId,
+          control,
+          liveInput.value,
+        );
+      }
     }
     return;
   }
 
   const power = event.target.closest("[data-group-power]");
   if (power) {
-    publishCommand(
-      groupCommandTopic(groupId, "power"),
-      power.checked ? "1" : "0",
-    );
+    const expected = power.checked ? "1" : "0";
+    if (publishCommand(groupCommandTopic(groupId, "power"), expected)) {
+      setPendingConfirmation("group", groupId, "power", expected);
+    }
     return;
   }
 
@@ -828,87 +1062,6 @@ elements.groupList.addEventListener("click", (event) => {
     "1",
   );
 });
-
-const descriptor = mqttTransportDescriptor(window.location);
-  const revision = configRevision(model);
-  const source = selectedSource(model);
-  const fixtures = fixtureViewModels(model);
-  const groups = groupViewModels(model);
-  const scenes = sceneItems(model);
-
-  elements.mqttEndpoint.textContent = descriptor.url;
-  elements.configRevision.textContent =
-    revision === null ? "нет snapshot" : `revision ${revision}`;
-  elements.stateStatus.textContent = model.state ? "получен" : "нет snapshot";
-  elements.sourceBadge.textContent =
-    source === null ? "Source: —" : `Source: ${source}`;
-
-  elements.fixtureCountBadge.textContent =
-    `${fixtures.length} светильников · ${groups.length} групп`;
-  elements.sceneCountBadge.textContent = `${scenes.length} сцен`;
-
-  renderConnection();
-  renderSourceControls(source);
-  renderFixtureControls(fixtures);
-  renderGroupControls(groups);
-  renderDiagnostics();
-  renderSettings();
-}
-
-function parseSnapshot(payload) {
-  const value = JSON.parse(payload);
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("MQTT snapshot must be a JSON object");
-  }
-  return value;
-}
-
-function applyMqttMessage(topic, payload) {
-  if (
-    topic === MQTT_CONFIG_TOPIC ||
-    topic === MQTT_STATE_TOPIC ||
-    topic === MQTT_STATUS_TOPIC
-  ) {
-    const snapshot = parseSnapshot(payload);
-
-    if (topic === MQTT_CONFIG_TOPIC) {
-      model = setConfigSnapshot(model, snapshot);
-    } else if (topic === MQTT_STATE_TOPIC) {
-      model = setStateSnapshot(model, snapshot);
-    } else {
-      model = setStatusSnapshot(model, snapshot);
-    }
-
-    render();
-    return;
-  }
-
-  const groupState = parseGroupStateTopic(topic);
-  if (groupState) {
-    model = setGroupControlState(
-      model,
-      groupState.groupId,
-      groupState.control,
-      payload,
-    );
-    render();
-  }
-}
-
-for (const button of elements.navButtons) {
-  button.addEventListener("click", () => {
-    activateSection(button.dataset.sectionTarget);
-  });
-}
-
-for (const button of elements.sourceButtons) {
-  button.addEventListener("click", () => {
-    publishCommand(
-      MQTT_SYSTEM_SOURCE_COMMAND_TOPIC,
-      button.dataset.sourceCommand,
-    );
-  });
-}
 
 elements.fixtureList.addEventListener("pointerdown", (event) => {
   const input = event.target.closest("[data-fixture-control]");
@@ -970,22 +1123,38 @@ elements.fixtureList.addEventListener("change", (event) => {
     if (control === "color") {
       const rgb = hexRgb(liveInput.value);
       if (rgb) {
-        fixturePublisher(fixtureId, control).final(
-          `${rgb.red};${rgb.green};${rgb.blue}`,
-        );
+        const expected = `${rgb.red};${rgb.green};${rgb.blue}`;
+        if (fixturePublisher(fixtureId, control).final(expected)) {
+          setPendingConfirmation(
+            "fixture",
+            fixtureId,
+            "color",
+            liveInput.value,
+          );
+          setPendingConfirmation("fixture", fixtureId, "red", rgb.red);
+          setPendingConfirmation("fixture", fixtureId, "green", rgb.green);
+          setPendingConfirmation("fixture", fixtureId, "blue", rgb.blue);
+        }
       }
     } else {
-      fixturePublisher(fixtureId, control).final(liveInput.value);
+      if (fixturePublisher(fixtureId, control).final(liveInput.value)) {
+        setPendingConfirmation(
+          "fixture",
+          fixtureId,
+          control,
+          liveInput.value,
+        );
+      }
     }
     return;
   }
 
   const power = event.target.closest("[data-fixture-power]");
   if (power) {
-    publishCommand(
-      fixtureCommandTopic(fixtureId, "power"),
-      power.checked ? "1" : "0",
-    );
+    const expected = power.checked ? "1" : "0";
+    if (publishCommand(fixtureCommandTopic(fixtureId, "power"), expected)) {
+      setPendingConfirmation("fixture", fixtureId, "power", expected);
+    }
     return;
   }
 
@@ -1024,7 +1193,10 @@ const mqttClient = new MqttWebSocketClient({
   url: descriptor.url,
   onConnectionChange(connection) {
     model = setConnection(model, connection);
-    render();
+    if (!connection.connected) {
+      clearPendingConfirmations();
+    }
+    scheduleRender();
   },
   onMessage(topic, payload) {
     try {
@@ -1042,7 +1214,6 @@ mqttClient.subscribe([
   MQTT_CONFIG_TOPIC,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
-  MQTT_GROUP_STATE_TOPIC_FILTER,
 ]);
 
 window.addEventListener(

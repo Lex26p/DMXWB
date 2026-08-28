@@ -5,9 +5,6 @@ export const MQTT_STATE_TOPIC = "/dmxwb/state";
 export const MQTT_STATUS_TOPIC = "/dmxwb/status";
 export const MQTT_SYSTEM_SOURCE_COMMAND_TOPIC =
   "/devices/dmxwb/controls/source/on";
-export const MQTT_GROUP_STATE_TOPIC_FILTER =
-  "/devices/dmxwb_group_+/controls/+";
-
 const LIVE_DEVICE_CONTROLS = new Set([
   "name",
   "power",
@@ -18,6 +15,17 @@ const LIVE_DEVICE_CONTROLS = new Set([
   "brightness",
   "temperature",
   "reset",
+]);
+
+const GROUP_STATE_CONTROLS = Object.freeze([
+  "name",
+  "power",
+  "red",
+  "green",
+  "blue",
+  "color",
+  "brightness",
+  "temperature",
 ]);
 
 function normalizePositiveId(value, label) {
@@ -52,6 +60,13 @@ export function groupCommandTopic(groupId, control) {
     groupId,
     control,
     "Group",
+  );
+}
+
+export function groupStateTopics(groupIdValue) {
+  const groupId = normalizePositiveId(groupIdValue, "Group");
+  return GROUP_STATE_CONTROLS.map(
+    (control) => `/devices/dmxwb_group_${groupId}/controls/${control}`,
   );
 }
 
@@ -343,15 +358,19 @@ export class MqttWebSocketClient {
 
   subscribe(topics) {
     const values = Array.isArray(topics) ? topics : [topics];
+    const added = [];
+
     for (const topic of values) {
       const normalized = String(topic);
-      if (normalized) {
-        this.subscriptions.add(normalized);
+      if (!normalized || this.subscriptions.has(normalized)) {
+        continue;
       }
+      this.subscriptions.add(normalized);
+      added.push(normalized);
     }
 
-    if (this.connected) {
-      this.#sendSubscriptions();
+    if (this.connected && added.length > 0) {
+      this.#sendSubscriptions(added);
     }
   }
 
@@ -480,16 +499,18 @@ export class MqttWebSocketClient {
     });
   }
 
-  #sendSubscriptions() {
+  #sendSubscriptions(topics = [...this.subscriptions]) {
     if (!this.connected || !this.socket || this.socket.readyState !== 1) {
       return;
     }
-    if (this.subscriptions.size === 0) {
+
+    const requested = [...new Set(topics.map(String))].filter(Boolean);
+    if (requested.length === 0) {
       return;
     }
 
     this.socket.send(
-      encodeSubscribePacket(this.#nextPacketId(), [...this.subscriptions]),
+      encodeSubscribePacket(this.#nextPacketId(), requested),
     );
   }
 
