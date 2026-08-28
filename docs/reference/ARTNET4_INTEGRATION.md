@@ -1,59 +1,72 @@
 # Art-Net 4 integration reference
 
 **Document type:** reusable protocol/integration reference  
-**Status:** Protocol research and socket-free DMXWB protocol core are Confirmed; real UDP/runtime integration is Deferred to DEV-010  
-**Last reviewed:** 2026-08-27  
+**Status:** Art-Net protocol core and DEV-010 Linux UDP/runtime/physical integration are Confirmed; production OEM registration remains Deferred  
+**Last reviewed:** 2026-08-28  
 **Specification basis:** Art-Net 4 Protocol Release V1.4, Document Revision 1.4dp, 23/10/2025
 
 ## 1. Purpose
 
-This document records the Art-Net 4 behaviour relevant to implementing a reliable
+This document records the Art-Net 4 behaviour relevant to a reliable
 Art-Net-to-DMX gateway and separates:
 
-- behaviour from the reviewed Art-Net specification;
+- behaviour taken from the reviewed Art-Net specification;
+- portable implementation principles;
 - DMXWB-specific product decisions;
-- behaviour already Confirmed in the socket-free DEV-009 core;
-- network/runtime behaviour Deferred to DEV-010 or production release.
+- behaviour Confirmed in DEV-009/DEV-010;
+- production-only items that remain Deferred.
 
 The normative DMXWB requirements remain in `docs/TECHNICAL_SPEC.md`.
 
 ## 2. Labels
 
-- **SPEC** — behaviour taken from the reviewed Art-Net 4 specification.
-- **DMXWB** — project-specific design/product decision.
-- **Confirmed DEV-009** — implemented in the deterministic socket-free core and covered by host tests.
-- **Compatibility** — deliberate support for legacy/common behaviour beyond the modern preferred path.
-- **Deferred DEV-010** — real UDP/runtime/recovery/source-switch integration.
-- **Deferred production** — item required before production distribution.
+- **SPEC** — behaviour taken from the reviewed Art-Net specification.
+- **Portable** — engineering guidance reusable in another gateway.
+- **DMXWB** — project-specific product decision.
+- **Confirmed DEV-009** — deterministic socket-free protocol core.
+- **Confirmed DEV-010** — Linux UDP/runtime/source/physical integration proven by
+  real WB8 acceptance.
+- **Deferred production** — required before production distribution but not part
+  of the DEV-010 engineering gate.
 
-## 3. Specification source
+## 3. Specification source and attribution
 
-Primary source:
+Primary specification:
 
-- Art-Net 4 Protocol Release V1.4, Document Revision 1.4dp, 23/10/2025
-- https://art-net.org.uk/downloads/art-net.pdf
+```text
+Art-Net 4 Protocol Release V1.4
+Document Revision 1.4dp
+23/10/2025
+https://art-net.org.uk/downloads/art-net.pdf
+```
 
 Official protocol/OEM site:
 
-- https://art-net.org.uk/
+```text
+https://art-net.org.uk/
+```
 
-When reusing this reference, verify the current Art-Net revision before coding.
+The official Art-Net site states that a user guide for a product implementing
+Art-Net must include the credit:
+
+> Art-Net™ Designed by and Copyright Artistic Licence Engineering Ltd
+
+When reusing this reference, verify the current Art-Net revision, attribution
+wording and OEM requirements before release.
 
 ## 4. Current DMXWB implementation boundary
 
-**Confirmed DEV-009:**
+### Confirmed DEV-009
+
+Socket-free protocol core:
 
 ```text
 include/dmxwb/artnet_core.hpp
 src/artnet_core.cpp
 tests/test_artnet_core.cpp
-commit d4ffe7ba6d9cbcc55fd012f41a9d1121f14284c0
 ```
 
-DEV-009 accepts an already-received datagram plus source IPv4 and monotonic time.
-It does not open sockets.
-
-Confirmed core responsibilities:
+Core responsibilities:
 
 ```text
 ArtDmx parse/state
@@ -68,16 +81,35 @@ source identity/conflict
 300-channel physical projection
 ```
 
-**Deferred DEV-010:**
+### Confirmed DEV-010
+
+Linux/runtime/source path:
 
 ```text
-UDP 6454 bind/rebind
-actual receive/send
-randomized unicast ArtPollReply scheduling
-interface/network recovery
-physical Source selector integration
-real Art-Net controller/WB8 acceptance
+LinuxArtNetDatagramTransport
+-> ArtNetRuntime
+-> ArtNetCore
+-> latest immutable DmxSnapshot
+-> ArtNetSourceCoordinator
+-> DmxSourceRouter
+-> DmxOutput
 ```
+
+Confirmed by real WB8/network/physical acceptance:
+
+- UDP 6454 bind/receive/send;
+- randomized non-blocking unicast PollReply scheduling;
+- real QLC+ 5.2.2 discovery/subscription;
+- physical MQTT/ART-NET source switching;
+- Hold Last and same-process recovery;
+- WB interface down/up recovery;
+- QLC+ restart recovery;
+- source IPv4 change across two real networks;
+- IP+Physical conflict/no-merge;
+- real UDP ArtSync staging/release;
+- repeated reconnect;
+- latest/no-FIFO high-rate stress;
+- physical fixed 44 Hz throughout acceptance.
 
 ## 5. Basic network model
 
@@ -88,20 +120,20 @@ Art-Net 4
 IPv4
 UDP
 port 6454 (0x1936)
-protocol revision in current packet definitions: 14
+protocol revision >= 14 for the packet set used here
 ```
 
 **DMXWB:** one Art-Net output Port-Address is supported.
 
-The constant `kArtNetUdpPort = 0x1936` exists in DEV-009 as protocol identity;
-socket ownership begins in DEV-010.
+**Confirmed DEV-010:** the Linux runtime binds UDP 6454 and processes network
+datagrams without placing socket/network work in the physical DMX thread.
 
 ## 6. Port-Address / universe numbering
 
 Art-Net encodes a 15-bit Port-Address from Net + Sub-Net + Universe.
 
-**SPEC:** current product range prefers `1..32767`; Port-Address `0` is deprecated
-for sACN interoperability reasons.
+**SPEC:** current product range is `1..32767`; Port-Address `0` is deprecated for
+sACN interoperability reasons.
 
 **DMXWB compatibility decision:**
 
@@ -110,15 +142,11 @@ configured range = 0..32767
 default          = 0
 ```
 
-Value `0` is a deliberate compatibility exception and should be labelled legacy
-compatibility in UI/diagnostics.
-
-**Confirmed DEV-009:** `ArtNetCore::create()` accepts `0..32767`, rejects values
-above 15 bits, and exposes whether configured address is the legacy zero value.
+Value `0` is an explicit compatibility exception, not a change to Art-Net.
 
 ## 7. Minimum packet set
 
-DMXWB requires:
+DMXWB supports:
 
 ```text
 ArtDmx
@@ -127,10 +155,10 @@ ArtPollReply
 ArtSync
 ```
 
-**Confirmed DEV-009:** ArtDmx, ArtPoll and ArtSync are parsed by the core;
-ArtPollReply is constructed by a deterministic builder.
+ArtDmx/ArtPoll/ArtSync are parsed; ArtPollReply is built and transmitted by the
+runtime.
 
-## 8. Common validation and extensibility
+## 8. Validation and extensibility
 
 For relevant packets validate:
 
@@ -141,17 +169,18 @@ protocol revision >= 14 where defined
 minimum mandatory packet size
 ```
 
-Receivers should not require arbitrary exact datagram size when the specification
-only requires a minimum. Correct trailing extension bytes are ignored.
+Portable rule: do not invent exact packet-length checks when the protocol defines
+a minimum and allows trailing extension bytes.
 
-Reserved/unused receiver-do-not-test bits must not become invented rejection
-conditions.
+Confirmed:
 
-**Confirmed DEV-009:** common-header validation, old protocol rejection, safe
-minimum-size checks, unsupported OpCode ignore and valid trailing ArtDmx bytes are
-covered by host tests.
+- invalid ID rejected;
+- old protocol revision rejected where applicable;
+- unsupported opcode safely ignored;
+- valid trailing ArtDmx bytes accepted;
+- reserved/do-not-test fields do not become invented reject conditions.
 
-## 9. ArtDmx validation
+## 9. ArtDmx validation and persistent state
 
 ArtDmx header before Data is 18 bytes.
 
@@ -163,16 +192,7 @@ Length       = even, 2..512
 datagram     >= 18 + Length
 ```
 
-Wrong Port-Address is ignored and does not acquire source lock.
-
-**Confirmed DEV-009:** odd, zero, >512 and truncated Length cases are rejected.
-A valid packet may include trailing bytes after the declared DMX Data.
-
-## 10. Persistent 512-channel state
-
-**SPEC:** ArtDmx Length is an even number from 2 to 512.
-
-**DMXWB:**
+DMXWB keeps:
 
 ```text
 artnet_state[512]
@@ -182,13 +202,12 @@ For a valid short packet:
 
 ```text
 channels 1..Length     -> updated
-channels Length+1..512 -> retain previous values
+channels Length+1..512 -> Hold Last
 ```
 
-**Confirmed DEV-009:** full 512-channel state is retained. A later two-byte packet
-changes only channels 1 and 2; channels 3..512 Hold Last.
+Wrong Port-Address does not acquire the source lock.
 
-## 11. DMXWB physical projection
+## 10. Physical projection
 
 DMXWB product profile:
 
@@ -198,115 +217,103 @@ physical RS-485 limit = first 300 slots
 physical cadence      = fixed 44 Hz
 ```
 
-Channels `301..512` are valid network state and are not considered malformed.
+Channels `301..512` remain valid network state but are not transmitted by this
+physical product profile.
 
-**Confirmed DEV-009:** `build_physical_snapshot()` returns a 300-slot
-`DmxSnapshot` after a valid ArtDmx and copies network channels 1..300.
+Before the first valid ArtDmx, no Art-Net physical snapshot exists. Therefore an
+explicit MQTT -> ART-NET selection before the first ArtDmx preserves the current
+physical frame instead of inventing a zero frame.
 
-Before the first valid ArtDmx it returns no snapshot. This is intentional: future
-`MQTT -> ART-NET` switching must preserve the existing physical frame rather than
-invent a zero frame.
+## 11. Modern unicast subscription
 
-## 12. Modern unicast subscription
-
-**SPEC:** modern Art-Net controllers discover subscribers through ArtPoll and
-ArtPollReply and normally send ArtDmx unicast to subscribers.
-
-Architectural consequence:
+Portable modern Art-Net flow:
 
 ```text
-Source = MQTT
-ArtPollReply still advertises configured SwOut
-ArtDmx still updates background artnet_state
-physical output still uses MQTT
+controller ArtPoll
+-> node ArtPollReply
+-> controller sends ArtDmx to discovered subscriber
 ```
 
-**Confirmed DEV-009:** PollReply construction keeps configured subscription
-independent from the `artnet_output_active` status flag.
+DMXWB keeps subscription/discovery alive while application `Source=MQTT`.
 
-**Deferred DEV-010:** actual unicast reception/transmission and subscription
-behaviour over the network.
+Confirmed DEV-010:
 
-### Compatibility receiver behaviour
+- QLC+ discovers the DMXWB node;
+- PollReply advertises the configured output;
+- ArtDmx continues to update background Art-Net state while MQTT is selected.
 
-DMXWB may accept correctly formed legacy broadcast ArtDmx as compatibility input.
-Production interoperability must not depend on broadcast ArtDmx.
+## 12. ArtPoll and Targeted Mode
 
-Broadcast-vs-unicast address inspection belongs to network runtime, not the
-socket-free packet core.
+Normal ArtPoll requests a reply.
 
-## 13. ArtPoll and Targeted Mode
-
-**SPEC:** ArtPoll is discovery/subscription traffic and may be broadcast or
-unicast in Targeted Mode.
-
-In Targeted Mode a node replies only if one of its subscribed Port-Addresses lies
+In Targeted Mode, reply is produced only if the node's subscribed Port-Address is
 inside the requested inclusive range.
 
-**DMXWB:** one output makes this a simple range membership test.
+DMXWB has one output, so this reduces to one range-membership test.
 
-**Confirmed DEV-009:** normal ArtPoll requests a reply; Targeted ArtPoll outside
-the configured range is ignored.
+Confirmed in core tests and real runtime discovery.
 
-## 14. ArtPollReply transmission
+## 13. PollReply scheduling
 
-**SPEC:** reply is unicast and should be delayed randomly up to one second to
-avoid response bunching.
+Portable rule: PollReply response timing must not block the physical output
+thread.
 
-**Confirmed DEV-009:** deterministic packet construction only.
-
-**Deferred DEV-010:**
+**SPEC/current requirement used by DMXWB:**
 
 ```text
-non-blocking randomized delay 0..1 s
-unicast send to ArtPoll sender
+unicast reply
+random delay <= 1 s
 ```
 
-Never sleep in the physical DMX output thread for discovery timing.
+**Confirmed DEV-010:**
 
-## 15. ArtPollReply fields
+```text
+ArtPoll
+-> schedule due time
+-> continue network/runtime work
+-> later unicast ArtPollReply
+```
+
+No sleep is introduced into `DmxOutput`.
+
+## 14. PollReply fields / output state
 
 DMXWB advertises one output subscription.
 
-Key project requirements:
+Project contract:
 
 ```text
-SwOut             = configured output Port-Address
+SwOut             = configured Port-Address
 RefreshRate        = 44
 subscription       = advertised regardless of application Source
-GoodOutput active  = true only when Art-Net data is actually selected/output
+GoodOutput active  = true only when Art-Net is actually selected/output
 ```
 
-**Confirmed DEV-009:** builder creates the fixed-size PollReply structure,
-advertises one output, reports 44 Hz and accepts `artnet_output_active` separately
-from subscription identity.
+Subscription existence and physical-output activity are intentionally separate
+state.
 
-Exact network send semantics remain DEV-010.
+## 15. OEM Code
 
-## 16. OEM Code
+A production Art-Net product requires a real registered OEM Code.
 
-A production Art-Net product requires its real registered OEM Code.
-
-**DMXWB rule:**
+DMXWB rule:
 
 ```text
 never invent production OEM code
 ```
 
-**Confirmed DEV-009:** `ArtNetPollReplyIdentity` stores OEM as an explicit optional
-value. `build_art_poll_reply()` refuses to build a reply when no OEM Code is
-provided.
+The PollReply identity requires an explicit OEM value.
+
+DEV-010 engineering acceptance used an explicitly labelled development-only
+placeholder. This is not a production assignment.
 
 **Deferred production:**
 
-- register DMXWB/product OEM Code;
-- insert registered value in production identity;
-- add the exact current required Art-Net credit to user documentation.
+- register the actual product OEM Code;
+- insert that registered value in production identity;
+- re-check current Art-Net OEM/credit requirements before distribution.
 
-A development run may use an explicitly marked non-production value only when the
-test procedure makes that status clear.
-
-## 17. No ArtDmx FIFO
+## 16. Latest-state architecture / no ArtDmx FIFO
 
 Wrong gateway architecture:
 
@@ -314,129 +321,160 @@ Wrong gateway architecture:
 ArtDmx #100 -> queue
 ArtDmx #101 -> queue
 ArtDmx #102 -> queue
-physical DMX drains queue later
+physical output drains old packets later
 ```
 
-That can accumulate latency.
+This accumulates latency.
 
 DMXWB architecture:
 
 ```text
-ArtDmx -> latest committed Art-Net state
-physical 44 Hz frame boundary -> acquire latest whole state
+ArtDmx
+-> committed Art-Net state / latest immutable snapshot
+-> coordinator samples latest generation
+-> source router publishes current whole selected snapshot
+-> independent 44 Hz DmxOutput frame boundary
 ```
 
-Intermediate states may be superseded.
+Intermediate network states may be superseded.
 
-**Confirmed DEV-009:** protocol core keeps current committed/staging state rather
-than a network-frame FIFO.
+### Confirmed DEV-010 stress evidence
 
-**Deferred DEV-010:** connect this state to the existing whole-frame physical
-mailbox/source selector.
-
-## 18. Independent physical clock
-
-ArtDmx arrival never directly starts UART transmission.
+Accepted C6 run:
 
 ```text
-network event:
-ArtDmx -> validate -> Art-Net state
-
-physical event:
-44 Hz boundary -> acquire selected source snapshot -> serial DMX
+datagrams_received:             4404
+committed snapshots published:  4396
+router Art-Net snapshots:       449
+burst packets:                  4096
+burst duration:                 473 ms
 ```
 
-This keeps UDP jitter away from DMX frame-start timing.
+A final BLUE guard became stable without multi-second playback of old burst
+states. This is direct real-runtime evidence for latest/coalescing behaviour.
 
-DEV-009 contains no UART interaction. DEV-010 must preserve the already Confirmed
-independent `DmxOutput` 44 Hz scheduler.
+## 17. Independent physical clock
 
-## 19. Sequence handling
-
-ArtDmx has an 8-bit Sequence.
-
-**SPEC:**
+Network event:
 
 ```text
-0x00       -> checking disabled
+ArtDmx
+-> validate/update Art-Net state
+```
+
+Physical event:
+
+```text
+fixed 44 Hz frame boundary
+-> acquire latest whole selected source snapshot
+-> serial DMX
+```
+
+ArtDmx arrival does not directly start UART transmission.
+
+DEV-010 network, source-loss, ArtSync and burst tests all retained:
+
+```text
+active_refresh_hz = 44
+missed_deadlines  = 0
+```
+
+in their accepted physical runs.
+
+## 18. Sequence handling
+
+ArtDmx Sequence:
+
+```text
+0x00       -> ordering check disabled
 0x01..0xFF -> incrementing domain
 ```
 
-**DMXWB:**
+DMXWB:
 
-- stale/out-of-order data must not overwrite newer state;
-- rollover `FF -> 01` must work;
-- missing numbers are not waited for;
-- no reorder FIFO;
-- tracking resets when active-source lock is released.
+- rejects stale/out-of-order state;
+- supports rollover `FF -> 01`;
+- does not wait for missing sequence numbers;
+- does not create a reorder FIFO;
+- resets tracking when the active source lock is released.
 
-**Confirmed DEV-009:** zero-disable, non-zero baseline, rollover, stale reject and
-sequence gaps are covered by host tests.
+Confirmed by DEV-009 deterministic tests; runtime preserves the same core logic.
 
-## 20. Source identity
+## 19. Source identity
 
-`Physical` distinguishes physical inputs that may share IP and Port-Address.
-
-**DMXWB:**
+DMXWB source identity:
 
 ```text
 ArtNetSource = source IPv4 + ArtDmx.Physical
 ```
 
-**Confirmed DEV-009:** both fields are part of equality/source-lock logic.
+Both fields participate in lock equality.
 
-## 21. Multiple sources
+## 20. Multiple sources / conflict
 
-DMXWB chooses a documented conflict policy instead of automatic merge:
+Policy:
 
 ```text
 no active source
     -> first valid source becomes ACTIVE
 
 same source
-    -> packet accepted
+    -> accepted
 
 different IPv4 or Physical
     -> CONFLICT
-    -> second source does not mutate committed output
+    -> no merge
+    -> conflicting packet does not mutate active committed state
 ```
 
-No HTP/LTP merge is implemented.
+No HTP/LTP merge is performed.
 
-**Confirmed DEV-009:** IP conflict and same-IP/different-Physical conflict are
-covered by host tests.
+Confirmed DEV-010C4:
 
-## 22. ArtSync
+```text
+conflicting packets: 150
+physical takeover:   none
+merge:               none
+critical errors:     0
+```
 
-Startup:
+## 21. ArtSync
+
+Startup mode:
 
 ```text
 asynchronous
-ArtDmx -> committed state
+ArtDmx -> committed
 ```
 
-After valid ArtSync from the relevant source IP:
+After a relevant valid ArtSync:
 
 ```text
 synchronous
-ArtDmx -> staging only
-next ArtSync -> staging atomically becomes committed
+ArtDmx -> staging
+next ArtSync -> atomic staging commit
 ```
 
-ArtSync does not directly start UART and does not move the 44 Hz physical grid.
-
-If ArtSync is absent for 4 seconds or more:
-
-```text
-return to asynchronous mode
-```
+If ArtSync is absent for 4 seconds, DMXWB returns to asynchronous mode and
+deterministically commits staged state as specified by the core design.
 
 Mismatched ArtSync source IP is ignored.
 
-**Confirmed DEV-009:** source matching, enter-sync, staging, atomic commit and
-4-second fallback are covered by host tests.
+### Confirmed real UDP acceptance
 
-## 23. Hold Last and source loss
+DEV-010C5:
+
+```text
+first ArtSync
+-> RED staged for 2530 ms / 51 packets
+-> physical remains GREEN
+-> second ArtSync
+-> physical transitions once to RED
+```
+
+The physical 44 Hz schedule continued independently.
+
+## 22. Hold Last and source loss
 
 DMXWB source-lock timeout:
 
@@ -447,152 +485,177 @@ DMXWB source-lock timeout:
 On LOST:
 
 ```text
-do not clear committed artnet_state
-do not blackout
-do not automatically change application Source
+keep committed artnet_state
+no blackout
+do not change application Source
 Hold Last
 release stale source lock
 reset sequence/sync tracking
 ```
 
-**Confirmed DEV-009:** `tick(now)` performs deterministic LOST transition and lock
-release while preserving committed channels.
+Confirmed on real WB8 through:
 
-**Deferred DEV-010:** real network-loss scenarios and recovery on WB8.
+- QLC+ output loss;
+- full QLC+ restart;
+- WB interface down/up;
+- repeated reconnect;
+- primary-source release before source IPv4 change.
 
-## 24. Application Source selector
+## 23. Application Source selector
 
-DMXWB has:
-
-```text
-WB MQTT
-ART-NET
-```
-
-Inactive source continues to update.
-
-When Source=MQTT, Art-Net network/runtime must stay alive and keep background
-state/subscription current. When Source=ART-NET, MQTT logical model continues to
-update.
-
-Switch occurs only at a physical frame boundary.
-
-**Confirmed before DEV-009:** MQTT side already preserves background logical state
-while `Source=artnet` and does not create fake MQTT physical frames.
-
-**Confirmed DEV-009:** Art-Net core can provide latest whole 300-slot projection
-and intentionally provides no frame before first valid ArtDmx.
-
-**Deferred DEV-010:** source arbitration wiring between Art-Net core and
-`DmxOutput`.
-
-## 25. GoodOutput and discovery state
-
-Subscription and actual output state are different concepts.
-
-DMXWB contract:
+Application Source values:
 
 ```text
-SwOut remains advertised while Source=MQTT
-GoodOutput/data-active reflects actual selected Art-Net physical output
+mqtt
+artnet
 ```
 
-**Confirmed DEV-009:** builder API keeps these inputs separate.
+Inactive source continues updating.
 
-DEV-010 must supply the real runtime state when building replies.
+### ART-NET selected
 
-## 26. Network recovery
+- MQTT logical Fixture/Group/Scene state still mutates;
+- MQTT whole logical snapshot remains current;
+- physical output uses Art-Net.
 
-Required future recovery cases:
+### MQTT selected
 
-- Ethernet cable disconnect/reconnect;
-- interface down/up;
-- source controller restart/power cycle;
-- source IP change;
-- temporary UDP socket failure;
-- local rebind need.
+- Art-Net UDP receiver/discovery remain alive;
+- Art-Net network state continues updating;
+- physical output uses MQTT.
 
-The network worker may recreate/rebind UDP 6454 while physical DMX continues Hold
-Last.
+Switches are whole-snapshot publications and are observed only by the physical
+output at frame boundaries.
 
-**Deferred DEV-010:** none of these network cases are claimed by DEV-009.
+Confirmed by real DEV-010B physical acceptance.
 
-## 27. Implementation checklist
+## 24. GoodOutput and subscription state
 
-### Confirmed DEV-009
-
-1. Validate `Art-Net\0`.
-2. Parse supported OpCodes.
-3. Enforce protocol revision >=14 where applicable.
-4. Decode one 15-bit Port-Address.
-5. Preserve explicit Port-Address 0 compatibility.
-6. Validate ArtDmx Length even `2..512`.
-7. Validate minimum datagram length.
-8. Ignore valid trailing extension bytes.
-9. Maintain persistent 512-channel state.
-10. Project channels 1..300 to physical snapshot.
-11. Keep no physical Art-Net snapshot before first valid ArtDmx.
-12. Implement Sequence=0 semantics.
-13. Implement non-zero rollover/stale protection without waiting for gaps.
-14. Include `Physical` in source identity.
-15. Implement `WAITING/ACTIVE/LOST/CONFLICT`.
-16. Apply documented no-merge conflict policy.
-17. Implement ArtSync staging/commit.
-18. Implement 4-second sync fallback.
-19. Ignore mismatched ArtSync source.
-20. Implement Hold Last and 3-second lock release.
-21. Parse ArtPoll and Targeted Mode.
-22. Build one-output ArtPollReply.
-23. Advertise RefreshRate 44.
-24. Require explicit OEM identity.
-
-### Deferred DEV-010 / production
-
-25. Bind IPv4 UDP 6454.
-26. Receive real ArtDmx/ArtPoll/ArtSync.
-27. Schedule randomized non-blocking unicast PollReply.
-28. Recover socket/interface without process restart.
-29. Integrate physical Source switching.
-30. Verify no ArtDmx FIFO latency under real traffic.
-31. Verify cable/interface/source restart/IP-change recovery.
-32. Test with named/versioned external Art-Net controller(s).
-33. Test second real conflicting source.
-34. Verify discovery/subscription while physical Source=MQTT.
-35. Verify real physical Hold Last while Source=ART-NET.
-36. Register product OEM Code before release.
-37. Add required Art-Net credit to production user documentation.
-
-## 28. Relevant DMXWB documents
-
-Normative project contract:
+These are separate concepts:
 
 ```text
-docs/TECHNICAL_SPEC.md       §16 Art-Net
-docs/PROJECT_STATE.md        current confirmed implementation point
-docs/ROADMAP.md              DEV-009 / DEV-010
+subscription advertised != Art-Net currently selected/output
 ```
 
-Current implementation base:
+DMXWB publishes GoodOutput/data-active only after an Art-Net snapshot has
+successfully reached the selected physical source path.
+
+Returning to MQTT clears the Art-Net physical-active indication while keeping the
+subscription advertised.
+
+## 25. Network recovery
+
+Confirmed DEV-010 real cases:
+
+- controller traffic loss >3 s;
+- controller full restart;
+- WB interface down/up;
+- repeated source reconnect;
+- source IPv4 change;
+- conflict source arrival.
+
+The application process does not need an operator restart for these temporary
+network/source failures.
+
+The transport abstraction also supports close/rebind recovery after socket
+receive/send failure.
+
+## 26. Real source IPv4 change
+
+DEV-010C3 used two real network paths simultaneously:
 
 ```text
-d4ffe7ba6d9cbcc55fd012f41a9d1121f14284c0
-Implement DEV-009 Art-Net protocol core
+primary:
+10.200.200.2 -> 10.200.200.1
+
+Wi-Fi:
+192.168.42.160 -> 192.168.42.1
 ```
 
-The protocol parser/state machine is now **Confirmed** by DEV-009 host tests.
-Real UDP transport, runtime recovery, source-selector wiring and WB8 Art-Net
-interoperability remain **Deferred DEV-010** and must not be described as already
-Confirmed.
+The old primary source was disabled and allowed to exceed the 3 s LOST timeout
+before the Wi-Fi source was enabled.
 
-## 29. External references
+Confirmed:
 
-Official Art-Net specification:
+- distinct Windows interfaces;
+- distinct WB `dbg0` / `wlan0` routes;
+- old source lock released;
+- application Source stayed ART-NET;
+- same DMXWB PID/start time;
+- physical GREEN Hold Last during loss;
+- new source IP accepted as RED;
+- conflicts remained zero;
+- physical output stayed 44 Hz.
 
-- https://art-net.org.uk/downloads/art-net.pdf
+## 27. DEV-010 acceptance reports
 
-Official Art-Net site / OEM registration / product credit requirements:
+```text
+docs/DEV010A_ARTNET_QLCPLUS_NETWORK_REPORT.txt
+docs/DEV010B_ARTNET_MQTT_SOURCE_SWITCH_REPORT.txt
+docs/DEV010B_ARTNET_LOST_HOLD_RECOVERY_REPORT.txt
+docs/DEV010C1_WB8_INTERFACE_RECOVERY_REPORT.txt
+docs/DEV010C2_QLCPLUS_RESTART_RECOVERY_REPORT.txt
+docs/DEV010C3_ARTNET_SOURCE_IP_CHANGE_REPORT.txt
+docs/DEV010C4_ARTNET_CONFLICT_REPORT.txt
+docs/DEV010C5_ARTSYNC_REPORT.txt
+docs/DEV010C6_RECONNECT_LATEST_REPORT.txt
+```
 
-- https://art-net.org.uk/
+External controller:
 
-When implementing or reusing this design, verify the current specification
-revision before coding.
+```text
+QLC+ 5.2.2
+```
+
+Acceptance WB8:
+
+```text
+Wiren Board rev. 8.5.1 (T507)
+Debian 11 Bullseye
+wb-2606 stable
+kernel 6.8.0-wb160
+aarch64
+/dev/ttyRS485-1 -> ttyS2
+```
+
+## 28. Portable implementation checklist
+
+1. Validate `Art-Net\0`, opcode and protocol revision.
+2. Validate mandatory minimum packet sizes.
+3. Accept valid extension/trailing bytes.
+4. Keep persistent network-channel state.
+5. Keep source identity separate from application Source selection.
+6. Define deterministic multi-source conflict policy.
+7. Do not merge unless merge semantics are explicitly part of the product.
+8. Release stale source lock without clearing committed output.
+9. Keep a deliberate Hold Last policy.
+10. Keep ArtSync staging separate from physical UART timing.
+11. Keep network receive cadence independent from physical DMX cadence.
+12. Route latest whole state instead of replaying old network frames.
+13. Keep discovery/subscription alive when the network source is not physically
+    selected.
+14. Keep PollReply timing off the physical output thread.
+15. Design socket transport for close/rebind recovery.
+16. Test interface loss, controller restart, source identity change and conflict.
+17. Test burst traffic for accumulating latency.
+18. Verify physical output timing while all network failure tests run.
+19. Use a real registered OEM Code before production.
+20. Include the current required Art-Net user-guide credit.
+
+## 29. Current DMXWB status
+
+```text
+DEV-009 protocol core:   Confirmed
+DEV-010 Linux runtime:   Confirmed
+DEV-010 physical source: Confirmed
+DEV-010 network recovery: Confirmed
+DEV-010 ArtSync:         Confirmed
+DEV-010 no-FIFO stress:  Confirmed
+production OEM Code:     Deferred
+```
+
+Current engineering gate after DEV-010 closeout:
+
+```text
+DEV-011 — static MQTT-only Web UI
+```
