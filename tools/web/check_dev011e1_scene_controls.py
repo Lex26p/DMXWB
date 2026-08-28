@@ -53,6 +53,19 @@ for token in [
         fail(f"model.js missing Scene factual state token {token}")
 
 for token in [
+    "const hadPending =",
+    "pendingSceneRenames.size > 0",
+    "pendingSceneLifecycle.size > 0",
+    "pendingSceneApply !== null",
+    "if (reason && hadPending)",
+]:
+    if token not in app:
+        fail(f"Scene disconnect handling missing pending-only error guard {token}")
+
+if 'if (reason) {\n    sceneResult = { kind: "error", text: reason };' in app:
+    fail("Scene disconnect must not show a command error without a pending command")
+
+for token in [
     "makeSceneRequestId",
     "pendingSceneLifecycle",
     "pendingSceneRenames",
@@ -114,6 +127,7 @@ print("dev011e1_scene_rename_contract: PASS")
 print("dev011e1_scene_delete_contract: PASS")
 print("dev011e1_scene_request_id_result_matching: PASS")
 print("dev011e1_scene_apply_factual_state_confirmation: PASS")
+print("dev011e1_scene_no_false_disconnect_error_without_pending: PASS")
 print("dev011e1_scene_no_command_replay_storage: PASS")
 print("dev011e1_scene_mqtt_only_controls: PASS")
 print("=== DMXWB DEV-011E1 SCENE WEB CONTROLS STATIC PASS ===")

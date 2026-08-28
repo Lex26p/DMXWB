@@ -91,11 +91,11 @@ if 'href="./styles.css' not in html:
 
 print("dev011a_required_sections: PASS")
 
-if '?v=011e1' not in html:
+if '?v=011e2fix1' not in html:
     fail("index.html does not cache-bust local static assets")
-if './model.js?v=011e1' not in texts["app.js"]:
+if './model.js?v=011e2fix1' not in texts["app.js"]:
     fail("app.js does not cache-bust model.js")
-if './mqtt-client.js?v=011e1' not in texts["app.js"]:
+if './mqtt-client.js?v=011e2fix1' not in texts["app.js"]:
     fail("app.js does not cache-bust mqtt-client.js")
 
 print("dev011a_asset_cache_busting: PASS")

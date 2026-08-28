@@ -14,7 +14,7 @@ import {
   setStateSnapshot,
   setStatusSnapshot,
   structuralSettings,
-} from "./model.js?v=011e1";;
+} from "./model.js?v=011e2fix1";;
 import {
   MQTT_CONFIG_RESULT_TOPIC,
   MQTT_CONFIG_TOPIC,
@@ -30,7 +30,7 @@ import {
   parseGroupStateTopic,
   sceneCommandTopic,
   sceneLifecycleTopic,
-} from "./mqtt-client.js?v=011e1";;
+} from "./mqtt-client.js?v=011e2fix1";;
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -811,6 +811,11 @@ function setSceneResult(kind, text) {
 }
 
 function clearScenePending(reason = "") {
+  const hadPending =
+    pendingSceneRenames.size > 0 ||
+    pendingSceneLifecycle.size > 0 ||
+    pendingSceneApply !== null;
+
   for (const pending of pendingSceneRenames.values()) {
     window.clearTimeout(pending.timer);
   }
@@ -818,7 +823,7 @@ function clearScenePending(reason = "") {
   pendingSceneLifecycle.clear();
   pendingSceneApply = null;
 
-  if (reason) {
+  if (reason && hadPending) {
     sceneResult = { kind: "error", text: reason };
   }
 }
