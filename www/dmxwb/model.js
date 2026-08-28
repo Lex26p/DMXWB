@@ -117,17 +117,36 @@ export function sceneItems(model) {
   return Array.isArray(items) ? items : [];
 }
 
+function clampInteger(value, minimum, maximum, fallback) {
+  const parsed = finiteInteger(value, fallback);
+  return Math.max(minimum, Math.min(maximum, parsed));
+}
+
 export function fixtureViewModels(model) {
   const runtimeById = new Map(
     fixtureRuntimeItems(model).map((item) => [String(item.id), item]),
   );
 
-  return fixtureConfigItems(model).map((fixture, index) => ({
-    id: fixture.id,
-    name: fixture.name || `Fixture ${fixture.id}`,
-    startAddress: finiteInteger(model.config?.fixtures?.start_address, 1) + index * 4,
-    runtime: runtimeById.get(String(fixture.id)) ?? null,
-  }));
+  return fixtureConfigItems(model).map((fixture, index) => {
+    const runtime = runtimeById.get(String(fixture.id)) ?? null;
+    return {
+      id: fixture.id,
+      name: fixture.name || `Fixture ${fixture.id}`,
+      startAddress:
+        finiteInteger(model.config?.fixtures?.start_address, 1) + index * 4,
+      runtime: runtime
+        ? {
+            requestedPower: Boolean(runtime.requested_power),
+            red: clampInteger(runtime.red, 0, 255, 255),
+            green: clampInteger(runtime.green, 0, 255, 255),
+            blue: clampInteger(runtime.blue, 0, 255, 255),
+            white: clampInteger(runtime.white, 0, 255, 255),
+            brightness: clampInteger(runtime.brightness, 0, 100, 100),
+            temperature: clampInteger(runtime.temperature, 0, 100, 100),
+          }
+        : null,
+    };
+  });
 }
 
 export function isLegacyArtNetUniverse(value) {

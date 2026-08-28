@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>DMXWB</title>
-  <link rel="stylesheet" href="./styles.css?v=011b2">
+  <link rel="stylesheet" href="./styles.css?v=011c1">
 </head>
 <body>
   <div class="app-shell">
@@ -68,10 +68,10 @@
                 </div>
               </div>
               <div class="segmented" aria-label="Источник DMX">
-                <button type="button" disabled>WB MQTT</button>
-                <button type="button" disabled>ART-NET</button>
+                <button type="button" data-source-command="mqtt" disabled>WB MQTT</button>
+                <button type="button" data-source-command="artnet" disabled>ART-NET</button>
               </div>
-              <p class="field-note">Команды недоступны без связи с DMXWB.</p>
+              <p class="field-note" id="source-note">Команды недоступны без связи с DMXWB.</p>
             </article>
 
             <article class="card">
@@ -103,9 +103,11 @@
           <div class="split-layout">
             <article class="card">
               <div class="card-heading"><h2>Светильники</h2></div>
-              <div id="fixture-list" class="empty-state">
-                <strong>Нет данных</strong>
-                <span>Здесь отображаются светильники и их элементы управления.</span>
+              <div id="fixture-list" class="fixture-list">
+                <div class="empty-state">
+                  <strong>Нет данных</strong>
+                  <span>Здесь отображаются светильники и их элементы управления.</span>
+                </div>
               </div>
             </article>
 
@@ -179,6 +181,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=011b2"></script>
+  <script type="module" src="./app.js?v=011c1"></script>
 </body>
 </html>

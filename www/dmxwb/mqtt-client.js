@@ -3,6 +3,32 @@ export const MQTT_PROTOCOL_NAME = "mqtt";
 export const MQTT_CONFIG_TOPIC = "/dmxwb/config";
 export const MQTT_STATE_TOPIC = "/dmxwb/state";
 export const MQTT_STATUS_TOPIC = "/dmxwb/status";
+export const MQTT_SYSTEM_SOURCE_COMMAND_TOPIC =
+  "/devices/dmxwb/controls/source/on";
+
+export function fixtureCommandTopic(fixtureId, control) {
+  const id = Number(fixtureId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new RangeError("fixture id must be a positive safe integer");
+  }
+
+  const allowed = new Set([
+    "name",
+    "power",
+    "red",
+    "green",
+    "blue",
+    "color",
+    "brightness",
+    "temperature",
+    "reset",
+  ]);
+  if (!allowed.has(control)) {
+    throw new RangeError(`unsupported Fixture control: ${control}`);
+  }
+
+  return `/devices/dmxwb_fixture_${id}/controls/${control}/on`;
+}
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
