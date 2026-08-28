@@ -1,89 +1,77 @@
 # DMXWB
 
 DMXWB — C++20-приложение, расширяющее контроллеры **серии Wiren Board 8 (WB8)**
-физическим DMX512, WB MQTT-интеграцией и Art-Net управлением.
+физическим DMX512, WB MQTT-интеграцией, Art-Net управлением и локальным
+MQTT-based Web.
 
-DMXWB не заменяет Wiren Board и использует штатную Linux/MQTT/systemd/web
-инфраструктуру согласно `docs/TECHNICAL_SPEC.md`. Production artifacts собираются
-на ноутбуке; Docker не используется.
+DMXWB не заменяет Wiren Board и не является самостоятельной SCADA. Приложение
+использует штатную Linux/MQTT/systemd/nginx инфраструктуру WB согласно
+[`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md). Docker не используется.
 
 ## Статус
 
 Последний завершённый engineering gate:
 
 ```text
-DEV-010 — Art-Net runtime, reliability and Source switching
-acceptance base: fe64b3627fdad9d8905ecbb9a5540cd80a364eff
+DEV-011 — static MQTT-only Web UI
+acceptance base: d356b41a99572daaaa58126244b84577ddd449ea
 ```
 
-DEV-010 подтверждён на реальном WB8 с физическим DMX и QLC+ 5.2.2. Проверены
-discovery/subscription, real ArtDmx, ArtSync, MQTT/ART-NET source switching,
-Hold Last, network/interface recovery, controller restart, real source IPv4
-change, repeated reconnect, conflict/no-merge и latest-state/no-FIFO behaviour.
+DEV-011 подтверждён static/host проверками и реальным WB8 acceptance. Web работает
+только через MQTT, а физический DMX продолжает работу независимо от браузера.
 
 Следующий engineering gate:
 
 ```text
-DEV-011 — static MQTT-only Web UI
+DEV-012 — systemd, diagnostics and fully offline deployment
 ```
 
-Подробная текущая точка проекта находится в
+Актуальная подробная точка проекта:
 [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md).
 
 ## Подтверждённая архитектура
 
 ```text
-                         Browser
-                            |
-                     future DEV-011
-                            |
-                         MQTT
-                            |
-        +-------------------+-------------------+
-        |                                       |
-        v                                       v
-Fixture / Group / Scene                 Art-Net UDP 6454
-        |                                       |
-        v                                       v
- MQTT whole snapshot                    ArtNetRuntime
-        |                                       |
-        |                                 ArtNetCore
-        |                                       |
-        |                             latest whole snapshot
-        |                                       |
-        +-------------------+-------------------+
-                            |
-                     DmxSourceRouter
-                      mqtt | artnet
-                            |
-                       DmxOutput
-                     fixed 44 Hz
-                            |
+Browser
+/dmxwb/
+    |
+MQTT WebSocket /mqtt
+    |
+Mosquitto
+    |
+    +---------------- WB MQTT ----------------+
+    |                                         |
+Fixture / Group / Scene                Art-Net UDP 6454
+    |                                         |
+mqtt whole snapshot                    latest Art-Net snapshot
+    |                                         |
+    +--------------- DmxSourceRouter ---------+
+                        mqtt | artnet
+                             |
+                         DmxOutput
+                       fixed 44 Hz
+                             |
                     /dev/ttyRS485-*
-                            |
-                          DMX512
+                             |
+                           DMX512
 ```
 
 Ключевые инварианты:
 
 - один физический DMX output;
 - только `DmxOutput` владеет serial-портом;
-- MQTT/Art-Net не пишут в serial напрямую;
-- physical output использует только один явно выбранный Source;
+- Web/MQTT/Art-Net не пишут в serial напрямую;
+- Source выбирается только явно: `mqtt | artnet`;
 - автоматического source switching нет;
-- MQTT и Art-Net продолжают обновляться в background независимо от выбранного
-  Source;
-- source switching происходит целыми snapshot-ами на physical frame boundary;
-- ArtDmx не запускает UART;
-- Art-Net использует latest committed state, не FIFO;
-- LOST сохраняет Source=ART-NET и Hold Last;
-- physical output фиксирован на 44 Hz;
-- Art-Net network state хранит 512 channels, physical product profile использует
-  только `1..300`.
+- оба источника продолжают обновляться в background;
+- только whole snapshots доходят до физического DMX;
+- Art-Net LOST использует Hold Last;
+- physical output работает фиксированно на 44 Hz;
+- Web не нужен для продолжения DMX после закрытия браузера.
 
 ## Physical DMX
 
-Подтверждённый production physical profile:
+Подтверждённый product profile:
 
 ```text
 kDmxMaxChannels       = 512
@@ -91,29 +79,17 @@ kDmxPhysicalMaxSlots  = 300
 kDmxOutputRefreshHz   = 44
 ```
 
-На acceptance WB8 подтверждены:
+На WB8 подтверждены continuous DMX512, Start Code `0x00`, whole-snapshot
+publication, serial recovery и fast transport с manual DE/BREAK/TEMT без custom
+kernel/WBEC patch.
 
-- standard DMX512 wire format;
-- Start Code `0x00`;
-- continuous fixed 44 Hz output;
-- whole snapshot publication;
-- serial close/reopen/recovery;
-- fast transport: manual DE + hardware BREAK + physical TEMT;
-- no custom kernel/WBEC patch required.
-
-Acceptance hardware:
+DEV-011 дополнительно подтвердил runtime-переключение физического порта:
 
 ```text
-Controller:       Wiren Board rev. 8.5.1 (T507)
-Architecture:     arm64
-OS:               Debian 11 Bullseye
-WB release:       wb-2606 stable
-Kernel:           6.8.0-wb160
-glibc:            2.31
-DMX port:         /dev/ttyRS485-1 -> ttyS2
-Build compiler:   Bullseye aarch64-linux-gnu-g++ 10.2.1
-MQTT broker:      127.0.0.1:1883
+/dev/ttyRS485-1 -> /dev/ttyRS485-2 -> /dev/ttyRS485-1
 ```
+
+в одном процессе без нарушения 44 Hz.
 
 ## Fixture / Group / Scene / MQTT
 
@@ -122,44 +98,60 @@ MQTT broker:      127.0.0.1:1883
 - RGBW Fixture model и addressing;
 - stable monotonic IDs;
 - persistence;
-- Group membership и factual Group Power;
-- Scene create/overwrite/apply/rename/delete;
-- one whole post-mutation MQTT DMX snapshot;
+- Group membership и factual Group state;
+- Scene create/apply/overwrite/rename/delete;
+- atomic whole-snapshot Scene Apply;
 - retained cleanup;
 - `libmosquitto` transport;
 - short callback: parse/enqueue;
 - reconnect/resubscribe/full retained republish;
-- broker loss не останавливает physical DMX;
-- persisted and retained Source:
-  - `mqtt`
-  - `artnet`.
+- persisted Source `mqtt | artnet`;
+- broker/browser outages не останавливают physical DMX.
 
-Persistence остаётся source of truth:
+Canonical state flow:
 
 ```text
 disk
 -> C++ canonical model
--> MQTT retained representation
+-> retained MQTT representation
 ```
 
-## Art-Net 4
+## Static Web
 
-Protocol/runtime baseline:
+Production Web:
 
 ```text
-IPv4 UDP port:            6454
-minimum protocol revision: 14
-Port-Address range:       0..32767
-default/compatibility:    0
-ArtDmx Length:            even 2..512
-network state:            512 channels
-physical projection:      channels 1..300
-source identity:          IPv4 + Physical
-source LOST timeout:      3 s
-ArtSync timeout:          4 s
-PollReply RefreshRate:    44
-PollReply delay:          randomized 0..1 s
+www/dmxwb/
+    index.html
+    app.js
+    model.js
+    mqtt-client.js
+    styles.css
 ```
+
+Свойства:
+
+- static HTML/CSS/vanilla JS;
+- no Node.js runtime;
+- no npm/build step;
+- no external Internet dependencies;
+- URL `/dmxwb/`;
+- MQTT WebSocket `/mqtt`;
+- русский пользовательский интерфейс;
+- Fixture/Group/Scene/Source controls;
+- structural Settings с локальным draft и явным `Применить`;
+- two-tab revision conflict protection;
+- reconnect без повторной отправки старых команд;
+- только MQTT API — без direct serial/file/systemd access.
+
+Structural settings, включая `DMX Port` и `Art-Net Universe`, подтверждены на
+реальном WB8 и применяются running process без restart.
+
+`/dmxwb/status` в DEV-011 намеренно минимален и содержит только обязательные
+верхнеуровневые состояния. Расширенные deployment/service diagnostics относятся к
+DEV-012.
+
+## Art-Net 4
 
 Поддерживаются:
 
@@ -170,65 +162,54 @@ ArtPollReply
 ArtSync
 ```
 
-Confirmed DEV-010 behaviour:
-
-- real UDP 6454 receive/send on WB8;
-- QLC+ 5.2.2 discovery/subscription;
-- randomized unicast ArtPollReply;
-- Targeted Mode filtering;
-- subscription remains advertised while Source=MQTT;
-- GoodOutput/data-active follows actual Art-Net physical selection;
-- 3 s LOST + Hold Last + stale lock release;
-- same-process source recovery;
-- WB interface down/up recovery;
-- controller restart recovery;
-- real source IPv4 change across two network interfaces;
-- IP+Physical conflict detection with no merge;
-- real UDP ArtSync staging and atomic release;
-- repeated reconnect;
-- high-rate latest/no-FIFO stress;
-- fixed physical 44 Hz throughout acceptance.
-
-Acceptance reports:
+Основной подтверждённый contract:
 
 ```text
-docs/DEV010A_ARTNET_QLCPLUS_NETWORK_REPORT.txt
-docs/DEV010B_ARTNET_MQTT_SOURCE_SWITCH_REPORT.txt
-docs/DEV010B_ARTNET_LOST_HOLD_RECOVERY_REPORT.txt
-docs/DEV010C1_WB8_INTERFACE_RECOVERY_REPORT.txt
-docs/DEV010C2_QLCPLUS_RESTART_RECOVERY_REPORT.txt
-docs/DEV010C3_ARTNET_SOURCE_IP_CHANGE_REPORT.txt
-docs/DEV010C4_ARTNET_CONFLICT_REPORT.txt
-docs/DEV010C5_ARTSYNC_REPORT.txt
-docs/DEV010C6_RECONNECT_LATEST_REPORT.txt
+IPv4 UDP port:             6454
+minimum protocol revision: 14
+Port-Address range:        0..32767
+compatibility default:     0
+network state:             512 channels
+physical projection:       channels 1..300
+source identity:           IPv4 + Physical
+source LOST timeout:       3 s
+ArtSync timeout:           4 s
+PollReply RefreshRate:     44
 ```
 
-Reusable protocol/runtime notes:
+DEV-010 подтвердил real UDP, QLC+ discovery, ArtSync, source loss/recovery,
+interface/controller recovery, source IPv4 change, conflict/no-merge и
+latest-state/no-FIFO behaviour.
 
-[`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md)
-
-## Art-Net attribution and OEM identity
-
-Art-Net is owned and copyrighted by Artistic Licence.
-
-Required user-guide credit:
-
-> Art-Net™ Designed by and Copyright Artistic Licence Engineering Ltd
-
-Official protocol/OEM resource:
+DEV-011 подтвердил runtime Art-Net Port-Address:
 
 ```text
-https://art-net.org.uk/
+0 -> 17 -> 0
 ```
 
-DMXWB development acceptance uses an explicitly marked non-production OEM
-placeholder. A real registered OEM Code is still required before production
-distribution; DMXWB does not invent one.
+с отбрасыванием старого universe cache и Hold Last без blackout.
+
+Подробности:
+[`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md).
+
+## Acceptance hardware
+
+Primary tested configuration:
+
+```text
+Controller:       Wiren Board rev. 8.5.1 (T507)
+Architecture:     arm64
+OS:               Debian 11 Bullseye
+WB release:       wb-2606 stable
+Kernel:           6.8.0-wb160
+glibc:            2.31
+DMX ports:        /dev/ttyRS485-1, /dev/ttyRS485-2
+MQTT broker:      127.0.0.1:1883
+```
 
 ## Build/test среда
 
-C++ build/test поддерживается только на Linux. Windows/MSVC не входит в build/test
-matrix.
+Windows/MSVC не входит в поддерживаемую build/test matrix.
 
 ```text
 Windows host                 -> project files, ZIP, Git, WSL launch
@@ -237,7 +218,7 @@ WB8                          -> runtime/hardware/integration acceptance
 Docker                       -> not used
 ```
 
-Native Linux:
+Native Linux/WSL:
 
 ```sh
 cd /mnt/c/Projects/DMXWB
@@ -252,23 +233,23 @@ Target build:
 bash tools/wb8/build_bullseye_arm64.sh
 ```
 
-## Что ещё не реализовано / не закрыто
+## Что ещё впереди
 
-Следующие roadmap gates остаются впереди:
+```text
+DEV-012 — systemd, diagnostics and fully offline deployment
+DEV-013 — full integration, offline install and 24h acceptance
+```
 
-- `DEV-011` — static MQTT-only Web UI;
-- `DEV-012` — systemd, diagnostics and fully offline deployment;
-- `DEV-013` — full integration, offline install and 24h acceptance.
-
-Production Art-Net OEM registration также остаётся Deferred до production
-distribution.
+До production distribution также остаётся Deferred зарегистрированный Art-Net OEM
+Code. Development acceptance не подменяет его выдуманным production code.
 
 ## Инженерные reference-документы
 
 - [`docs/reference/WB8_RS485_DMX.md`](docs/reference/WB8_RS485_DMX.md)
 - [`docs/reference/ARTNET4_INTEGRATION.md`](docs/reference/ARTNET4_INTEGRATION.md)
 
-`docs/reference/` не заменяет normative `TECHNICAL_SPEC.md`.
+`docs/reference/` не заменяет normative `TECHNICAL_SPEC.md`,
+`docs/ROADMAP.md` и `docs/PROJECT_STATE.md`.
 
 ## Источник истины
 

@@ -2,118 +2,262 @@
 
 **Last updated:** 2026-08-28
 
-## Repository base
+## Repository / acceptance base
 
 ```text
-fe64b3627fdad9d8905ecbb9a5540cd80a364eff
-Validate DEV-010C3 real-network source IP change
+d356b41a99572daaaa58126244b84577ddd449ea
+Complete DEV-011 minimal status contract
 ```
 
 ## Last confirmed engineering PASS
 
 ```text
-DEV-010 — Art-Net runtime, reliability and Source switching
+DEV-011 — static MQTT-only Web UI
 ```
 
-DEV-010 is Confirmed by host/integration work plus real WB8 physical/network
-acceptance. The acceptance runtime, QLC+ 5.2.2 and deterministic probes proved the
-roadmap requirements for discovery/subscription, physical source switching,
-ArtSync, network loss/recovery, source restart/IP change, WB interface down/up,
-repeated reconnect, conflict/no-merge and latest-state/no-FIFO behaviour.
+DEV-011 is **Confirmed** by static/host checks and real WB8 browser/MQTT/physical
+acceptance. The Web remains a static MQTT-only client and does not enter the DMX
+timing path.
 
 The next engineering gate is:
 
 ```text
-DEV-011 — static MQTT-only Web UI
+DEV-012 — systemd, diagnostics and fully offline deployment
 ```
 
-## DEV-010 result
-
-### Architecture now Confirmed
-
-Real Art-Net flow:
+## Current confirmed product architecture
 
 ```text
-IPv4 UDP 6454
--> LinuxArtNetDatagramTransport
--> ArtNetRuntime
--> ArtNetCore
--> latest immutable Art-Net physical snapshot
--> ArtNetSourceCoordinator
--> DmxSourceRouter
--> DmxOutput mailbox
--> fixed 44 Hz physical DMX
+Browser
+/var/www/dmxwb
+    |
+MQTT WebSocket /mqtt
+    |
+Mosquitto
+    |
+    +---------------- WB MQTT logical model ----------------+
+    |                                                       |
+Fixture / Group / Scene                              Art-Net UDP 6454
+    |                                                       |
+mqtt whole snapshot                                  ArtNetRuntime
+    |                                                       |
+    +---------------------- DmxSourceRouter ----------------+
+                               |
+                         mqtt | artnet
+                               |
+                           DmxOutput
+                         fixed 44 Hz
+                               |
+                      /dev/ttyRS485-*
+                               |
+                             DMX512
 ```
 
-Important invariants:
+Core invariants remain Confirmed:
 
-- Art-Net receiver remains alive regardless of selected application Source;
-- MQTT and Art-Net continue updating independently;
-- explicit `mqtt | artnet` selector is the only application source switch;
-- network loss never automatically switches application Source;
-- only whole snapshots reach `DmxOutput`;
-- physical source changes occur at DMX frame boundaries;
-- physical DMX cadence remains fixed at 44 Hz;
-- ArtDmx arrival never directly starts UART transmission;
-- latest committed Art-Net state is sampled, not replayed from a FIFO;
-- network state keeps 512 channels while the physical product profile uses
-  channels `1..300`;
-- before the first valid process-local ArtDmx, selecting ART-NET does not invent a
-  zero/blackout frame;
-- LOST holds the last committed Art-Net state and releases the stale source lock;
-- source identity is `IPv4 + ArtDmx.Physical`;
-- a conflicting source does not merge into or mutate the active source state.
+- one physical DMX output;
+- only `DmxOutput` owns the serial port;
+- MQTT, Web and Art-Net never write directly to serial;
+- physical output uses only the explicitly selected `mqtt | artnet` source;
+- no automatic source switching;
+- MQTT and Art-Net continue updating independently in the background;
+- only whole snapshots reach the physical DMX path;
+- source changes occur at DMX frame boundaries;
+- physical output remains fixed at 44 Hz;
+- Art-Net uses latest committed state rather than a FIFO;
+- Art-Net LOST keeps the selected Source and Holds Last;
+- Web is not required for DMX to continue after the browser is closed.
 
-### UDP runtime / discovery
+## DEV-011 result
+
+### Static Web
+
+Confirmed production Web layout:
+
+```text
+www/dmxwb/
+    index.html
+    app.js
+    model.js
+    mqtt-client.js
+    styles.css
+```
 
 Confirmed:
 
-```text
-UDP port:               6454
-protocol revision:      >= 14
-Port-Address:           0..32767
-DMXWB compatibility:    Port-Address 0 explicitly supported
-PollReply RefreshRate:  44
-PollReply delay:        randomized 0..1 s
-PollReply destination:  unicast to poll sender
-```
+- HTML/CSS/vanilla JavaScript only;
+- no Node.js runtime;
+- no npm/build step;
+- no external Internet dependencies;
+- served from `/dmxwb/`;
+- MQTT WebSocket `/mqtt`;
+- current page hostname is used for the WB connection;
+- Web has no direct serial/file/systemd API;
+- user-facing interface is Russian;
+- `DMX`, `MQTT`, `Art-Net`, `WB MQTT`, `ART-NET` and device paths remain technical
+  names rather than translated protocol identifiers.
 
-ArtPoll/ArtPollReply subscription remains advertised while application
-`Source=MQTT`. GoodOutput/data-active reflects actual selected Art-Net physical
-output rather than subscription existence.
+### Browser MQTT/reconnect
 
-The runtime can close/rebind/recover the UDP socket without restarting the
-application process.
-
-### Source selector
-
-`DmxSourceRouter` caches the latest whole snapshot from each source.
+Report:
 
 ```text
-MQTT -> ART-NET
+docs/DEV011B2_MQTT_WEBSOCKET_REPORT.txt
 ```
 
-- if an Art-Net snapshot exists, the next whole physical publication uses it;
-- if no valid ArtDmx has existed since process start, current physical output is
-  preserved until one arrives.
+Confirmed on WB8:
+
+- real browser WebSocket connection to local Mosquitto;
+- disconnect is shown to the user;
+- new commands are blocked while disconnected;
+- reconnect is automatic;
+- retained config/state/status are re-subscribed;
+- old commands are not replayed after reconnect;
+- physical DMX does not depend on the open browser.
+
+### Fixture and Source
+
+Report:
 
 ```text
-ART-NET -> MQTT
+docs/DEV011C2_WEB_FIXTURE_SOURCE_REPORT.txt
 ```
 
-- the current whole logical MQTT snapshot becomes physical;
-- MQTT logical state has continued updating while ART-NET was selected.
+Confirmed through real browser -> MQTT -> application -> physical DMX:
 
-GoodOutput active state becomes true only after an Art-Net snapshot is
-successfully published through the physical source path.
+- Fixture Power and RGB controls;
+- slider throttle/final publish contract;
+- explicit `WB MQTT / ART-NET` Source switching;
+- background MQTT logical state remains current while ART-NET is selected;
+- switching back to MQTT uses the latest whole logical MQTT state.
 
-## DEV-010 acceptance matrix
+### Groups
 
-External controller used for interoperability:
+Report:
 
 ```text
-QLC+ 5.2.2
+docs/DEV011D2_WEB_GROUP_REPORT.txt
 ```
+
+Confirmed:
+
+- Group controls use MQTT only;
+- exact Group subscriptions are derived from canonical config;
+- retained subscription loops are avoided;
+- Group state is factually confirmed from backend MQTT state;
+- real grouped physical DMX control passed on WB8.
+
+### Scenes
+
+Report:
+
+```text
+docs/DEV011E2_WEB_SCENE_REPORT.txt
+```
+
+Confirmed:
+
+- create;
+- apply;
+- overwrite;
+- rename;
+- delete;
+- request/result matching;
+- Scene Apply produces one whole post-mutation snapshot rather than visible
+  per-Fixture iteration;
+- revision progressed monotonically through lifecycle operations.
+
+### Structural configuration transaction
+
+Report:
+
+```text
+docs/DEV011F3_WEB_CONFIG_TRANSACTION_REPORT.txt
+```
+
+Confirmed:
+
+- local structural draft;
+- explicit `Применить`;
+- full `/dmxwb/config/set` proposal;
+- `expected_revision`;
+- two-tab stale revision conflict rejection;
+- invalid config rejection;
+- stable monotonic IDs;
+- Fixture removal cleans Group membership without rewriting historical Scene
+  snapshots;
+- canonical retained config is republished after successful apply.
+
+### Runtime structural transport apply
+
+Report:
+
+```text
+docs/DEV011F4B_TRANSPORT_STRUCTURAL_APPLY_REPORT.txt
+=== DMXWB DEV-011F4B REAL DMX PORT + ART-NET UNIVERSE APPLY PASS ===
+```
+
+Confirmed in one WB8 process/PID:
+
+```text
+DMX Port:
+  /dev/ttyRS485-1
+  -> /dev/ttyRS485-2
+  -> /dev/ttyRS485-1
+
+Art-Net Port-Address:
+  0
+  -> 17
+  -> 0
+```
+
+The accepted run proved:
+
+- two successful DMX-port runtime reconfigurations;
+- zero DMX-port reconfiguration failures;
+- two successful Art-Net universe reconfigurations;
+- zero Art-Net universe reconfiguration failures;
+- old Art-Net universe data is not replayed after reconfiguration;
+- universe change preserves Hold Last and does not create a blackout;
+- Source switching continues to use whole current snapshots;
+- the same runtime PID survives all reconfiguration;
+- physical DMX remains 44 Hz;
+- final `software_result: PASS`.
+
+### Minimal Web status contract
+
+Retained `/dmxwb/status` now contains the required top-level fields:
+
+```text
+application
+dmx
+mqtt
+artnet
+configuration
+last_error
+```
+
+DEV-011 deliberately keeps this status **minimal**. Extended counters, telemetry,
+monitoring and deployment/service diagnostics are not part of the Web gate and are
+Deferred to DEV-012 where diagnostics belong in the roadmap.
+
+## DEV-011 acceptance conclusion
+
+The DEV-011 roadmap goal is Confirmed:
+
+- static MQTT-only Web is implemented;
+- no direct browser access to serial/files/systemd exists;
+- Fixture/Group/Scene/Source management works through MQTT;
+- MQTT reconnect works without replaying old commands;
+- revision conflict and invalid structural config are rejected;
+- structural DMX Port and Art-Net Universe changes are applied by the running
+  process;
+- browser closure does not stop physical DMX;
+- previously Confirmed DMX and Art-Net invariants remain intact.
+
+Therefore DEV-011 receives engineering PASS.
+
+## Confirmed target / hardware baseline
 
 Primary acceptance WB8:
 
@@ -124,256 +268,12 @@ OS:               Debian 11 Bullseye
 WB release:       wb-2606 stable
 Kernel:           6.8.0-wb160
 glibc:            2.31
-DMX port:         /dev/ttyRS485-1 -> ttyS2
+DMX ports:        /dev/ttyRS485-1 and /dev/ttyRS485-2
 MQTT broker:      127.0.0.1:1883
+Web:              nginx + Mosquitto WebSocket /mqtt
 ```
 
-### DEV-010A — real QLC+ networking
-
-Report:
-
-```text
-docs/DEV010A_ARTNET_QLCPLUS_NETWORK_REPORT.txt
-=== DMXWB DEV-010A QLC+ ART-NET NETWORK PASS ===
-```
-
-Confirmed:
-
-- DMXWB node discovery in QLC+ Nodes Tree;
-- randomized unicast PollReply traffic;
-- real ArtDmx reception;
-- ACTIVE -> LOST after the 3 s timeout;
-- Hold Last during source loss;
-- same-runtime recovery after ArtDmx returns;
-- no core/network errors in the accepted run.
-
-### DEV-010B — physical MQTT / ART-NET integration
-
-Source switching report:
-
-```text
-docs/DEV010B_ARTNET_MQTT_SOURCE_SWITCH_REPORT.txt
-=== DMXWB DEV-010B QLC+ PHYSICAL SOURCE SWITCH PASS ===
-```
-
-Confirmed physically:
-
-```text
-MQTT red
--> background Art-Net green does not take over
--> explicit MQTT -> ART-NET gives green
--> background MQTT blue does not take over
--> explicit ART-NET -> MQTT gives current blue
-```
-
-LOST/Hold/recovery report:
-
-```text
-docs/DEV010B_ARTNET_LOST_HOLD_RECOVERY_REPORT.txt
-=== DMXWB DEV-010B ART-NET LOST HOLD RECOVERY PASS ===
-```
-
-Confirmed:
-
-- `Source=artnet` remains selected after Art-Net loss;
-- physical output Holds Last;
-- 44 Hz transmission continues;
-- same process accepts the returning source;
-- no operator restart is needed.
-
-### DEV-010C1 — WB interface down/up
-
-Report:
-
-```text
-docs/DEV010C1_WB8_INTERFACE_RECOVERY_REPORT.txt
-=== DMXWB DEV-010C1 WB8 INTERFACE DOWN UP RECOVERY PASS ===
-```
-
-Real WB network interface down/up was exercised while the acceptance runtime and
-physical DMX continued. The same PID/start time recovered after the interface
-returned and accepted new ArtDmx without application restart.
-
-### DEV-010C2 — controller restart
-
-Report:
-
-```text
-docs/DEV010C2_QLCPLUS_RESTART_RECOVERY_REPORT.txt
-=== DMXWB DEV-010C2 QLC+ CONTROLLER RESTART RECOVERY PASS ===
-```
-
-QLC+ 5.2.2 was fully closed for longer than the source timeout and restarted on
-the same IP. Physical Hold Last continued during the outage and new ArtDmx was
-accepted by the same DMXWB process after QLC+ returned.
-
-### DEV-010C3 — real source IPv4 change
-
-Report:
-
-```text
-docs/DEV010C3_ARTNET_SOURCE_IP_CHANGE_REPORT.txt
-=== DMXWB DEV-010C3 REAL-NETWORK SOURCE IPv4 CHANGE PASS ===
-```
-
-Two real network paths were present simultaneously:
-
-```text
-primary:
-QLC+ 10.200.200.2 -> WB8 10.200.200.1
-
-Wi-Fi:
-QLC+ 192.168.42.160 -> WB8 192.168.42.1
-```
-
-Acceptance sequence:
-
-```text
-primary GREEN
--> primary output disabled
--> >3 s LOST / Hold Last GREEN
--> stale source lock released
--> same QLC+ reconfigured to Wi-Fi
--> Wi-Fi RED accepted
-```
-
-Confirmed in the same DMXWB process:
-
-- Windows selected the intended source IP for each destination;
-- WB8 used distinct `dbg0` and `wlan0` paths;
-- application Source stayed ART-NET;
-- source IPv4 changed from `10.200.200.2` to `192.168.42.160`;
-- physical output changed GREEN -> RED without restart;
-- `final_artnet_conflicts = 0`;
-- `final_dmx_missed_deadlines = 0`;
-- physical refresh remained 44 Hz.
-
-### DEV-010C4 — source conflict / no merge
-
-Report:
-
-```text
-docs/DEV010C4_ARTNET_CONFLICT_REPORT.txt
-=== DMXWB DEV-010C4 ART-NET SOURCE CONFLICT NO-MERGE PASS ===
-```
-
-A conflicting source identity was injected while QLC+ remained active.
-
-Confirmed:
-
-- 150 conflicting ArtDmx packets were detected;
-- active physical output was not taken over or merged;
-- committed active-source state remained stable;
-- same runtime continued;
-- physical output remained fixed 44 Hz.
-
-### DEV-010C5 — real UDP ArtSync
-
-Report:
-
-```text
-docs/DEV010C5_ARTSYNC_REPORT.txt
-=== DMXWB DEV-010C5 REAL UDP ARTSYNC STAGING ATOMIC RELEASE PASS ===
-```
-
-Observed sequence:
-
-```text
-first ArtSync
--> RED ArtDmx staged for 2530 ms
--> fixture remains GREEN
--> second ArtSync
--> one physical transition to RED
-```
-
-Accepted run:
-
-```text
-red_staging_packets: 51
-staging_window_ms:    2530
-dmx_missed_deadlines: 0
-active_refresh_hz:    44
-software_result:      PASS
-```
-
-This proves real UDP ArtSync staging/release without moving the physical 44 Hz
-scheduler.
-
-### DEV-010C6 — repeated reconnect and latest/no-FIFO
-
-Report:
-
-```text
-docs/DEV010C6_RECONNECT_LATEST_REPORT.txt
-=== DMXWB DEV-010C6 REPEATED RECONNECT LATEST NO-FIFO PASS ===
-```
-
-Three sequential reconnect cycles proved Hold Last and same-process reacquisition.
-
-Burst stress:
-
-```text
-Art-Net datagrams received:       4404
-committed snapshots published:    4396
-router Art-Net snapshots sampled: 449
-burst packets requested/sent:     4096
-burst duration:                   473 ms
-```
-
-The final BLUE guard became stable without multi-second playback of earlier burst
-states. This confirms the intended latest-state/coalescing architecture rather
-than an ArtDmx FIFO.
-
-Final accepted physical diagnostics included:
-
-```text
-dmx_frames_sent:       4234
-dmx_missed_deadlines:  0
-dmx_active_refresh_hz: 44
-receive_errors:        0
-send_errors:           0
-core_rejections:       0
-conflicts:             0
-software_result:       PASS
-```
-
-## DEV-010 roadmap conclusion
-
-The DEV-010 acceptance requirements are now Confirmed:
-
-- named/versioned external Art-Net controller/tool;
-- discovery/subscription;
-- real ArtDmx;
-- ArtSync;
-- Ethernet/source loss durations and Hold Last;
-- controller restart;
-- real source IPv4 change;
-- WB interface down/up;
-- repeated reconnect;
-- IP+Physical conflict;
-- no operator restart after temporary network failure;
-- no accumulating ArtDmx FIFO latency;
-- fixed physical 44 Hz;
-- latest committed channels `1..300`.
-
-Therefore DEV-010 receives engineering PASS.
-
-## Production items still Deferred
-
-DEV-010 engineering PASS does **not** claim production release readiness.
-
-Still Deferred to the appropriate later gates:
-
-- registered production Art-Net OEM Code;
-- production packaging/systemd/offline installation;
-- final integrated 24-hour acceptance.
-
-Development acceptance uses an explicitly marked non-production OEM placeholder
-only. No production OEM Code is invented.
-
-## Confirmed baseline retained from earlier gates
-
-Physical DMX profile remains:
+Physical product profile remains:
 
 ```text
 kDmxMaxChannels       = 512
@@ -381,29 +281,29 @@ kDmxPhysicalMaxSlots  = 300
 kDmxOutputRefreshHz   = 44
 ```
 
-The previously Confirmed Fixture/Group/Scene, persistence and MQTT behaviour
-remains unchanged by DEV-010.
+## Production items still Deferred
 
-MQTT canonical flow remains:
+DEV-011 PASS does **not** claim production release readiness.
 
-```text
-disk
--> C++ canonical model
--> retained MQTT representation
-```
+Still Deferred:
 
-MQTT callback remains parse/enqueue only and does not perform serial or persistence
-I/O.
+- production systemd service and installer;
+- reproducible fully offline installation bundle;
+- deployment permissions/layout and reboot acceptance;
+- production logging and diagnostics;
+- standard WB UI cleanup to only the intended system Status/Source surface;
+- registered production Art-Net OEM Code;
+- final integrated/offline/24-hour acceptance.
 
 ## Current engineering gate
 
 ```text
-DEV-011 — static MQTT-only Web UI
+DEV-012 — systemd, diagnostics and fully offline deployment
 ```
 
-DEV-011 must preserve all Confirmed physical/source/network invariants. In
-particular, browser/web/MQTT work must not become part of the physical DMX timing
-path.
+DEV-012 must package the already Confirmed application as a normal WB8 daemon and
+prove installation/reboot/basic operation with no external Internet and no source
+compilation on WB8.
 
 ## Build/test policy
 
@@ -416,9 +316,3 @@ Docker                       -> not used
 ```
 
 Windows/MSVC is not part of the supported build/test matrix.
-
-## Next
-
-```text
-DEV-011 — static MQTT-only Web UI
-```
