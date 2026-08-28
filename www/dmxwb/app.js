@@ -12,14 +12,14 @@ import {
   setStateSnapshot,
   setStatusSnapshot,
   structuralSettings,
-} from "./model.js";
+} from "./model.js?v=011b2";
 import {
   MQTT_CONFIG_TOPIC,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
   MqttWebSocketClient,
   mqttTransportDescriptor,
-} from "./mqtt-client.js";
+} from "./mqtt-client.js?v=011b2";
 
 let model = createInitialModel();
 

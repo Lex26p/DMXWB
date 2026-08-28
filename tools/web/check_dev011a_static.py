@@ -84,12 +84,21 @@ for section in ["control", "fixtures", "scenes", "settings"]:
     if f'data-section="{section}"' not in html:
         fail(f"missing section container: {section}")
 
-if 'type="module" src="./app.js"' not in html:
+if 'type="module" src="./app.js' not in html:
     fail("index.html does not load local app.js as an ES module")
-if 'href="./styles.css"' not in html:
+if 'href="./styles.css' not in html:
     fail("index.html does not load local styles.css")
 
 print("dev011a_required_sections: PASS")
+
+if '?v=011b2' not in html:
+    fail("index.html does not cache-bust local static assets")
+if './model.js?v=011b2' not in texts["app.js"]:
+    fail("app.js does not cache-bust model.js")
+if './mqtt-client.js?v=011b2' not in texts["app.js"]:
+    fail("app.js does not cache-bust mqtt-client.js")
+
+print("dev011a_asset_cache_busting: PASS")
 
 for forbidden_ui_text in [
     "DEV-011A",

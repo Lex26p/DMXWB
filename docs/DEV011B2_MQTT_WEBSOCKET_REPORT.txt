@@ -1,0 +1,48 @@
+=== DMXWB DEV-011B2 REAL WB8 MQTT WEBSOCKET ACCEPTANCE ===
+generated_utc: 2026-08-28T09:35:49Z
+source_head: 74ffd2a228e0b41303d4e8a60c3fd414f57a8a23
+source_worktree: modified
+ssh_target: root@10.200.200.1
+web_host: 10.200.200.1
+web_path: /dmxwb/
+mqtt_websocket_path: /mqtt
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011b_mqtt_wire_codec_contract: PASS
+dev011b_retained_snapshot_subscriptions: PASS
+dev011b_automatic_reconnect_contract: PASS
+dev011b_no_command_replay_storage: PASS
+=== DMXWB DEV-011B MQTT WEBSOCKET FOUNDATION STATIC PASS ===
+local_static_checks: PASS
+nginx: [warn] could not build optimal proxy_headers_hash, you should increase either proxy_headers_hash_max_size: 512 or proxy_headers_hash_bucket_size: 64; ignoring proxy_headers_hash_bucket_size
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+wb_arch: aarch64
+wb_kernel: 6.8.0-wb160
+wb_os: Debian GNU/Linux 11 (bullseye)
+wb_release: RELEASE_NAME=wb-2606 SUITE=stable TARGET=wb8/bullseye REPO_PREFIX=
+wb_nginx_var_www_root: PASS
+wb_nginx_mqtt_location: PASS
+no_running_dmxwb_process: PASS
+original_retained_snapshots_captured: PASS
+acceptance_snapshots_staged: PASS
+wb_static_web_http_load: PASS
+phase1_retained_published: PASS (revision 110201, source mqtt, fixtures 2)
+phase1_browser_retained_snapshots_user: PASS
+mosquitto_stopped: PASS
+browser_disconnect_state_user: PASS
+mosquitto_restarted: PASS
+phase2_retained_published: PASS (revision 110202, source artnet, fixtures 3)
+browser_reconnect_resubscribe_user: PASS
+original_retained_snapshots_restored: PASS
+temporary_remote_acceptance_files_removed: PASS
+dev011b2_real_wb8_mqtt_websocket_result: PASS
+=== DMXWB DEV-011B2 REAL WB8 MQTT WEBSOCKET RECONNECT PASS ===
