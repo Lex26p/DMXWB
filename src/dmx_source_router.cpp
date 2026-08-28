@@ -52,6 +52,16 @@ DmxSourceRouteResult DmxSourceRouter::select_source(PersistedSource source) {
     return publish_cached_locked(source, true);
 }
 
+void DmxSourceRouter::clear_artnet_snapshot() noexcept {
+    std::scoped_lock lock{mutex_};
+    latest_artnet_.reset();
+    if (last_physical_source_.has_value() &&
+        *last_physical_source_ == PersistedSource::artnet) {
+        last_physical_source_.reset();
+    }
+    update_artnet_output_active_locked();
+}
+
 PersistedSource DmxSourceRouter::selected_source() const noexcept {
     std::scoped_lock lock{mutex_};
     return selected_source_;

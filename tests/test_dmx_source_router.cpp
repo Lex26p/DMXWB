@@ -211,6 +211,61 @@ void test_initial_artnet_keeps_mqtt_background_only() {
         "startup MQTT cache is ready for explicit source return");
 }
 
+void test_clear_artnet_snapshot_invalidates_old_universe_without_blackout() {
+    RecordingPhysical physical;
+    dmxwb::DmxSourceRouter router{
+        dmxwb::PersistedSource::mqtt,
+        [&physical](const dmxwb::DmxSnapshot& snapshot) {
+            return physical.publish(snapshot);
+        }};
+
+    static_cast<void>(router.publish_mqtt_snapshot(make_snapshot(4, 1, 11, 12)));
+    static_cast<void>(router.publish_artnet_snapshot(make_snapshot(4, 2, 21, 22)));
+    const auto to_artnet = router.select_source(dmxwb::PersistedSource::artnet);
+    expect_true(to_artnet.ok() && to_artnet.physical_published,
+        "precondition old Art-Net universe is physically active");
+    expect_true(
+        physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{21},
+        "precondition old Art-Net data is physical");
+
+    const auto published_before_clear = physical.snapshots_.size();
+    router.clear_artnet_snapshot();
+
+    expect_true(!router.has_artnet_snapshot(),
+        "universe reconfiguration invalidates cached Art-Net snapshot");
+    expect_true(!router.artnet_output_active(),
+        "GoodOutput/data-active clears after old universe is invalidated");
+    expect_true(physical.snapshots_.size() == published_before_clear,
+        "invalidating old universe does not synthesize blackout or another frame");
+    expect_true(
+        physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{21},
+        "physical Hold Last remains the old frame until another selected source publishes");
+
+    const auto to_mqtt = router.select_source(dmxwb::PersistedSource::mqtt);
+    expect_true(to_mqtt.ok() && to_mqtt.physical_published,
+        "MQTT remains available after Art-Net universe invalidation");
+    expect_true(
+        physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{11},
+        "MQTT snapshot becomes physical normally");
+
+    const auto back_without_new_artnet =
+        router.select_source(dmxwb::PersistedSource::artnet);
+    expect_true(back_without_new_artnet.ok() &&
+                    !back_without_new_artnet.physical_publish_attempted,
+        "return to ART-NET before new-universe ArtDmx holds current physical output");
+    expect_true(
+        physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{11},
+        "old-universe Art-Net data is never replayed after reconfiguration");
+
+    const auto new_artnet =
+        router.publish_artnet_snapshot(make_snapshot(4, 3, 31, 32));
+    expect_true(new_artnet.ok() && new_artnet.physical_published,
+        "first new-universe Art-Net snapshot becomes physical");
+    expect_true(
+        physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{31},
+        "new Art-Net data replaces Hold Last");
+}
+
 void test_rejects_nonphysical_snapshot_and_reports_sink_failure() {
     RecordingPhysical physical;
     dmxwb::DmxSourceRouter router{
@@ -249,6 +304,7 @@ int main() {
     test_latest_source_caches_and_switching();
     test_switch_to_artnet_without_snapshot_holds_last();
     test_initial_artnet_keeps_mqtt_background_only();
+    test_clear_artnet_snapshot_invalidates_old_universe_without_blackout();
     test_rejects_nonphysical_snapshot_and_reports_sink_failure();
 
     if (failures != 0) {

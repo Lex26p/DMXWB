@@ -14,12 +14,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -55,27 +57,87 @@ private:
 
 class DmxOutputPhysicalSink final {
 public:
-    explicit DmxOutputPhysicalSink(dmxwb::DmxOutput& output) noexcept
-        : output_(output) {}
+    explicit DmxOutputPhysicalSink(dmxwb::DmxOutputConfig config)
+        : config_(std::move(config)),
+          output_(std::make_unique<dmxwb::DmxOutput>(config_)) {}
 
     [[nodiscard]] bool publish(const dmxwb::DmxSnapshot& snapshot) {
-        if (!output_.publish_snapshot(snapshot)) {
+        if (!output_->publish_snapshot(snapshot)) {
             publish_failures_.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
+        latest_snapshot_ = snapshot;
 
-        if (!output_.running()) {
+        if (!output_->running()) {
             if (ever_started_.load(std::memory_order_acquire)) {
                 unexpected_stops_.fetch_add(1, std::memory_order_relaxed);
                 return false;
             }
-            if (!output_.start()) {
+            if (!output_->start()) {
                 start_failures_.fetch_add(1, std::memory_order_relaxed);
                 return false;
             }
             ever_started_.store(true, std::memory_order_release);
         }
         return true;
+    }
+
+    // Config transaction has already been validated and committed. Preserve the
+    // latest whole physical frame, stop the old serial owner, and start the same
+    // frame on the newly selected built-in RS-485 port without process restart.
+    [[nodiscard]] bool reconfigure_port(std::string port) {
+        if (port == config_.port) {
+            return true;
+        }
+
+        auto replacement_config = config_;
+        replacement_config.port = std::move(port);
+
+        std::unique_ptr<dmxwb::DmxOutput> replacement;
+        try {
+            replacement = std::make_unique<dmxwb::DmxOutput>(replacement_config);
+        } catch (...) {
+            reconfigure_failures_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+
+        if (latest_snapshot_.has_value() &&
+            !replacement->publish_snapshot(*latest_snapshot_)) {
+            reconfigure_failures_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+
+        const bool was_running = output_->running();
+        if (was_running) {
+            output_->stop();
+        }
+
+        if (was_running && !replacement->start()) {
+            // The old owner is still valid and retains the same mailbox state.
+            // Best-effort rollback keeps the already-working port alive.
+            if (!output_->start()) {
+                unexpected_stops_.fetch_add(1, std::memory_order_relaxed);
+            }
+            reconfigure_failures_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+
+        output_ = std::move(replacement);
+        config_ = std::move(replacement_config);
+        reconfigurations_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    [[nodiscard]] dmxwb::DmxOutput& output() noexcept {
+        return *output_;
+    }
+
+    [[nodiscard]] const dmxwb::DmxOutput& output() const noexcept {
+        return *output_;
+    }
+
+    void stop() noexcept {
+        output_->stop();
     }
 
     [[nodiscard]] bool ever_started() const noexcept {
@@ -94,12 +156,28 @@ public:
         return unexpected_stops_.load(std::memory_order_acquire);
     }
 
+    [[nodiscard]] std::uint64_t reconfigurations() const noexcept {
+        return reconfigurations_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::uint64_t reconfigure_failures() const noexcept {
+        return reconfigure_failures_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::string_view port() const noexcept {
+        return config_.port;
+    }
+
 private:
-    dmxwb::DmxOutput& output_;
+    dmxwb::DmxOutputConfig config_;
+    std::unique_ptr<dmxwb::DmxOutput> output_;
+    std::optional<dmxwb::DmxSnapshot> latest_snapshot_;
     std::atomic_bool ever_started_{false};
     std::atomic<std::uint64_t> start_failures_{0};
     std::atomic<std::uint64_t> publish_failures_{0};
     std::atomic<std::uint64_t> unexpected_stops_{0};
+    std::atomic<std::uint64_t> reconfigurations_{0};
+    std::atomic<std::uint64_t> reconfigure_failures_{0};
 };
 
 struct Options final {
@@ -292,17 +370,16 @@ void print_usage(std::ostream& stream) {
 
 void print_status(
     const dmxwb::DmxSourceRouter& router,
-    const dmxwb::DmxOutput& output,
     const DmxOutputPhysicalSink& physical_sink) {
     const auto router_diag = router.diagnostics();
-    const auto dmx_diag = output.diagnostics();
+    const auto dmx_diag = physical_sink.output().diagnostics();
     std::cout
         << "status_selected_source: " << source_name(router_diag.selected_source) << '\n'
         << "status_has_mqtt_snapshot: " << (router.has_mqtt_snapshot() ? 1 : 0) << '\n'
         << "status_has_artnet_snapshot: " << (router.has_artnet_snapshot() ? 1 : 0) << '\n'
         << "status_artnet_output_active: " << (router_diag.artnet_output_active ? 1 : 0) << '\n'
         << "status_dmx_output_ever_started: " << (physical_sink.ever_started() ? 1 : 0) << '\n'
-        << "status_dmx_output_running: " << (output.running() ? 1 : 0) << '\n'
+        << "status_dmx_output_running: " << (physical_sink.output().running() ? 1 : 0) << '\n'
         << "status_dmx_frames_sent: " << dmx_diag.frames_sent << '\n';
 }
 
@@ -329,10 +406,9 @@ int main(int argc, char** argv) {
     dmxwb::MqttCommandQueue command_queue;
     dmxwb::MqttController controller{persistence};
     dmxwb::MqttClient mqtt{command_queue};
-    dmxwb::DmxOutput output{dmxwb::DmxOutputConfig{
+    DmxOutputPhysicalSink physical_sink{dmxwb::DmxOutputConfig{
         persistence.config().dmx_port,
         std::chrono::milliseconds{250}}};
-    DmxOutputPhysicalSink physical_sink{output};
     dmxwb::DmxSourceRouter router{
         initial_source,
         [&physical_sink](const dmxwb::DmxSnapshot& snapshot) {
@@ -350,7 +426,7 @@ int main(int argc, char** argv) {
     // stopped until a real Art-Net snapshot is selected or Source changes.
     if (!mqtt_runtime.publish_initial_snapshot()) {
         std::cerr << "Cannot initialize MQTT/source routing\n";
-        output.stop();
+        physical_sink.stop();
         return 1;
     }
 
@@ -359,10 +435,10 @@ int main(int argc, char** argv) {
     // snapshot, so the physical DMX worker must still be stopped. This avoids
     // emitting an artificial empty/zero startup frame while waiting for ArtDmx.
     const bool startup_artnet_output_deferred =
-        initial_source != dmxwb::PersistedSource::artnet || !output.running();
+        initial_source != dmxwb::PersistedSource::artnet || !physical_sink.output().running();
     if (!startup_artnet_output_deferred) {
         std::cerr << "ART-NET startup incorrectly started DmxOutput before first ArtDmx\n";
-        output.stop();
+        physical_sink.stop();
         return 1;
     }
 
@@ -383,14 +459,16 @@ int main(int argc, char** argv) {
         poll_reply_delay);
     if (!artnet_runtime) {
         std::cerr << "Cannot create ArtNetRuntime\n";
-        output.stop();
+        physical_sink.stop();
         return 1;
     }
-    dmxwb::ArtNetSourceCoordinator artnet_source{*artnet_runtime, router};
+    auto artnet_source = std::make_unique<dmxwb::ArtNetSourceCoordinator>(
+        *artnet_runtime,
+        router);
 
     if (!mqtt.start()) {
-        artnet_source.shutdown();
-        output.stop();
+        artnet_source->shutdown();
+        physical_sink.stop();
         std::cerr << "Cannot start MQTT client\n";
         return 1;
     }
@@ -400,17 +478,78 @@ int main(int argc, char** argv) {
     try {
         artnet_worker = std::thread{[&artnet_source, &artnet_stop] {
             while (!artnet_stop.load(std::memory_order_acquire)) {
-                artnet_source.step(dmxwb::ArtNetCore::clock::now());
+                artnet_source->step(dmxwb::ArtNetCore::clock::now());
                 std::this_thread::sleep_for(std::chrono::milliseconds{2});
             }
         }};
     } catch (...) {
         mqtt.stop();
-        artnet_source.shutdown();
-        output.stop();
+        artnet_source->shutdown();
+        physical_sink.stop();
         std::cerr << "Cannot start Art-Net worker\n";
         return 1;
     }
+
+    auto applied_dmx_port = persistence.config().dmx_port;
+    auto applied_artnet_universe = persistence.config().artnet_universe;
+    std::uint64_t artnet_universe_reconfigurations = 0;
+    std::uint64_t artnet_universe_reconfigure_failures = 0;
+
+    const auto stop_artnet_worker = [&] {
+        artnet_stop.store(true, std::memory_order_release);
+        if (artnet_worker.joinable()) {
+            artnet_worker.join();
+        }
+        artnet_source->shutdown();
+    };
+
+    const auto start_artnet_worker = [&]() -> bool {
+        artnet_stop.store(false, std::memory_order_release);
+        try {
+            artnet_worker = std::thread{[&artnet_source, &artnet_stop] {
+                while (!artnet_stop.load(std::memory_order_acquire)) {
+                    artnet_source->step(dmxwb::ArtNetCore::clock::now());
+                    std::this_thread::sleep_for(std::chrono::milliseconds{2});
+                }
+            }};
+        } catch (...) {
+            return false;
+        }
+        return true;
+    };
+
+    const auto reconfigure_artnet_universe =
+        [&](std::uint16_t port_address) -> bool {
+            stop_artnet_worker();
+
+            // Old Port-Address data must never become physical again after the
+            // structural config transaction. Hold the current physical frame
+            // until the configured universe receives a new valid ArtDmx.
+            router.clear_artnet_snapshot();
+
+            artnet_config.core.port_address = port_address;
+            auto replacement = dmxwb::ArtNetRuntime::create(
+                artnet_config,
+                artnet_transport,
+                poll_reply_delay);
+            if (!replacement) {
+                ++artnet_universe_reconfigure_failures;
+                return false;
+            }
+
+            artnet_runtime = std::move(replacement);
+            artnet_source = std::make_unique<dmxwb::ArtNetSourceCoordinator>(
+                *artnet_runtime,
+                router);
+            if (!start_artnet_worker()) {
+                ++artnet_universe_reconfigure_failures;
+                artnet_source->shutdown();
+                return false;
+            }
+
+            ++artnet_universe_reconfigurations;
+            return true;
+        };
 
     std::cout
         << "dmxwb_dev010_source_acceptance: running\n"
@@ -434,7 +573,29 @@ int main(int argc, char** argv) {
     while (!g_stop_requested.load(std::memory_order_acquire)) {
         mqtt_runtime.step(dmxwb::StatePersistenceManager::clock::now());
 
-        if (physical_sink.ever_started() && !output.running()) {
+        const auto& current_config = persistence.config();
+        if (current_config.dmx_port != applied_dmx_port) {
+            if (!physical_sink.reconfigure_port(current_config.dmx_port)) {
+                std::cerr << "Cannot apply configured DMX Port without restart\n";
+                break;
+            }
+            applied_dmx_port = current_config.dmx_port;
+            std::cout << "runtime_dmx_port_applied: " << applied_dmx_port << '\n';
+        }
+
+        if (current_config.artnet_universe != applied_artnet_universe) {
+            if (!reconfigure_artnet_universe(current_config.artnet_universe)) {
+                std::cerr << "Cannot apply configured Art-Net Universe without restart\n";
+                break;
+            }
+            applied_artnet_universe = current_config.artnet_universe;
+            std::cout
+                << "runtime_artnet_port_address_applied: "
+                << applied_artnet_universe
+                << '\n';
+        }
+
+        if (physical_sink.ever_started() && !physical_sink.output().running()) {
             unexpected_output_stop = true;
             std::cerr << "DmxOutput worker stopped unexpectedly\n";
             break;
@@ -442,7 +603,7 @@ int main(int argc, char** argv) {
 
         const auto now = std::chrono::steady_clock::now();
         if (now >= next_status) {
-            print_status(router, output, physical_sink);
+            print_status(router, physical_sink);
             next_status = now + options->status_interval;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
@@ -454,17 +615,17 @@ int main(int argc, char** argv) {
     }
 
     const bool artnet_transport_was_open = artnet_runtime->diagnostics().transport_open;
-    artnet_source.shutdown();
+    artnet_source->shutdown();
     const auto flush_result = mqtt_runtime.flush_state();
     mqtt.stop();
-    output.stop();
+    physical_sink.stop();
 
     const auto mqtt_diag = mqtt.diagnostics();
     const auto& mqtt_runtime_diag = mqtt_runtime.diagnostics();
     const auto artnet_diag = artnet_runtime->diagnostics();
-    const auto& artnet_source_diag = artnet_source.diagnostics();
+    const auto& artnet_source_diag = artnet_source->diagnostics();
     const auto router_diag = router.diagnostics();
-    const auto dmx_diag = output.diagnostics();
+    const auto dmx_diag = physical_sink.output().diagnostics();
 
     std::cout
         << "final_selected_source: " << source_name(router_diag.selected_source) << '\n'
@@ -502,6 +663,13 @@ int main(int argc, char** argv) {
         << "final_dmx_sink_start_failures: " << physical_sink.start_failures() << '\n'
         << "final_dmx_sink_publish_failures: " << physical_sink.publish_failures() << '\n'
         << "final_dmx_sink_unexpected_stops: " << physical_sink.unexpected_stops() << '\n'
+        << "final_dmx_port_reconfigurations: " << physical_sink.reconfigurations() << '\n'
+        << "final_dmx_port_reconfigure_failures: " << physical_sink.reconfigure_failures() << '\n'
+        << "final_artnet_universe_reconfigurations: " << artnet_universe_reconfigurations << '\n'
+        << "final_artnet_universe_reconfigure_failures: "
+        << artnet_universe_reconfigure_failures << '\n'
+        << "final_applied_dmx_port: " << applied_dmx_port << '\n'
+        << "final_applied_artnet_port_address: " << applied_artnet_universe << '\n'
         << "final_dmx_frames_sent: " << dmx_diag.frames_sent << '\n'
         << "final_dmx_open_failures: " << dmx_diag.open_failures << '\n'
         << "final_dmx_send_failures: " << dmx_diag.send_failures << '\n'
@@ -519,6 +687,8 @@ int main(int argc, char** argv) {
         physical_sink.start_failures() == 0 &&
         physical_sink.publish_failures() == 0 &&
         physical_sink.unexpected_stops() == 0 &&
+        physical_sink.reconfigure_failures() == 0 &&
+        artnet_universe_reconfigure_failures == 0 &&
         dmx_diag.missed_deadlines == 0 &&
         dmx_diag.active_refresh_hz == dmxwb::kDmxOutputRefreshHz &&
         !dmx_diag.serial_open;

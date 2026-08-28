@@ -60,6 +60,11 @@ public:
         const DmxSnapshot& snapshot);
     [[nodiscard]] DmxSourceRouteResult select_source(PersistedSource source);
 
+    // Structural Art-Net Universe changes invalidate data from the previous
+    // Port-Address. Physical output is intentionally left untouched until the
+    // selected source publishes a new whole snapshot.
+    void clear_artnet_snapshot() noexcept;
+
     [[nodiscard]] PersistedSource selected_source() const noexcept;
     [[nodiscard]] bool has_mqtt_snapshot() const noexcept;
     [[nodiscard]] bool has_artnet_snapshot() const noexcept;
