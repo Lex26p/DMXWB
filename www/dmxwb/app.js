@@ -1,9 +1,7 @@
 import {
   addGroupDraft,
   configDraftInfo,
-  configRevision,
   createInitialModel,
-  diagnosticSummary,
   fixtureViewModels,
   groupViewModels,
   isLegacyArtNetUniverse,
@@ -19,10 +17,11 @@ import {
   setStateSnapshot,
   setStatusSnapshot,
   setGroupDraftMember,
+  statusSummary,
   structuralGroupDrafts,
   structuralSettings,
   updateConfigDraft,
-} from "./model.js?v=011g1a";;
+} from "./model.js?v=011r1";
 import {
   MQTT_CONFIG_RESULT_TOPIC,
   MQTT_CONFIG_SET_TOPIC,
@@ -35,11 +34,11 @@ import {
   fixtureCommandTopic,
   groupCommandTopic,
   groupStateTopics,
-  mqttTransportDescriptor,
+  buildMqttWebSocketUrl,
   parseGroupStateTopic,
   sceneCommandTopic,
   sceneLifecycleTopic,
-} from "./mqtt-client.js?v=011g1a";;
+} from "./mqtt-client.js?v=011r1";
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -123,12 +122,7 @@ function scheduleRender() {
 const elements = {
   navButtons: [...document.querySelectorAll("[data-section-target]")],
   sections: [...document.querySelectorAll("[data-section]")],
-  mqttEndpoint: document.querySelector("#mqtt-endpoint"),
-  configRevision: document.querySelector("#config-revision"),
-  stateStatus: document.querySelector("#state-status"),
-  sourceBadge: document.querySelector("#source-badge"),
   sourceButtons: [...document.querySelectorAll("[data-source-command]")],
-  sourceNote: document.querySelector("#source-note"),
   fixtureCountBadge: document.querySelector("#fixture-count-badge"),
   fixtureList: document.querySelector("#fixture-list"),
   groupList: document.querySelector("#group-list"),
@@ -137,9 +131,13 @@ const elements = {
   sceneCreateName: document.querySelector("#scene-create-name"),
   sceneCreateButton: document.querySelector("#scene-create-button"),
   sceneResult: document.querySelector("#scene-result"),
-  diagnosticGrid: document.querySelector("#diagnostic-grid"),
   pageTitle: document.querySelector("#page-title"),
-  pageSubtitle: document.querySelector("#page-subtitle"),
+  statusFields: Object.fromEntries(
+    [...document.querySelectorAll("[data-status-field]")].map((element) => [
+      element.dataset.statusField,
+      element,
+    ]),
+  ),
   connectionIndicator: document.querySelector("#connection-indicator"),
   connectionTitle: document.querySelector("#connection-title"),
   settings: {
@@ -157,11 +155,11 @@ const elements = {
   },
 };
 
-const sectionMeta = {
-  control: ["Управление", "Источник и состояние DMXWB"],
-  fixtures: ["Светильники и группы", "Fixture и Group"],
-  scenes: ["Сцены", "Scene lifecycle"],
-  settings: ["Настройки", "Структурная конфигурация"],
+const sectionTitles = {
+  control: "Управление",
+  fixtures: "Светильники и группы",
+  scenes: "Сцены",
+  settings: "Настройки",
 };
 
 function activateSection(sectionName) {
@@ -178,9 +176,8 @@ function activateSection(sectionName) {
     section.hidden = !active;
   }
 
-  const meta = sectionMeta[sectionName] ?? sectionMeta.control;
-  elements.pageTitle.textContent = meta[0];
-  elements.pageSubtitle.textContent = meta[1];
+  elements.pageTitle.textContent =
+    sectionTitles[sectionName] ?? sectionTitles.control;
 }
 
 function renderConnection() {
@@ -212,7 +209,6 @@ function renderConnection() {
     elements.connectionIndicator.classList.add("status-dot--offline");
   }
 }
-
 
 function canPublishCommands() {
   return model.connection.connected === true;
@@ -569,7 +565,6 @@ function renderFixtureControls(fixtures) {
   updateFixtureCards(fixtures);
 }
 
-
 function createGroupRangeControl(label, control, minimum, maximum) {
   const wrapper = document.createElement("label");
   wrapper.className = "fixture-range";
@@ -811,8 +806,6 @@ function renderGroupControls(groups) {
   updateGroupCards(groups);
 }
 
-
-
 function makeConfigRequestId() {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) {
@@ -847,8 +840,8 @@ function handleConfigSetResult(result) {
       kind: "error",
       text:
         result.error_code === "revision_conflict"
-          ? `Конфликт revision: backend уже revision ${result.revision}. Сбросьте draft или повторите изменения на актуальной конфигурации.`
-          : result.message || result.error_code || "Конфигурация отклонена backend.",
+          ? "Конфигурация изменилась в другой вкладке. Отмените изменения или повторите их после обновления."
+          : result.message || "Не удалось применить конфигурацию.",
     };
     scheduleRender();
     return true;
@@ -857,7 +850,7 @@ function handleConfigSetResult(result) {
   model = resetConfigDraft(model);
   settingsResult = {
     kind: "success",
-    text: `Конфигурация применена · revision ${result.revision}`,
+    text: "Конфигурация сохранена.",
   };
   scheduleRender();
   return true;
@@ -895,13 +888,10 @@ function publishConfigDraft() {
     return false;
   }
 
-  pendingConfigSet = {
-    requestId,
-    expectedRevision: info.baseRevision,
-  };
+  pendingConfigSet = { requestId };
   settingsResult = {
     kind: "pending",
-    text: `Ожидание backend · base revision ${info.baseRevision}`,
+    text: "Применение…",
   };
   scheduleRender();
   return true;
@@ -915,11 +905,6 @@ function makeSceneRequestId(operation) {
 
   sceneRequestCounter += 1;
   return `web-scene-${operation}-${Date.now().toString(36)}-${sceneRequestCounter}`;
-}
-
-function setSceneResult(kind, text) {
-  sceneResult = { kind, text };
-  scheduleRender();
 }
 
 function clearScenePending(reason = "") {
@@ -976,7 +961,7 @@ function confirmSceneRenames(scenes) {
     pendingSceneRenames.delete(sceneId);
     sceneResult = {
       kind: "success",
-      text: "Имя сцены подтверждено backend.",
+      text: "Имя сцены сохранено.",
     };
   }
 }
@@ -1016,9 +1001,14 @@ function handleSceneConfigResult(result) {
     elements.sceneCreateName.value = "";
   }
 
+  const successText = {
+    create: "Сцена создана.",
+    overwrite: "Сцена перезаписана.",
+    delete: "Сцена удалена.",
+  };
   sceneResult = {
     kind: "success",
-    text: `Операция подтверждена · revision ${result.revision}`,
+    text: successText[pending.operation] ?? "Готово.",
   };
   scheduleRender();
 }
@@ -1036,7 +1026,7 @@ function publishSceneLifecycle(topic, payload, operation) {
   pendingSceneLifecycle.set(requestId, { operation });
   sceneResult = {
     kind: "pending",
-    text: "Ожидание подтверждения backend…",
+    text: "Выполнение…",
   };
   scheduleRender();
   return true;
@@ -1056,11 +1046,7 @@ function createSceneCard(scene) {
   name.dataset.sceneName = "";
   name.setAttribute("aria-label", `Имя сцены ${scene.id}`);
 
-  const meta = document.createElement("span");
-  meta.className = "scene-card__meta";
-  meta.dataset.sceneMeta = "";
-
-  identity.append(name, meta);
+  identity.append(name);
 
   const actions = document.createElement("div");
   actions.className = "scene-actions";
@@ -1119,16 +1105,12 @@ function updateSceneCards(scenes) {
     }
 
     const name = card.querySelector("[data-scene-name]");
-    const meta = card.querySelector("[data-scene-meta]");
     const pendingRename = pendingSceneRenames.get(scene.id);
 
     if (document.activeElement !== name) {
       name.value = pendingRename?.expected ?? scene.name;
     }
     name.disabled = !connected || lifecycleBusy;
-
-    meta.textContent =
-      `${scene.snapshotCount} snapshot ${scene.snapshotCount === 1 ? "Fixture" : "Fixtures"}`;
 
     for (const button of card.querySelectorAll("[data-scene-action]")) {
       button.disabled = !connected || lifecycleBusy || pendingSceneApply !== null;
@@ -1174,7 +1156,7 @@ function maybeConfirmSceneApply() {
   pendingSceneApply = null;
   sceneResult = {
     kind: "success",
-    text: "Сцена применена и подтверждена runtime state.",
+    text: "Сцена применена.",
   };
 }
 
@@ -1186,27 +1168,14 @@ function renderSourceControls(source) {
     button.disabled = !connected || source === null;
     button.setAttribute("aria-pressed", selected ? "true" : "false");
   }
-
-  elements.sourceNote.textContent = connected
-    ? "Источник переключается явно."
-    : "Команды недоступны без связи с DMXWB.";
 }
 
-function renderDiagnostics() {
-  const diagnostics = diagnosticSummary(model);
-  elements.diagnosticGrid.replaceChildren(
-    ...diagnostics.map((diagnostic) => {
-      const card=document.createElement("article"); card.className="metric-card"; card.dataset.diagnostic=diagnostic.key;
-      card.classList.toggle("metric-card--ok", diagnostic.severity === "ok");
-      card.classList.toggle("metric-card--error", diagnostic.severity === "error");
-      const caption=document.createElement("span"); caption.textContent=diagnostic.label;
-      const strong=document.createElement("strong"); strong.textContent=diagnostic.value; card.append(caption,strong);
-      if (diagnostic.detail) { const detail=document.createElement("small"); detail.className="metric-card__detail"; detail.textContent=diagnostic.detail; card.append(detail); }
-      return card;
-    }),
-  );
+function renderStatus() {
+  const summary = statusSummary(model);
+  for (const [field, element] of Object.entries(elements.statusFields)) {
+    element.textContent = summary[field] ?? "—";
+  }
 }
-
 
 function createSettingsGroupCard(group, fixtures) {
   const card = document.createElement("article");
@@ -1219,10 +1188,7 @@ function createSettingsGroupCard(group, fixtures) {
   const identity = document.createElement("div");
   const name = document.createElement("strong");
   name.textContent = group.name;
-  const id = document.createElement("span");
-  id.className = "settings-group-card__id";
-  id.textContent = `ID ${group.id}`;
-  identity.append(name, id);
+  identity.append(name);
 
   const remove = document.createElement("button");
   remove.type = "button";
@@ -1238,7 +1204,7 @@ function createSettingsGroupCard(group, fixtures) {
   if (fixtures.length === 0) {
     const empty = document.createElement("span");
     empty.className = "field-note";
-    empty.textContent = "Нет Fixture для добавления в группу.";
+    empty.textContent = "Нет светильников.";
     members.append(empty);
   } else {
     const selected = new Set(group.members.map(String));
@@ -1276,7 +1242,7 @@ function renderSettingsGroupEditor() {
     const title = document.createElement("strong");
     title.textContent = "Нет групп";
     const text = document.createElement("span");
-    text.textContent = "Добавьте группу и выберите её Fixture.";
+    text.textContent = "Добавьте группу.";
     empty.append(title, text);
     elements.settings.groupList.append(empty);
     return;
@@ -1306,7 +1272,7 @@ function renderSettings() {
     fields.fixtureCount.value = "";
     fields.startAddress.value = "";
     fields.artnetUniverse.value = "";
-    fields.draftBadge.textContent = "нет конфигурации";
+    fields.draftBadge.textContent = "Нет конфигурации";
     fields.legacyNote.textContent = "";
     fields.result.textContent = "";
     fields.applyButton.disabled = true;
@@ -1339,13 +1305,11 @@ function renderSettings() {
   }
 
   if (!info.dirty) {
-    fields.draftBadge.textContent =
-      `без изменений · revision ${info.currentRevision}`;
+    fields.draftBadge.textContent = "Сохранено";
   } else if (info.stale) {
-    fields.draftBadge.textContent =
-      `draft · base ${info.baseRevision} / current ${info.currentRevision}`;
+    fields.draftBadge.textContent = "Конфигурация изменилась";
   } else {
-    fields.draftBadge.textContent = `draft · revision ${info.baseRevision}`;
+    fields.draftBadge.textContent = "Есть изменения";
   }
 
   fields.legacyNote.textContent = isLegacyArtNetUniverse(settings.artnetUniverse)
@@ -1368,20 +1332,10 @@ function renderSettings() {
 }
 
 function render() {
-  
-const descriptor = mqttTransportDescriptor(window.location);
-  const revision = configRevision(model);
   const source = selectedSource(model);
   const fixtures = fixtureViewModels(model);
   const groups = groupViewModels(model);
   const scenes = sceneViewModels(model);
-
-  elements.mqttEndpoint.textContent = descriptor.url;
-  elements.configRevision.textContent =
-    revision === null ? "нет snapshot" : `revision ${revision}`;
-  elements.stateStatus.textContent = model.state ? "получен" : "нет snapshot";
-  elements.sourceBadge.textContent =
-    source === null ? "Source: —" : `Source: ${source}`;
 
   elements.fixtureCountBadge.textContent =
     `${fixtures.length} светильников · ${groups.length} групп`;
@@ -1392,7 +1346,7 @@ const descriptor = mqttTransportDescriptor(window.location);
   renderFixtureControls(fixtures);
   renderGroupControls(groups);
   renderSceneControls(scenes);
-  renderDiagnostics();
+  renderStatus();
   renderSettings();
 }
 
@@ -1469,9 +1423,6 @@ for (const button of elements.sourceButtons) {
     );
   });
 }
-
-
-
 
 elements.settings.addGroupButton.addEventListener("click", () => {
   if (pendingConfigSet) {
@@ -1670,7 +1621,7 @@ elements.sceneList.addEventListener("click", (event) => {
       };
       sceneResult = {
         kind: "pending",
-        text: "Ожидание подтверждения runtime state…",
+        text: "Применение сцены…",
       };
       scheduleRender();
     }
@@ -1954,9 +1905,8 @@ elements.fixtureList.addEventListener("click", (event) => {
   );
 });
 
-const descriptor = mqttTransportDescriptor(window.location);
 const mqttClient = new MqttWebSocketClient({
-  url: descriptor.url,
+  url: buildMqttWebSocketUrl(window.location),
   onConnectionChange(connection) {
     model = setConnection(model, connection);
     if (!connection.connected) {

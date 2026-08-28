@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>DMXWB</title>
-  <link rel="stylesheet" href="./styles.css?v=011g1a">
+  <link rel="stylesheet" href="./styles.css?v=011r1">
 </head>
 <body>
   <div class="app-shell">
@@ -36,14 +36,12 @@
           <span>Настройки</span>
         </button>
       </nav>
-
     </aside>
 
     <div class="workspace">
       <header class="topbar">
         <div class="page-context">
           <strong id="page-title">Управление</strong>
-          <span id="page-subtitle">Источник и состояние DMXWB</span>
         </div>
 
         <div class="connection-block" aria-live="polite">
@@ -56,41 +54,32 @@
         <section class="page-section is-active" data-section="control" aria-labelledby="control-title">
           <div class="section-heading">
             <h1 id="control-title">Управление</h1>
-            <span class="badge badge--neutral" id="source-badge">Source: —</span>
           </div>
 
           <div class="card-grid card-grid--two">
             <article class="card">
               <div class="card-heading">
-                <div>
-                  <h2>Источник DMX</h2>
-                  <p class="muted">Явное переключение через MQTT.</p>
-                </div>
+                <h2>Источник DMX</h2>
               </div>
               <div class="segmented" aria-label="Источник DMX">
                 <button type="button" data-source-command="mqtt" disabled>WB MQTT</button>
                 <button type="button" data-source-command="artnet" disabled>ART-NET</button>
               </div>
-              <p class="field-note" id="source-note">Команды недоступны без связи с DMXWB.</p>
             </article>
 
             <article class="card">
               <div class="card-heading">
-                <h2>Подключение</h2>
+                <h2>Состояние</h2>
               </div>
-              <dl class="kv-list">
-                <div><dt>WebSocket</dt><dd id="mqtt-endpoint">—</dd></div>
-                <div><dt>Конфигурация</dt><dd id="config-revision">нет snapshot</dd></div>
-                <div><dt>Runtime state</dt><dd id="state-status">нет snapshot</dd></div>
+              <dl class="kv-list status-list">
+                <div><dt>Приложение</dt><dd data-status-field="application">—</dd></div>
+                <div><dt>DMX</dt><dd data-status-field="dmx">—</dd></div>
+                <div><dt>MQTT</dt><dd data-status-field="mqtt">—</dd></div>
+                <div><dt>Art-Net</dt><dd data-status-field="artnet">—</dd></div>
+                <div><dt>Конфигурация</dt><dd data-status-field="configuration">—</dd></div>
+                <div><dt>Последняя ошибка</dt><dd data-status-field="last_error">нет</dd></div>
               </dl>
             </article>
-          </div>
-
-          <div class="diagnostic-grid" id="diagnostic-grid">
-            <article class="metric-card"><span>Application</span><strong>—</strong></article>
-            <article class="metric-card"><span>DMX</span><strong>—</strong></article>
-            <article class="metric-card"><span>MQTT</span><strong>—</strong></article>
-            <article class="metric-card"><span>Art-Net</span><strong>—</strong></article>
           </div>
         </section>
 
@@ -104,20 +93,14 @@
             <article class="card">
               <div class="card-heading"><h2>Светильники</h2></div>
               <div id="fixture-list" class="fixture-list">
-                <div class="empty-state">
-                  <strong>Нет данных</strong>
-                  <span>Здесь отображаются светильники и их элементы управления.</span>
-                </div>
+                <div class="empty-state"><strong>Нет светильников</strong></div>
               </div>
             </article>
 
             <article class="card">
               <div class="card-heading"><h2>Группы</h2></div>
               <div id="group-list" class="group-list">
-                <div class="empty-state">
-                  <strong>Нет данных</strong>
-                  <span>Здесь отображаются группы светильников.</span>
-                </div>
+                <div class="empty-state"><strong>Нет групп</strong></div>
               </div>
             </article>
           </div>
@@ -136,7 +119,6 @@
                 <input
                   id="scene-create-name"
                   type="text"
-                  maxlength="120"
                   placeholder="Название сцены"
                   disabled
                 >
@@ -152,10 +134,7 @@
             <p id="scene-result" class="field-note scene-result" aria-live="polite"></p>
 
             <div id="scene-list" class="scene-list">
-              <div class="empty-state empty-state--wide">
-                <strong>Нет данных</strong>
-                <span>Здесь отображаются сохранённые сцены.</span>
-              </div>
+              <div class="empty-state empty-state--wide"><strong>Нет сцен</strong></div>
             </div>
           </article>
         </section>
@@ -163,17 +142,12 @@
         <section class="page-section" data-section="settings" aria-labelledby="settings-title" hidden>
           <div class="section-heading">
             <h1 id="settings-title">Настройки</h1>
-            <span class="badge badge--neutral" id="draft-badge">нет конфигурации</span>
+            <span class="badge badge--neutral" id="draft-badge">Нет конфигурации</span>
           </div>
 
           <article class="card">
             <div class="card-heading card-heading--settings">
-              <div>
-                <h2>Структурная конфигурация</h2>
-                <p class="muted">
-                  Изменения остаются в локальном draft до явного «Применить».
-                </p>
-              </div>
+              <h2>DMX и Art-Net</h2>
             </div>
 
             <div class="form-grid">
@@ -224,12 +198,7 @@
 
             <div class="settings-group-editor">
               <div class="settings-group-editor__heading">
-                <div>
-                  <h3>Group membership</h3>
-                  <p class="field-note">
-                    Состав групп изменяется только в draft и применяется общей транзакцией.
-                  </p>
-                </div>
+                <h3>Группы</h3>
                 <button
                   id="settings-add-group-button"
                   class="secondary-button"
@@ -238,10 +207,7 @@
                 >Добавить группу</button>
               </div>
               <div id="settings-group-list" class="settings-group-list">
-                <div class="empty-state">
-                  <strong>Нет групп</strong>
-                  <span>Добавьте группу и выберите её Fixture.</span>
-                </div>
+                <div class="empty-state"><strong>Нет групп</strong></div>
               </div>
             </div>
 
@@ -255,7 +221,7 @@
                   class="secondary-button"
                   type="button"
                   disabled
-                >Сбросить draft</button>
+                >Отменить изменения</button>
                 <button
                   id="settings-apply-button"
                   class="primary-button"
@@ -267,10 +233,9 @@
           </article>
         </section>
       </main>
-
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=011g1a"></script>
+  <script type="module" src="./app.js?v=011r1"></script>
 </body>
 </html>

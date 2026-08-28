@@ -214,14 +214,6 @@ export function buildMqttWebSocketUrl(locationLike = globalThis.location) {
   return `${protocol}//${locationLike.host}${MQTT_WEBSOCKET_PATH}`;
 }
 
-export function mqttTransportDescriptor(locationLike = globalThis.location) {
-  return Object.freeze({
-    path: MQTT_WEBSOCKET_PATH,
-    url: buildMqttWebSocketUrl(locationLike),
-    automaticReconnect: true,
-  });
-}
-
 export function encodeConnectPacket(clientId, keepAliveSeconds = 30) {
   const keepAlive = Math.max(1, Math.min(0xffff, Number(keepAliveSeconds) || 30));
   const variableHeader = concatenate([

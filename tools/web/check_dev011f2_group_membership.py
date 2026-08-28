@@ -24,7 +24,7 @@ styles = (WEB_ROOT / "styles.css").read_text(encoding="utf-8")
 for token in [
     'id="settings-add-group-button"',
     'id="settings-group-list"',
-    "Group membership",
+    "<h3>Группы</h3>",
 ]:
     if token not in html:
         fail(f"index.html missing Group draft editor token {token}")
