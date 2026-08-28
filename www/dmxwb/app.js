@@ -21,7 +21,7 @@ import {
   structuralGroupDrafts,
   structuralSettings,
   updateConfigDraft,
-} from "./model.js?v=011r1";
+} from "./model.js?v=011ru1";
 import {
   MQTT_CONFIG_RESULT_TOPIC,
   MQTT_CONFIG_SET_TOPIC,
@@ -38,7 +38,7 @@ import {
   parseGroupStateTopic,
   sceneCommandTopic,
   sceneLifecycleTopic,
-} from "./mqtt-client.js?v=011r1";
+} from "./mqtt-client.js?v=011ru1";
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -372,7 +372,7 @@ function createFixtureCard(fixture) {
   power.type = "checkbox";
   power.dataset.fixturePower = "";
   const powerText = document.createElement("span");
-  powerText.textContent = "Power";
+  powerText.textContent = "Питание";
   powerLabel.append(power, powerText);
 
   header.append(identity, powerLabel);
@@ -627,7 +627,7 @@ function createGroupCard(group) {
   power.dataset.groupPower = "";
   power.disabled = true;
   const powerText = document.createElement("span");
-  powerText.textContent = "Power";
+  powerText.textContent = "Питание";
   powerLabel.append(power, powerText);
 
   header.append(identity, powerLabel);
@@ -829,6 +829,18 @@ function clearPendingConfigSet(reason = "") {
   }
 }
 
+function configErrorText(errorCode) {
+  const messages = {
+    revision_conflict:
+      "Конфигурация изменилась в другой вкладке. Отмените изменения или повторите их после обновления.",
+    json_syntax: "Некорректный формат конфигурации.",
+    schema: "Структура конфигурации некорректна.",
+    version: "Версия конфигурации не поддерживается.",
+    validation: "Параметры конфигурации не прошли проверку.",
+  };
+  return messages[errorCode] ?? "Не удалось применить конфигурацию.";
+}
+
 function handleConfigSetResult(result) {
   if (!pendingConfigSet || result.request_id !== pendingConfigSet.requestId) {
     return false;
@@ -838,10 +850,7 @@ function handleConfigSetResult(result) {
   if (!result.ok) {
     settingsResult = {
       kind: "error",
-      text:
-        result.error_code === "revision_conflict"
-          ? "Конфигурация изменилась в другой вкладке. Отмените изменения или повторите их после обновления."
-          : result.message || "Не удалось применить конфигурацию.",
+      text: configErrorText(result.error_code),
     };
     scheduleRender();
     return true;
@@ -976,7 +985,7 @@ function parseConfigResult(payload) {
     typeof result.error_code !== "string" ||
     typeof result.message !== "string"
   ) {
-    throw new TypeError("config/result schema mismatch");
+    throw new TypeError("Некорректный ответ результата конфигурации.");
   }
   return result;
 }
@@ -989,9 +998,14 @@ function handleSceneConfigResult(result) {
 
   pendingSceneLifecycle.delete(result.request_id);
   if (!result.ok) {
+    const sceneErrors = {
+      not_found: "Сцена не найдена.",
+      validation: "Параметры сцены некорректны.",
+      operation_failed: "Не удалось выполнить операцию со сценой.",
+    };
     sceneResult = {
       kind: "error",
-      text: result.message || result.error_code || "Операция сцены отклонена.",
+      text: sceneErrors[result.error_code] ?? "Операция сцены отклонена.",
     };
     scheduleRender();
     return;
@@ -1313,7 +1327,7 @@ function renderSettings() {
   }
 
   fields.legacyNote.textContent = isLegacyArtNetUniverse(settings.artnetUniverse)
-    ? "Art-Net Universe 0 — legacy compatibility."
+    ? "Вселенная Art-Net 0 — режим совместимости с нумерацией с нуля."
     : "";
 
   fields.result.classList.toggle(
@@ -1353,7 +1367,7 @@ function render() {
 function parseSnapshot(payload) {
   const value = JSON.parse(payload);
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("MQTT snapshot must be a JSON object");
+    throw new TypeError("Некорректный снимок состояния MQTT.");
   }
   return value;
 }
@@ -1922,11 +1936,11 @@ const mqttClient = new MqttWebSocketClient({
     try {
       applyMqttMessage(topic, payload);
     } catch (error) {
-      console.error(`DMXWB ignored invalid MQTT snapshot from ${topic}`, error);
+      console.error(`DMXWB: отклонён некорректный MQTT-снимок из ${topic}`, error);
     }
   },
   onProtocolError(error) {
-    console.error("DMXWB MQTT transport error", error);
+    console.error("DMXWB: ошибка транспорта MQTT", error);
   },
 });
 

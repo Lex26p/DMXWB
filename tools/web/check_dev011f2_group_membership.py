@@ -37,7 +37,7 @@ for token in [
     "next_group_id",
     "Stable Group IDs are never reused",
     "Canonicalize membership in current Fixture order",
-    "Group member references missing Fixture",
+    "Группа ссылается на отсутствующий светильник.",
 ]:
     if token not in model:
         fail(f"model.js missing Group draft token {token}")

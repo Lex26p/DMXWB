@@ -129,9 +129,9 @@ export function resizeFixtureDraft(model, fixtureCount) {
     while (items.length < fixtureCount) {
       const id = Number(draft.id_counters.next_fixture_id);
       if (!Number.isSafeInteger(id) || id <= 0) {
-        throw new RangeError("next_fixture_id is invalid");
+        throw new RangeError("Некорректный счётчик идентификаторов светильников.");
       }
-      items.push({ id, name: `Fixture ${id}` });
+      items.push({ id, name: `Светильник ${id}` });
       draft.id_counters.next_fixture_id = id + 1;
     }
 
@@ -183,14 +183,14 @@ export function structuralGroupDrafts(model) {
   const fixtures = Array.isArray(draft.fixtures?.items)
     ? draft.fixtures.items.map((fixture) => ({
         id: fixture.id,
-        name: fixture.name || `Fixture ${fixture.id}`,
+        name: fixture.name || `Светильник ${fixture.id}`,
       }))
     : [];
 
   const groups = Array.isArray(draft.groups)
     ? draft.groups.map((group) => ({
         id: group.id,
-        name: group.name || `Group ${group.id}`,
+        name: group.name || `Группа ${group.id}`,
         members: Array.isArray(group.members) ? [...group.members] : [],
       }))
     : [];
@@ -209,12 +209,12 @@ export function addGroupDraft(model) {
 
     const id = Number(draft.id_counters.next_group_id);
     if (!Number.isSafeInteger(id) || id <= 0) {
-      throw new RangeError("next_group_id is invalid");
+      throw new RangeError("Некорректный счётчик идентификаторов групп.");
     }
 
     draft.groups.push({
       id,
-      name: `Group ${id}`,
+      name: `Группа ${id}`,
       members: [],
     });
     draft.id_counters.next_group_id = id + 1;
@@ -259,7 +259,7 @@ export function setGroupDraftMember(
       : [];
     const fixtureOrder = fixtures.map((fixture) => Number(fixture.id));
     if (!fixtureOrder.includes(fixtureId)) {
-      throw new RangeError("Group member references missing Fixture");
+      throw new RangeError("Группа ссылается на отсутствующий светильник.");
     }
 
     draft.groups = Array.isArray(draft.groups) ? draft.groups : [];
@@ -267,7 +267,7 @@ export function setGroupDraftMember(
       (candidate) => Number(candidate.id) === groupId,
     );
     if (!group) {
-      throw new RangeError("Group draft does not exist");
+      throw new RangeError("Изменяемая группа не найдена.");
     }
 
     const members = new Set(
@@ -386,7 +386,7 @@ export function groupViewModels(model) {
   const fixtureNames = new Map(
     fixtureConfigItems(model).map((fixture) => [
       String(fixture.id),
-      fixture.name || `Fixture ${fixture.id}`,
+      fixture.name || `Светильник ${fixture.id}`,
     ]),
   );
 
@@ -398,11 +398,11 @@ export function groupViewModels(model) {
       name:
         typeof state?.name === "string"
           ? state.name
-          : group.name || `Group ${group.id}`,
+          : group.name || `Группа ${group.id}`,
       members,
       memberNames: members.map(
         (memberId) =>
-          fixtureNames.get(String(memberId)) ?? `Fixture ${memberId}`,
+          fixtureNames.get(String(memberId)) ?? `Светильник ${memberId}`,
       ),
       runtime: state
         ? {
@@ -431,7 +431,7 @@ export function sceneItems(model) {
 export function sceneViewModels(model) {
   return sceneItems(model).map((scene) => ({
     id: scene.id,
-    name: scene.name || `Scene ${scene.id}`,
+    name: scene.name || `Сцена ${scene.id}`,
     fixtures: Array.isArray(scene.fixtures) ? scene.fixtures : [],
   }));
 }
@@ -490,7 +490,7 @@ export function fixtureViewModels(model) {
     const runtime = runtimeById.get(String(fixture.id)) ?? null;
     return {
       id: fixture.id,
-      name: fixture.name || `Fixture ${fixture.id}`,
+      name: fixture.name || `Светильник ${fixture.id}`,
       startAddress:
         finiteInteger(model.config?.fixtures?.start_address, 1) + index * 4,
       runtime: runtime
@@ -526,24 +526,47 @@ export function structuralSettings(model) {
   };
 }
 
+const STATUS_TEXT_RU = Object.freeze({
+  running: "Работает",
+  stopped: "Остановлен",
+  error: "Ошибка",
+  off: "Выключено",
+  connected: "Подключён",
+  offline: "Нет связи",
+  controller: "Работает",
+  ok: "Загружена",
+  fallback: "Резервная конфигурация",
+  WAITING: "Ожидание",
+  ACTIVE: "Активен",
+  LOST: "Источник потерян",
+  CONFLICT: "Конфликт",
+  ASYNC: "Асинхронно",
+  SYNC: "Синхронно",
+});
+
+function statusTextToken(value) {
+  const text = String(value);
+  return STATUS_TEXT_RU[text] ?? text;
+}
+
 function statusText(value) {
   if (value === null || value === undefined || value === "") {
     return "—";
   }
   if (typeof value !== "object" || Array.isArray(value)) {
-    return String(value);
+    return statusTextToken(value);
   }
   if (typeof value.state === "string") {
-    return value.state;
+    return statusTextToken(value.state);
   }
   if (typeof value.status === "string") {
-    return value.status;
+    return statusTextToken(value.status);
   }
   if (typeof value.connected === "boolean") {
-    return value.connected ? "connected" : "offline";
+    return value.connected ? "Подключён" : "Нет связи";
   }
   if (typeof value.running === "boolean") {
-    return value.running ? "running" : "stopped";
+    return value.running ? "Работает" : "Остановлен";
   }
   return "—";
 }
