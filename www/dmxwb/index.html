@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>DMXWB</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">D</span>
+        <div class="brand-copy">
+          <strong>DMXWB</strong>
+          <span>Wiren Board · DMX512</span>
+        </div>
+      </div>
+
+      <nav class="section-nav" aria-label="Разделы DMXWB">
+        <button class="nav-button is-active" type="button" data-section-target="control">
+          <span class="nav-icon" aria-hidden="true">●</span>
+          <span>Управление</span>
+        </button>
+        <button class="nav-button" type="button" data-section-target="fixtures">
+          <span class="nav-icon" aria-hidden="true">▦</span>
+          <span>Светильники и группы</span>
+        </button>
+        <button class="nav-button" type="button" data-section-target="scenes">
+          <span class="nav-icon" aria-hidden="true">◆</span>
+          <span>Сцены</span>
+        </button>
+        <button class="nav-button" type="button" data-section-target="settings">
+          <span class="nav-icon" aria-hidden="true">⚙</span>
+          <span>Настройки</span>
+        </button>
+      </nav>
+
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="page-context">
+          <strong id="page-title">Управление</strong>
+          <span id="page-subtitle">Источник и состояние DMXWB</span>
+        </div>
+
+        <div class="connection-block" aria-live="polite">
+          <span id="connection-indicator" class="status-dot status-dot--offline" aria-hidden="true"></span>
+          <strong id="connection-title">Нет связи</strong>
+        </div>
+      </header>
+
+      <main>
+        <section class="page-section is-active" data-section="control" aria-labelledby="control-title">
+          <div class="section-heading">
+            <h1 id="control-title">Управление</h1>
+            <span class="badge badge--neutral" id="source-badge">Source: —</span>
+          </div>
+
+          <div class="card-grid card-grid--two">
+            <article class="card">
+              <div class="card-heading">
+                <div>
+                  <h2>Источник DMX</h2>
+                  <p class="muted">Явное переключение через MQTT.</p>
+                </div>
+              </div>
+              <div class="segmented" aria-label="Источник DMX">
+                <button type="button" disabled>WB MQTT</button>
+                <button type="button" disabled>ART-NET</button>
+              </div>
+              <p class="field-note">Команды недоступны без связи с DMXWB.</p>
+            </article>
+
+            <article class="card">
+              <div class="card-heading">
+                <h2>Подключение</h2>
+              </div>
+              <dl class="kv-list">
+                <div><dt>WebSocket</dt><dd id="mqtt-endpoint">—</dd></div>
+                <div><dt>Конфигурация</dt><dd id="config-revision">нет snapshot</dd></div>
+                <div><dt>Runtime state</dt><dd id="state-status">нет snapshot</dd></div>
+              </dl>
+            </article>
+          </div>
+
+          <div class="diagnostic-grid" id="diagnostic-grid">
+            <article class="metric-card"><span>Application</span><strong>—</strong></article>
+            <article class="metric-card"><span>DMX</span><strong>—</strong></article>
+            <article class="metric-card"><span>MQTT</span><strong>—</strong></article>
+            <article class="metric-card"><span>Art-Net</span><strong>—</strong></article>
+          </div>
+        </section>
+
+        <section class="page-section" data-section="fixtures" aria-labelledby="fixtures-title" hidden>
+          <div class="section-heading">
+            <h1 id="fixtures-title">Светильники и группы</h1>
+            <span class="badge badge--neutral" id="fixture-count-badge">0 светильников</span>
+          </div>
+
+          <div class="split-layout">
+            <article class="card">
+              <div class="card-heading"><h2>Светильники</h2></div>
+              <div id="fixture-list" class="empty-state">
+                <strong>Нет данных</strong>
+                <span>Здесь отображаются светильники и их элементы управления.</span>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-heading"><h2>Группы</h2></div>
+              <div id="group-list" class="empty-state">
+                <strong>Нет данных</strong>
+                <span>Здесь отображаются группы светильников.</span>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page-section" data-section="scenes" aria-labelledby="scenes-title" hidden>
+          <div class="section-heading">
+            <h1 id="scenes-title">Сцены</h1>
+            <span class="badge badge--neutral" id="scene-count-badge">0 сцен</span>
+          </div>
+
+          <article class="card">
+            <div id="scene-list" class="empty-state empty-state--wide">
+              <strong>Нет данных</strong>
+              <span>Здесь отображаются сохранённые сцены.</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="page-section" data-section="settings" aria-labelledby="settings-title" hidden>
+          <div class="section-heading">
+            <h1 id="settings-title">Настройки</h1>
+            <span class="badge badge--neutral" id="draft-badge">нет конфигурации</span>
+          </div>
+
+          <article class="card">
+            <div class="card-heading card-heading--settings">
+              <div>
+                <h2>Структурная конфигурация</h2>
+                <p class="muted">
+                  Изменения остаются в локальном draft до явного «Применить».
+                </p>
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <label>
+                <span>DMX Port</span>
+                <input id="setting-dmx-port" type="text" value="" disabled>
+              </label>
+              <label>
+                <span>Fixture Count</span>
+                <input id="setting-fixture-count" type="number" value="" disabled>
+              </label>
+              <label>
+                <span>Start Address</span>
+                <input id="setting-start-address" type="number" value="" disabled>
+              </label>
+              <label>
+                <span>Art-Net Universe</span>
+                <input id="setting-artnet-universe" type="number" min="0" max="32767" value="" disabled>
+              </label>
+            </div>
+
+            <div class="settings-footer">
+              <p id="legacy-universe-note" class="field-note"></p>
+              <button class="primary-button" type="button" disabled>Применить</button>
+            </div>
+          </article>
+        </section>
+      </main>
+
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
