@@ -1,0 +1,195 @@
+=== DMXWB DEV-011E2 REAL WEB SCENE ACCEPTANCE ===
+generated_utc: 2026-08-28T11:47:25Z
+source_head: deb023747983c505dbd0ab1d7653fe14c82b6bae
+source_worktree: modified
+artifact_sha256: a1e08ea8429c6b9d0d5fd44565dce7ad9c080e0b558915df3ba1d922cf986c62
+target: root@10.200.200.1
+web_host: 10.200.200.1
+fixture_1_start_address: 1
+fixture_2_start_address: 5
+fixed_refresh_hz: 44
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011b_mqtt_wire_codec_contract: PASS
+dev011b_retained_snapshot_subscriptions: PASS
+dev011b_automatic_reconnect_contract: PASS
+dev011b_no_command_replay_storage: PASS
+=== DMXWB DEV-011B MQTT WEBSOCKET FOUNDATION STATIC PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011b_mqtt_wire_codec_contract: PASS
+dev011b_retained_snapshot_subscriptions: PASS
+dev011b_automatic_reconnect_contract: PASS
+dev011b_no_command_replay_storage: PASS
+=== DMXWB DEV-011B MQTT WEBSOCKET FOUNDATION STATIC PASS ===
+dev011c1_source_command_contract: PASS
+dev011c1_fixture_command_contract: PASS
+dev011c1_fixture_state_mapping: PASS
+dev011c1_slider_throttle_25hz_and_final_publish: PASS
+dev011c1_no_command_replay_storage: PASS
+dev011c1_mqtt_only_controls: PASS
+=== DMXWB DEV-011C1 SOURCE FIXTURE WEB CONTROLS STATIC PASS ===
+dev011d1_group_command_contract: PASS
+dev011d1_group_factual_state_subscription: PASS
+dev011d1_incremental_subscription_no_retained_loop: PASS
+dev011d1_group_power_not_synthesized_in_browser: PASS
+dev011d1_group_member_mapping: PASS
+dev011d1_group_slider_throttle_25hz_and_final_publish: PASS
+dev011d1_event_listeners_registered_once: PASS
+dev011d1_render_burst_coalescing: PASS
+dev011d1_pending_factual_confirmation_guard: PASS
+dev011d1_group_no_command_replay_storage: PASS
+dev011d1_group_mqtt_only_controls: PASS
+=== DMXWB DEV-011D1 GROUP WEB CONTROLS STATIC PASS ===
+dev011e1_scene_create_contract: PASS
+dev011e1_scene_apply_contract: PASS
+dev011e1_scene_overwrite_contract: PASS
+dev011e1_scene_rename_contract: PASS
+dev011e1_scene_delete_contract: PASS
+dev011e1_scene_request_id_result_matching: PASS
+dev011e1_scene_apply_factual_state_confirmation: PASS
+dev011e1_scene_no_command_replay_storage: PASS
+dev011e1_scene_mqtt_only_controls: PASS
+=== DMXWB DEV-011E1 SCENE WEB CONTROLS STATIC PASS ===
+local_dev011e1_checks: PASS
+dev011e2_scene_apply_mutate_then_single_snapshot_contract: PASS
+dev011e2_mqtt_runtime_single_snapshot_route_contract: PASS
+local_scene_atomic_backend_contract: PASS
+nginx: [warn] could not build optimal proxy_headers_hash, you should increase either proxy_headers_hash_max_size: 512 or proxy_headers_hash_bucket_size: 64; ignoring proxy_headers_hash_bucket_size
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+no_running_dmxwb_process: PASS
+wb8_interface: dbg0
+wb8_mac: 1a:55:89:a2:69:43
+original_retained_topics_captured: PASS
+wb_static_web_deployed: PASS
+unified_runtime_started: PASS
+initial_scene_count_zero: PASS
+browser_initial_scene_state_user: PASS
+scene_a_prepare_physical_user: PASS
+scene_a_prepare_factual_state: PASS
+web_scene_create_user: PASS
+web_scene_create_factual_confirmation: PASS
+scene_a_apply_guard_green_user: PASS
+web_scene_apply_a_atomic_physical_user: PASS
+web_scene_apply_a_factual_confirmation: PASS
+web_scene_apply_a_atomic_contract: PASS (single backend snapshot + one physical transition)
+scene_apply_did_not_switch_source: PASS
+scene_b_prepare_physical_user: PASS
+web_scene_overwrite_user: PASS
+web_scene_overwrite_factual_confirmation: PASS
+scene_b_apply_guard_blue_user: PASS
+web_scene_apply_b_atomic_physical_user: PASS
+web_scene_apply_b_factual_confirmation: PASS
+web_scene_apply_b_atomic_contract: PASS (single backend snapshot + one physical transition)
+web_scene_rename_user: PASS
+web_scene_rename_factual_confirmation: PASS
+web_scene_delete_user: PASS
+web_scene_delete_factual_confirmation: PASS
+scene_lifecycle_revision_sequence: PASS (1->2->3->4->5)
+continuous_dmx_frames_observed: PASS (12426)
+--- final runtime diagnostics ---
+final_selected_source: mqtt
+final_mqtt_successful_connections: 1
+final_mqtt_disconnects: 1
+final_mqtt_callback_failures: 0
+final_mqtt_runtime_commands_processed: 76
+final_mqtt_runtime_dmx_publish_failures: 0
+final_mqtt_runtime_state_save_failures: 0
+final_artnet_source_state: WAITING
+final_artnet_sync_mode: ASYNC
+final_artnet_bind_attempts: 1
+final_artnet_bind_failures: 0
+final_artnet_transport_recoveries: 0
+final_artnet_datagrams_received: 0
+final_artnet_receive_errors: 0
+final_artnet_send_errors: 0
+final_artnet_core_rejections: 0
+final_artnet_conflicts: 0
+final_artnet_source_lost_events: 0
+final_artnet_snapshots_published: 0
+final_artnet_poll_replies_sent: 0
+final_artnet_route_failures: 0
+final_router_mqtt_snapshots_received: 73
+final_router_artnet_snapshots_received: 0
+final_router_source_switches: 0
+final_router_source_switches_without_snapshot: 0
+final_router_physical_snapshots_published: 73
+final_router_physical_publish_failures: 0
+final_router_artnet_output_active: 0
+final_dmx_sink_ever_started: 1
+final_dmx_sink_start_failures: 0
+final_dmx_sink_publish_failures: 0
+final_dmx_sink_unexpected_stops: 0
+final_dmx_frames_sent: 12439
+final_dmx_open_failures: 0
+final_dmx_send_failures: 0
+final_dmx_recoveries: 0
+final_dmx_missed_deadlines: 0
+final_dmx_active_refresh_hz: 44
+final_dmx_serial_open_after_stop: 0
+final_artnet_transport_open_before_shutdown: 1
+final_artnet_transport_open_after_shutdown: 0
+state_flush_action: not_dirty
+software_result: PASS
+router_mqtt_snapshots: PASS (73)
+router_artnet_snapshots_absent: PASS (0)
+mqtt_commands_processed: PASS (76)
+physical_dmx_frames: PASS (12439)
+fixed_44hz_physical_output: PASS
+final_mqtt_callback_failures: PASS (0)
+final_mqtt_runtime_dmx_publish_failures: PASS (0)
+final_mqtt_runtime_state_save_failures: PASS (0)
+final_artnet_bind_failures: PASS (0)
+final_artnet_receive_errors: PASS (0)
+final_artnet_send_errors: PASS (0)
+final_artnet_core_rejections: PASS (0)
+final_artnet_conflicts: PASS (0)
+final_artnet_route_failures: PASS (0)
+final_router_physical_publish_failures: PASS (0)
+final_dmx_sink_start_failures: PASS (0)
+final_dmx_sink_publish_failures: PASS (0)
+final_dmx_sink_unexpected_stops: PASS (0)
+final_dmx_open_failures: PASS (0)
+final_dmx_send_failures: PASS (0)
+final_dmx_missed_deadlines: PASS (0)
+final_dmx_serial_open_after_stop: PASS (0)
+original_retained_topics_restored: PASS
+dev011e2_real_web_scene_result: PASS
+=== DMXWB DEV-011E2 REAL WEB SCENE LIFECYCLE + ATOMIC APPLY PASS ===
