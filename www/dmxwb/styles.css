@@ -487,6 +487,79 @@ h2 {
   gap: 8px;
 }
 
+.settings-group-editor {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid #e2e7ee;
+}
+
+.settings-group-editor__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-group-editor__heading h3 {
+  margin: 0 0 3px;
+  font-size: 0.94rem;
+}
+
+.settings-group-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.settings-group-card {
+  padding: 9px 10px;
+  border: 1px solid #dce2ea;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.settings-group-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-group-card__header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-group-card__id {
+  color: #7b8795;
+  font-size: 0.75rem;
+}
+
+.settings-group-remove {
+  min-height: 30px;
+}
+
+.settings-group-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+}
+
+.settings-member-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  font-size: 0.84rem;
+}
+
+.settings-member-option input {
+  margin: 0;
+}
+
 .settings-result {
   min-height: 1.15em;
   margin: 9px 0 0;
@@ -941,6 +1014,19 @@ h2 {
 
   .settings-result--error {
     color: #ff9b8e;
+  }
+
+  .settings-group-editor {
+    border-top-color: #2a3647;
+  }
+
+  .settings-group-card {
+    border-color: #344155;
+    background: #141e2c;
+  }
+
+  .settings-group-card__id {
+    color: #97a6b9;
   }
 
   .fixture-card {

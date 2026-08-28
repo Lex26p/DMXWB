@@ -174,6 +174,118 @@ export function configDraftInfo(model) {
   };
 }
 
+export function structuralGroupDrafts(model) {
+  const draft = model.configDraft;
+  if (!draft) {
+    return null;
+  }
+
+  const fixtures = Array.isArray(draft.fixtures?.items)
+    ? draft.fixtures.items.map((fixture) => ({
+        id: fixture.id,
+        name: fixture.name || `Fixture ${fixture.id}`,
+      }))
+    : [];
+
+  const groups = Array.isArray(draft.groups)
+    ? draft.groups.map((group) => ({
+        id: group.id,
+        name: group.name || `Group ${group.id}`,
+        members: Array.isArray(group.members) ? [...group.members] : [],
+      }))
+    : [];
+
+  return { fixtures, groups };
+}
+
+export function addGroupDraft(model) {
+  return updateConfigDraft(model, (draft) => {
+    draft.groups = Array.isArray(draft.groups) ? draft.groups : [];
+    draft.id_counters ??= {
+      next_fixture_id: 1,
+      next_group_id: 1,
+      next_scene_id: 1,
+    };
+
+    const id = Number(draft.id_counters.next_group_id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new RangeError("next_group_id is invalid");
+    }
+
+    draft.groups.push({
+      id,
+      name: `Group ${id}`,
+      members: [],
+    });
+    draft.id_counters.next_group_id = id + 1;
+  });
+}
+
+export function removeGroupDraft(model, groupIdValue) {
+  const groupId = Number(groupIdValue);
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    return model;
+  }
+
+  return updateConfigDraft(model, (draft) => {
+    draft.groups = Array.isArray(draft.groups) ? draft.groups : [];
+    draft.groups = draft.groups.filter(
+      (group) => Number(group.id) !== groupId,
+    );
+    // Stable Group IDs are never reused: next_group_id is intentionally kept.
+  });
+}
+
+export function setGroupDraftMember(
+  model,
+  groupIdValue,
+  fixtureIdValue,
+  included,
+) {
+  const groupId = Number(groupIdValue);
+  const fixtureId = Number(fixtureIdValue);
+  if (
+    !Number.isSafeInteger(groupId) ||
+    groupId <= 0 ||
+    !Number.isSafeInteger(fixtureId) ||
+    fixtureId <= 0
+  ) {
+    return model;
+  }
+
+  return updateConfigDraft(model, (draft) => {
+    const fixtures = Array.isArray(draft.fixtures?.items)
+      ? draft.fixtures.items
+      : [];
+    const fixtureOrder = fixtures.map((fixture) => Number(fixture.id));
+    if (!fixtureOrder.includes(fixtureId)) {
+      throw new RangeError("Group member references missing Fixture");
+    }
+
+    draft.groups = Array.isArray(draft.groups) ? draft.groups : [];
+    const group = draft.groups.find(
+      (candidate) => Number(candidate.id) === groupId,
+    );
+    if (!group) {
+      throw new RangeError("Group draft does not exist");
+    }
+
+    const members = new Set(
+      Array.isArray(group.members)
+        ? group.members.map(Number)
+        : [],
+    );
+    if (included) {
+      members.add(fixtureId);
+    } else {
+      members.delete(fixtureId);
+    }
+
+    // Canonicalize membership in current Fixture order: unique and stable.
+    group.members = fixtureOrder.filter((id) => members.has(id));
+  });
+}
+
 export function setStateSnapshot(model, state) {
   return {
     ...model,

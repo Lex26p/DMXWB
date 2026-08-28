@@ -1,4 +1,5 @@
 import {
+  addGroupDraft,
   configDraftInfo,
   configRevision,
   createInitialModel,
@@ -9,6 +10,7 @@ import {
   sceneSnapshotMatchesState,
   sceneViewModels,
   selectedSource,
+  removeGroupDraft,
   resetConfigDraft,
   resizeFixtureDraft,
   setConfigSnapshot,
@@ -16,9 +18,11 @@ import {
   setGroupControlState,
   setStateSnapshot,
   setStatusSnapshot,
+  setGroupDraftMember,
+  structuralGroupDrafts,
   structuralSettings,
   updateConfigDraft,
-} from "./model.js?v=011f1";;
+} from "./model.js?v=011f2";;
 import {
   MQTT_CONFIG_RESULT_TOPIC,
   MQTT_CONFIG_SET_TOPIC,
@@ -35,7 +39,7 @@ import {
   parseGroupStateTopic,
   sceneCommandTopic,
   sceneLifecycleTopic,
-} from "./mqtt-client.js?v=011f1";;
+} from "./mqtt-client.js?v=011f2";;
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -146,6 +150,8 @@ const elements = {
     draftBadge: document.querySelector("#draft-badge"),
     legacyNote: document.querySelector("#legacy-universe-note"),
     result: document.querySelector("#settings-result"),
+    groupList: document.querySelector("#settings-group-list"),
+    addGroupButton: document.querySelector("#settings-add-group-button"),
     resetButton: document.querySelector("#settings-reset-button"),
     applyButton: document.querySelector("#settings-apply-button"),
   },
@@ -1213,12 +1219,101 @@ function renderDiagnostics() {
   );
 }
 
+
+function createSettingsGroupCard(group, fixtures) {
+  const card = document.createElement("article");
+  card.className = "settings-group-card";
+  card.dataset.settingsGroupId = String(group.id);
+
+  const header = document.createElement("div");
+  header.className = "settings-group-card__header";
+
+  const identity = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = group.name;
+  const id = document.createElement("span");
+  id.className = "settings-group-card__id";
+  id.textContent = `ID ${group.id}`;
+  identity.append(name, id);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "secondary-button settings-group-remove";
+  remove.dataset.settingsGroupRemove = "";
+  remove.textContent = "Удалить";
+
+  header.append(identity, remove);
+
+  const members = document.createElement("div");
+  members.className = "settings-group-members";
+
+  if (fixtures.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "field-note";
+    empty.textContent = "Нет Fixture для добавления в группу.";
+    members.append(empty);
+  } else {
+    const selected = new Set(group.members.map(String));
+    for (const fixture of fixtures) {
+      const label = document.createElement("label");
+      label.className = "settings-member-option";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.settingsGroupMember = String(fixture.id);
+      checkbox.checked = selected.has(String(fixture.id));
+
+      const text = document.createElement("span");
+      text.textContent = fixture.name;
+
+      label.append(checkbox, text);
+      members.append(label);
+    }
+  }
+
+  card.append(header, members);
+  return card;
+}
+
+function renderSettingsGroupEditor() {
+  const editor = structuralGroupDrafts(model);
+  const disabled = pendingConfigSet !== null;
+
+  elements.settings.addGroupButton.disabled = !editor || disabled;
+  elements.settings.groupList.replaceChildren();
+
+  if (!editor || editor.groups.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    const title = document.createElement("strong");
+    title.textContent = "Нет групп";
+    const text = document.createElement("span");
+    text.textContent = "Добавьте группу и выберите её Fixture.";
+    empty.append(title, text);
+    elements.settings.groupList.append(empty);
+    return;
+  }
+
+  for (const group of editor.groups) {
+    const card = createSettingsGroupCard(group, editor.fixtures);
+    for (const input of card.querySelectorAll(
+      "[data-settings-group-member]",
+    )) {
+      input.disabled = disabled;
+    }
+    const remove = card.querySelector("[data-settings-group-remove]");
+    remove.disabled = disabled;
+    elements.settings.groupList.append(card);
+  }
+}
+
 function renderSettings() {
   const settings = structuralSettings(model);
   const info = configDraftInfo(model);
   const fields = elements.settings;
 
   if (!settings || !info) {
+    renderSettingsGroupEditor();
     fields.dmxPort.value = "/dev/ttyRS485-1";
     fields.fixtureCount.value = "";
     fields.startAddress.value = "";
@@ -1238,6 +1333,8 @@ function renderSettings() {
     }
     return;
   }
+
+  renderSettingsGroupEditor();
 
   fields.dmxPort.value = settings.dmxPort;
   fields.fixtureCount.value = String(settings.fixtureCount);
@@ -1386,6 +1483,65 @@ for (const button of elements.sourceButtons) {
 }
 
 
+
+
+elements.settings.addGroupButton.addEventListener("click", () => {
+  if (pendingConfigSet) {
+    return;
+  }
+
+  try {
+    model = addGroupDraft(model);
+    settingsResult = { kind: "idle", text: "" };
+    scheduleRender();
+  } catch (error) {
+    setSettingsResult("error", String(error?.message ?? error));
+  }
+});
+
+elements.settings.groupList.addEventListener("change", (event) => {
+  const checkbox = event.target.closest("[data-settings-group-member]");
+  if (!checkbox || pendingConfigSet) {
+    return;
+  }
+
+  const card = checkbox.closest("[data-settings-group-id]");
+  if (!card) {
+    return;
+  }
+
+  try {
+    model = setGroupDraftMember(
+      model,
+      Number(card.dataset.settingsGroupId),
+      Number(checkbox.dataset.settingsGroupMember),
+      checkbox.checked,
+    );
+    settingsResult = { kind: "idle", text: "" };
+    scheduleRender();
+  } catch (error) {
+    setSettingsResult("error", String(error?.message ?? error));
+  }
+});
+
+elements.settings.groupList.addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-settings-group-remove]");
+  if (!remove || remove.disabled || pendingConfigSet) {
+    return;
+  }
+
+  const card = remove.closest("[data-settings-group-id]");
+  if (!card) {
+    return;
+  }
+
+  model = removeGroupDraft(
+    model,
+    Number(card.dataset.settingsGroupId),
+  );
+  settingsResult = { kind: "idle", text: "" };
+  scheduleRender();
+});
 
 elements.settings.dmxPort.addEventListener("change", () => {
   model = updateConfigDraft(model, (draft) => {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>DMXWB</title>
-  <link rel="stylesheet" href="./styles.css?v=011f1">
+  <link rel="stylesheet" href="./styles.css?v=011f2">
 </head>
 <body>
   <div class="app-shell">
@@ -222,6 +222,29 @@
               </label>
             </div>
 
+            <div class="settings-group-editor">
+              <div class="settings-group-editor__heading">
+                <div>
+                  <h3>Group membership</h3>
+                  <p class="field-note">
+                    Состав групп изменяется только в draft и применяется общей транзакцией.
+                  </p>
+                </div>
+                <button
+                  id="settings-add-group-button"
+                  class="secondary-button"
+                  type="button"
+                  disabled
+                >Добавить группу</button>
+              </div>
+              <div id="settings-group-list" class="settings-group-list">
+                <div class="empty-state">
+                  <strong>Нет групп</strong>
+                  <span>Добавьте группу и выберите её Fixture.</span>
+                </div>
+              </div>
+            </div>
+
             <p id="settings-result" class="field-note settings-result" aria-live="polite"></p>
 
             <div class="settings-footer">
@@ -248,6 +271,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=011f1"></script>
+  <script type="module" src="./app.js?v=011f2"></script>
 </body>
 </html>
