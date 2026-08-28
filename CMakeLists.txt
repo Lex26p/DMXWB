@@ -75,6 +75,7 @@ target_compile_definitions(dmxwb_core PRIVATE DMXWB_VERSION="${PROJECT_VERSION}"
 dmxwb_enable_warnings(dmxwb_core)
 
 add_library(dmxwb_mqtt_transport STATIC
+    src/integrated_runtime.cpp
     src/mqtt_client.cpp
     src/mqtt_runtime.cpp
 )
@@ -93,13 +94,25 @@ target_compile_features(dmxwb_mqtt_transport PUBLIC cxx_std_20)
 dmxwb_enable_warnings(dmxwb_mqtt_transport)
 
 add_executable(dmxwb
-    src/main.cpp
+    src/production_main.cpp
 )
 
 target_link_libraries(dmxwb PRIVATE dmxwb_core dmxwb_mqtt_transport)
 target_compile_features(dmxwb PRIVATE cxx_std_20)
 dmxwb_enable_warnings(dmxwb)
 dmxwb_enable_portable_gnu_runtime(dmxwb)
+
+# Historical DEV-003/004/005 diagnostics remain available, but they no longer
+# occupy the production dmxwb executable path.
+add_executable(dmxwb_hardware_diagnostics
+    src/main.cpp
+)
+
+target_link_libraries(dmxwb_hardware_diagnostics PRIVATE dmxwb_core)
+target_compile_features(dmxwb_hardware_diagnostics PRIVATE cxx_std_20)
+dmxwb_enable_warnings(dmxwb_hardware_diagnostics)
+dmxwb_enable_portable_gnu_runtime(dmxwb_hardware_diagnostics)
+set_target_properties(dmxwb_hardware_diagnostics PROPERTIES OUTPUT_NAME "dmxwb-hardware-diagnostics")
 
 add_executable(dmxwb_mqtt_acceptance
     src/mqtt_acceptance_main.cpp
