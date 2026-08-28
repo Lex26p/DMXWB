@@ -1,0 +1,138 @@
+=== DMXWB DEV-010C3 REAL-NETWORK SOURCE IPv4 CHANGE ===
+generated_utc: 2026-08-28T08:13:09Z
+source_head: c4c4b82e48c329fa1849a954e41b26e3f4ad70b5
+source_worktree: modified
+artifact_sha256: a1e08ea8429c6b9d0d5fd44565dce7ad9c080e0b558915df3ba1d922cf986c62
+target_management_path: root@10.200.200.1
+primary_pc_ipv4: 10.200.200.2
+wifi_pc_ipv4: 192.168.42.160
+wifi_wb_ipv4_expected: 192.168.42.1
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+fixture_channels_rgbw: 1/2/3/4
+artnet_port_address: 0
+development_oem_placeholder: 0xFFFF
+fixed_refresh_hz: 44
+external_controller: QLC+ 5.2.2
+external_controller_version_source: fixed acceptance-stand value confirmed by user
+qlc_output_disabled_before_runtime_user: PASS
+primary_wb_interface: dbg0
+primary_wb_ipv4: 10.200.200.1
+primary_wb_mac: 1a:55:89:a2:69:43
+primary_route_to_pc: 10.200.200.2 dev dbg0 src 10.200.200.1 uid 0 
+wifi_wb_interface: wlan0
+wifi_wb_ipv4: 192.168.42.1
+wifi_route_to_pc: 192.168.42.160 dev wlan0 src 192.168.42.1 uid 0 
+wb_dual_network_interfaces_distinct: PASS
+checker_name=DMXWB DEV010C3 Dual Network Check
+checker_version=1.0
+primary_source_ip=10.200.200.2
+primary_destination_ip=10.200.200.1
+primary_interface_alias=Ethernet 2
+primary_interface_index=10
+primary_route_selected_source=10.200.200.2
+primary_ping=PASS
+secondary_source_ip=192.168.42.160
+secondary_destination_ip=192.168.42.1
+secondary_interface_alias=Wi-Fi
+secondary_interface_index=12
+secondary_route_selected_source=192.168.42.160
+secondary_ping=PASS
+windows_interfaces_distinct=PASS
+dual_network_check=PASS
+dual_network_preflight: PASS
+unified_runtime_started: PASS
+runtime_pid_before_source_ip_change: 51755
+runtime_starttime_before_source_ip_change: 331281
+initial_source_mqtt: PASS
+no_artnet_snapshot_before_qlc_enable: PASS
+fresh_initial_artnet_snapshot_received: PASS
+source_artnet_selected: PASS
+artnet_green_physical_user: PASS
+dmx_frames_before_source_ip_change: 1226
+primary_artnet_output_disabled_user: PASS
+same_dmxwb_process_during_primary_lost: PASS (pid 51755, starttime 331281)
+source_stays_artnet_during_primary_lost: PASS
+physical_dmx_continues_during_primary_lost: PASS (1226 -> 7445, delta=6219)
+primary_lost_hold_last_green_user: PASS
+wifi_source_red_config_user: PASS
+wifi_new_source_red_physical_user: PASS
+same_dmxwb_process_after_source_ip_change: PASS (pid 51755, starttime 331281)
+source_stays_artnet_after_source_ip_change: PASS
+physical_dmx_continues_after_source_ip_change: PASS (7445 -> 10745, delta=3300)
+real_network_source_ipv4_change_path: PASS (10.200.200.2 -> 192.168.42.160)
+final_explicit_return_to_mqtt: PASS
+final_mqtt_off_physical_user: PASS
+--- final runtime diagnostics ---
+final_selected_source: mqtt
+final_mqtt_successful_connections: 1
+final_mqtt_disconnects: 1
+final_mqtt_callback_failures: 0
+final_mqtt_runtime_commands_processed: 4
+final_mqtt_runtime_dmx_publish_failures: 0
+final_mqtt_runtime_state_save_failures: 0
+final_artnet_source_state: ACTIVE
+final_artnet_sync_mode: ASYNC
+final_artnet_bind_attempts: 1
+final_artnet_bind_failures: 0
+final_artnet_transport_recoveries: 0
+final_artnet_datagrams_received: 106
+final_artnet_receive_errors: 0
+final_artnet_send_errors: 0
+final_artnet_core_rejections: 0
+final_artnet_conflicts: 0
+final_artnet_source_lost_events: 1
+final_artnet_snapshots_published: 80
+final_artnet_poll_replies_sent: 26
+final_artnet_route_failures: 0
+final_router_mqtt_snapshots_received: 3
+final_router_artnet_snapshots_received: 80
+final_router_source_switches: 2
+final_router_source_switches_without_snapshot: 0
+final_router_physical_snapshots_published: 55
+final_router_physical_publish_failures: 0
+final_router_artnet_output_active: 0
+final_dmx_sink_ever_started: 1
+final_dmx_sink_start_failures: 0
+final_dmx_sink_publish_failures: 0
+final_dmx_sink_unexpected_stops: 0
+final_dmx_frames_sent: 10898
+final_dmx_open_failures: 0
+final_dmx_send_failures: 0
+final_dmx_recoveries: 0
+final_dmx_missed_deadlines: 0
+final_dmx_active_refresh_hz: 44
+final_dmx_serial_open_after_stop: 0
+final_artnet_transport_open_before_shutdown: 1
+final_artnet_transport_open_after_shutdown: 0
+state_flush_action: not_dirty
+software_result: PASS
+final_artnet_source_state_after_ip_change: PASS (ACTIVE)
+final_artnet_sync_mode: PASS (ASYNC)
+primary_source_lost_release_events: PASS (1)
+artnet_conflicts: PASS (0)
+source_switch_count: PASS (2)
+artnet_datagrams_received: PASS (106)
+router_artnet_snapshots: PASS (80)
+physical_dmx_frames: PASS (10898)
+source_ipv4_change_acceptance: PASS (10.200.200.2 -> 192.168.42.160, same DMXWB process)
+final_mqtt_callback_failures: PASS (0)
+final_mqtt_runtime_dmx_publish_failures: PASS (0)
+final_mqtt_runtime_state_save_failures: PASS (0)
+final_artnet_bind_failures: PASS (0)
+final_artnet_receive_errors: PASS (0)
+final_artnet_send_errors: PASS (0)
+final_artnet_core_rejections: PASS (0)
+final_artnet_route_failures: PASS (0)
+final_router_physical_publish_failures: PASS (0)
+final_dmx_sink_start_failures: PASS (0)
+final_dmx_sink_publish_failures: PASS (0)
+final_dmx_sink_unexpected_stops: PASS (0)
+final_dmx_open_failures: PASS (0)
+final_dmx_send_failures: PASS (0)
+final_dmx_missed_deadlines: PASS (0)
+final_dmx_serial_open_after_stop: PASS (0)
+fixed_44hz_physical_output: PASS
+artnet_transport_lifecycle: PASS
+dev010c3_real_network_source_ipv4_change_result: PASS
+=== DMXWB DEV-010C3 REAL-NETWORK SOURCE IPv4 CHANGE PASS ===
