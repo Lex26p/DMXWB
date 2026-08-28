@@ -217,7 +217,7 @@ Fixture* MqttController::find_fixture(Fixture::Id id) noexcept {
 
 const Fixture* MqttController::find_fixture(Fixture::Id id) const noexcept {
     for (std::size_t index = 0; index < runtime_.fixtures().fixture_count(); ++index) {
-        const auto* fixture = runtime_.fixture_at(index);
+        const auto* fixture = runtime_.fixtures().fixture_at(index);
         if (fixture != nullptr && fixture->id() == id) {
             return fixture;
         }
@@ -746,7 +746,7 @@ void MqttController::append_all_scene_states(std::vector<MqttPublication>& outpu
 std::string MqttController::build_status_json(MqttApplicationStatus status) const {
     std::string output{"{\"application\":\""};
     output += mqtt_application_status_name(status);
-    output += "\",\"mqtt\":\"controller\",\"configuration\":";
+    output += "\",\"dmx\":\"controller\",\"mqtt\":\"controller\",\"artnet\":\"controller\",\"configuration\":";
     output += runtime_.startup_status().ok() ? "\"ok\"" : "\"fallback\"";
     output += ",\"last_error\":\"\"}";
     return output;
