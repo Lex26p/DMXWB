@@ -1,0 +1,143 @@
+=== DMXWB DEV-010C6 REPEATED RECONNECT + LATEST NO-FIFO ===
+generated_utc: 2026-08-28T07:52:44Z
+source_head: 135f4f6cb5821ac5374b8533ffd30fb5d32db928
+source_worktree: modified
+artifact_sha256: a1e08ea8429c6b9d0d5fd44565dce7ad9c080e0b558915df3ba1d922cf986c62
+target: root@10.200.200.1
+qlc_plus_pc_ip: 10.200.200.2
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+fixture_channels_rgbw: 1/2/3/4
+artnet_port_address: 0
+development_oem_placeholder: 0xFFFF
+stress_probe: DMXWB DEV010C6 Reconnect Latest Probe 1.0
+stress_probe_ipv4: 10.200.200.2
+stress_probe_physical: 43
+stress_probe_port_address: 0
+stress_reconnect_silence_seconds: 3.6
+stress_burst_packets_requested: 4096
+fixed_refresh_hz: 44
+external_controller: QLC+ 5.2.2
+external_controller_version_source: fixed acceptance-stand value confirmed by user
+external_controller_ipv4: 10.200.200.2
+external_controller_role: active_reference_source
+stress_probe_status: probe_name=DMXWB DEV010C6 Reconnect Latest Probe; probe_version=1.1; powershell_version=5.1.22621.7517; source_ip=10.200.200.2; destination_ip=10.200.200.1; physical=43
+qlc_output_disabled_before_runtime_user: PASS
+wb8_interface: dbg0
+wb8_ipv4: 10.200.200.1
+wb8_mac: 1a:55:89:a2:69:43
+route_to_qlc: 10.200.200.2 dev dbg0 src 10.200.200.1 uid 0 
+unified_runtime_started: PASS
+runtime_pid_before_reconnect_stress: 35510
+runtime_starttime_before_reconnect_stress: 207196
+initial_source_mqtt: PASS
+no_artnet_snapshot_before_qlc_enable: PASS
+fresh_initial_artnet_snapshot_received: PASS
+source_artnet_selected: PASS
+artnet_green_physical_user: PASS
+dmx_frames_before_reconnect_stress: 1137
+qlc_output_disabled_before_reconnect_probe_user: PASS
+qlc_source_loss_window_elapsed: PASS (>3 s)
+same_dmxwb_process_before_reconnect_stress: PASS (pid 35510, starttime 207196)
+color_stream=GREEN
+color_stream_packets=38
+reconnect_cycle1_green_active_user: PASS
+reconnect_cycle1_green_hold_last_user: PASS
+color_stream=RED
+color_stream_packets=39
+reconnect_cycle2_red_active_user: PASS
+reconnect_cycle2_red_hold_last_user: PASS
+color_stream=BLUE
+color_stream_packets=38
+reconnect_cycle3_blue_active_user: PASS
+reconnect_cycle3_blue_hold_last_user: PASS
+color_stream=WHITE
+color_stream_packets=39
+reconnect_final_white_active_user: PASS
+repeated_reconnect_hold_last_user: PASS
+phase=BURST_START
+phase=FINAL_BLUE_GUARD_START
+phase=FINAL_BLUE_STABLE
+burst_packets_sent=4096
+burst_duration_ms=473
+deterministic_reconnect_burst_probe: PASS (4096 packets, 473 ms)
+latest_no_fifo_final_blue_user: PASS
+same_dmxwb_process_after_reconnect_stress: PASS (pid 35510, starttime 207196)
+source_stays_artnet_through_reconnects: PASS
+physical_dmx_continues_during_reconnect_stress: PASS (1137 -> 4045, delta=2908)
+final_explicit_return_to_mqtt: PASS
+final_mqtt_off_physical_user: PASS
+--- final runtime diagnostics ---
+final_selected_source: mqtt
+final_mqtt_successful_connections: 1
+final_mqtt_disconnects: 1
+final_mqtt_callback_failures: 0
+final_mqtt_runtime_commands_processed: 4
+final_mqtt_runtime_dmx_publish_failures: 0
+final_mqtt_runtime_state_save_failures: 0
+final_artnet_source_state: LOST
+final_artnet_sync_mode: ASYNC
+final_artnet_bind_attempts: 1
+final_artnet_bind_failures: 0
+final_artnet_transport_recoveries: 0
+final_artnet_datagrams_received: 4404
+final_artnet_receive_errors: 0
+final_artnet_send_errors: 0
+final_artnet_core_rejections: 0
+final_artnet_conflicts: 0
+final_artnet_source_lost_events: 5
+final_artnet_snapshots_published: 4396
+final_artnet_poll_replies_sent: 8
+final_artnet_route_failures: 0
+final_router_mqtt_snapshots_received: 3
+final_router_artnet_snapshots_received: 449
+final_router_source_switches: 2
+final_router_source_switches_without_snapshot: 0
+final_router_physical_snapshots_published: 430
+final_router_physical_publish_failures: 0
+final_router_artnet_output_active: 0
+final_dmx_sink_ever_started: 1
+final_dmx_sink_start_failures: 0
+final_dmx_sink_publish_failures: 0
+final_dmx_sink_unexpected_stops: 0
+final_dmx_frames_sent: 4234
+final_dmx_open_failures: 0
+final_dmx_send_failures: 0
+final_dmx_recoveries: 0
+final_dmx_missed_deadlines: 0
+final_dmx_active_refresh_hz: 44
+final_dmx_serial_open_after_stop: 0
+final_artnet_transport_open_before_shutdown: 1
+final_artnet_transport_open_after_shutdown: 0
+state_flush_action: not_dirty
+software_result: PASS
+final_artnet_source_state_after_reconnect_stress: PASS (LOST)
+final_artnet_sync_mode: PASS (ASYNC)
+repeated_source_lost_reacquire_events: PASS (5)
+artnet_conflicts: PASS (0)
+source_switch_count: PASS (2)
+artnet_datagrams_received_stress: PASS (4404)
+artnet_committed_snapshots_published: PASS (4396)
+router_latest_snapshots_routed: PASS (449)
+latest_coalescing_ratio: PASS (routed 449 < 50% of published 4396)
+physical_dmx_frames: PASS (4234)
+final_mqtt_callback_failures: PASS (0)
+final_mqtt_runtime_dmx_publish_failures: PASS (0)
+final_mqtt_runtime_state_save_failures: PASS (0)
+final_artnet_bind_failures: PASS (0)
+final_artnet_receive_errors: PASS (0)
+final_artnet_send_errors: PASS (0)
+final_artnet_core_rejections: PASS (0)
+final_artnet_route_failures: PASS (0)
+final_router_physical_publish_failures: PASS (0)
+final_dmx_sink_start_failures: PASS (0)
+final_dmx_sink_publish_failures: PASS (0)
+final_dmx_sink_unexpected_stops: PASS (0)
+final_dmx_open_failures: PASS (0)
+final_dmx_send_failures: PASS (0)
+final_dmx_missed_deadlines: PASS (0)
+final_dmx_serial_open_after_stop: PASS (0)
+fixed_44hz_physical_output: PASS
+artnet_transport_lifecycle: PASS
+dev010c6_repeated_reconnect_latest_no_fifo_result: PASS
+=== DMXWB DEV-010C6 REPEATED RECONNECT LATEST NO-FIFO PASS ===
