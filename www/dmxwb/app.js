@@ -3,29 +3,35 @@ import {
   createInitialModel,
   diagnosticSummary,
   fixtureViewModels,
-  groupItems,
+  groupViewModels,
   isLegacyArtNetUniverse,
   sceneItems,
   selectedSource,
   setConfigSnapshot,
   setConnection,
+  setGroupControlState,
   setStateSnapshot,
   setStatusSnapshot,
   structuralSettings,
-} from "./model.js?v=011c1";
+} from "./model.js?v=011d1";
 import {
   MQTT_CONFIG_TOPIC,
+  MQTT_GROUP_STATE_TOPIC_FILTER,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
   MQTT_SYSTEM_SOURCE_COMMAND_TOPIC,
   MqttWebSocketClient,
   fixtureCommandTopic,
+  groupCommandTopic,
   mqttTransportDescriptor,
-} from "./mqtt-client.js?v=011c1";
+  parseGroupStateTopic,
+} from "./mqtt-client.js?v=011d1";
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
+let groupStructureKey = "";
 const fixturePublishers = new Map();
+const groupPublishers = new Map();
 const LIVE_PUBLISH_INTERVAL_MS = 40; // 25/s, inside the required 20–30/s window.
 
 const elements = {
@@ -39,6 +45,7 @@ const elements = {
   sourceNote: document.querySelector("#source-note"),
   fixtureCountBadge: document.querySelector("#fixture-count-badge"),
   fixtureList: document.querySelector("#fixture-list"),
+  groupList: document.querySelector("#group-list"),
   sceneCountBadge: document.querySelector("#scene-count-badge"),
   diagnosticGrid: document.querySelector("#diagnostic-grid"),
   pageTitle: document.querySelector("#page-title"),
@@ -186,6 +193,17 @@ function fixturePublisher(fixtureId, control) {
     );
   }
   return fixturePublishers.get(key);
+}
+
+function groupPublisher(groupId, control) {
+  const key = `${groupId}:${control}`;
+  if (!groupPublishers.has(key)) {
+    groupPublishers.set(
+      key,
+      createThrottledPublisher(() => groupCommandTopic(groupId, control)),
+    );
+  }
+  return groupPublishers.get(key);
 }
 
 function rgbHex(red, green, blue) {
@@ -409,6 +427,226 @@ function renderFixtureControls(fixtures) {
   updateFixtureCards(fixtures);
 }
 
+
+function createGroupRangeControl(label, control, minimum, maximum) {
+  const wrapper = document.createElement("label");
+  wrapper.className = "fixture-range";
+
+  const heading = document.createElement("span");
+  heading.className = "fixture-range__heading";
+
+  const caption = document.createElement("span");
+  caption.textContent = label;
+
+  const value = document.createElement("output");
+  value.dataset.groupControlValue = control;
+  value.textContent = "—";
+
+  heading.append(caption, value);
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = String(minimum);
+  input.max = String(maximum);
+  input.step = "1";
+  input.dataset.groupControl = control;
+  input.disabled = true;
+
+  wrapper.append(heading, input);
+  return wrapper;
+}
+
+function createGroupCard(group) {
+  const card = document.createElement("article");
+  card.className = "fixture-card group-card";
+  card.dataset.groupId = String(group.id);
+
+  const header = document.createElement("div");
+  header.className = "fixture-card__header";
+
+  const identity = document.createElement("div");
+  identity.className = "fixture-card__identity";
+
+  const name = document.createElement("input");
+  name.type = "text";
+  name.className = "fixture-name";
+  name.value = group.name;
+  name.dataset.groupName = "";
+  name.setAttribute("aria-label", `Имя группы ${group.id}`);
+
+  const members = document.createElement("span");
+  members.className = "fixture-address group-members";
+  members.textContent =
+    group.memberNames.length > 0
+      ? group.memberNames.join(", ")
+      : "Без участников";
+
+  identity.append(name, members);
+
+  const powerLabel = document.createElement("label");
+  powerLabel.className = "fixture-power";
+  const power = document.createElement("input");
+  power.type = "checkbox";
+  power.dataset.groupPower = "";
+  power.disabled = true;
+  const powerText = document.createElement("span");
+  powerText.textContent = "Power";
+  powerLabel.append(power, powerText);
+
+  header.append(identity, powerLabel);
+
+  const colorRow = document.createElement("div");
+  colorRow.className = "fixture-color-row";
+
+  const colorLabel = document.createElement("label");
+  colorLabel.className = "fixture-color-picker";
+  const colorCaption = document.createElement("span");
+  colorCaption.textContent = "Цвет";
+  const color = document.createElement("input");
+  color.type = "color";
+  color.dataset.groupControl = "color";
+  color.value = "#ffffff";
+  color.disabled = true;
+  colorLabel.append(colorCaption, color);
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "secondary-button";
+  reset.dataset.groupReset = "";
+  reset.textContent = "Сброс";
+  reset.disabled = true;
+
+  colorRow.append(colorLabel, reset);
+
+  const controls = document.createElement("div");
+  controls.className = "fixture-controls";
+  controls.append(
+    createGroupRangeControl("R", "red", 0, 255),
+    createGroupRangeControl("G", "green", 0, 255),
+    createGroupRangeControl("B", "blue", 0, 255),
+    createGroupRangeControl("Яркость", "brightness", 0, 100),
+    createGroupRangeControl("Температура", "temperature", 0, 100),
+  );
+
+  card.append(header, colorRow, controls);
+  return card;
+}
+
+function groupStructureSignature(groups) {
+  return groups
+    .map(
+      (group) =>
+        `${group.id}:${group.name}:${group.members.join(",")}`,
+    )
+    .join("|");
+}
+
+function rebuildGroupCards(groups) {
+  groupPublishers.clear();
+  elements.groupList.replaceChildren();
+
+  if (groups.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    const title = document.createElement("strong");
+    title.textContent = "Нет групп";
+    const text = document.createElement("span");
+    text.textContent = "Группы создаются в настройках конфигурации.";
+    empty.append(title, text);
+    elements.groupList.append(empty);
+    return;
+  }
+
+  for (const group of groups) {
+    elements.groupList.append(createGroupCard(group));
+  }
+}
+
+function groupRuntimeComplete(runtime) {
+  return (
+    runtime !== null &&
+    typeof runtime.actualPower === "boolean" &&
+    Number.isInteger(runtime.red) &&
+    Number.isInteger(runtime.green) &&
+    Number.isInteger(runtime.blue) &&
+    Number.isInteger(runtime.brightness) &&
+    Number.isInteger(runtime.temperature)
+  );
+}
+
+function updateGroupCards(groups) {
+  const connected = canPublishCommands();
+
+  for (const group of groups) {
+    const card = elements.groupList.querySelector(
+      `[data-group-id="${group.id}"]`,
+    );
+    if (!card) {
+      continue;
+    }
+
+    const runtime = group.runtime;
+    const stateReady = groupRuntimeComplete(runtime);
+    const name = card.querySelector("[data-group-name]");
+    const power = card.querySelector("[data-group-power]");
+    const reset = card.querySelector("[data-group-reset]");
+    const liveInputs = [...card.querySelectorAll("[data-group-control]")];
+
+    name.disabled = !connected;
+    reset.disabled = !connected;
+    power.disabled = !connected || !stateReady;
+    for (const input of liveInputs) {
+      input.disabled = !connected || !stateReady;
+    }
+
+    if (!stateReady) {
+      power.checked = false;
+      for (const output of card.querySelectorAll(
+        "[data-group-control-value]",
+      )) {
+        output.textContent = "—";
+      }
+      continue;
+    }
+
+    power.checked = runtime.actualPower;
+
+    const values = {
+      red: runtime.red,
+      green: runtime.green,
+      blue: runtime.blue,
+      brightness: runtime.brightness,
+      temperature: runtime.temperature,
+    };
+
+    for (const [control, value] of Object.entries(values)) {
+      const input = card.querySelector(
+        `[data-group-control="${control}"]`,
+      );
+      const output = card.querySelector(
+        `[data-group-control-value="${control}"]`,
+      );
+      setInteractiveValue(input, value);
+      output.textContent = String(value);
+    }
+
+    const color = card.querySelector('[data-group-control="color"]');
+    setInteractiveValue(
+      color,
+      rgbHex(runtime.red, runtime.green, runtime.blue),
+    );
+  }
+}
+
+function renderGroupControls(groups) {
+  const signature = groupStructureSignature(groups);
+  if (signature !== groupStructureKey) {
+    groupStructureKey = signature;
+    rebuildGroupCards(groups);
+  }
+  updateGroupCards(groups);
+}
+
 function renderSourceControls(source) {
   const connected = canPublishCommands();
   for (const button of elements.sourceButtons) {
@@ -475,11 +713,127 @@ function renderSettings() {
 }
 
 function render() {
-  const descriptor = mqttTransportDescriptor(window.location);
+  
+elements.groupList.addEventListener("pointerdown", (event) => {
+  const input = event.target.closest("[data-group-control]");
+  if (input) {
+    input.dataset.interacting = "1";
+  }
+});
+
+elements.groupList.addEventListener("pointercancel", (event) => {
+  const input = event.target.closest("[data-group-control]");
+  if (input) {
+    delete input.dataset.interacting;
+  }
+});
+
+elements.groupList.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-group-control]");
+  if (!input || input.disabled) {
+    return;
+  }
+
+  const card = input.closest("[data-group-id]");
+  if (!card) {
+    return;
+  }
+  const groupId = Number(card.dataset.groupId);
+  const control = input.dataset.groupControl;
+
+  if (control === "color") {
+    const rgb = hexRgb(input.value);
+    if (!rgb) {
+      return;
+    }
+    groupPublisher(groupId, control).schedule(
+      `${rgb.red};${rgb.green};${rgb.blue}`,
+    );
+    return;
+  }
+
+  const output = card.querySelector(
+    `[data-group-control-value="${control}"]`,
+  );
+  if (output) {
+    output.textContent = input.value;
+  }
+  groupPublisher(groupId, control).schedule(input.value);
+});
+
+elements.groupList.addEventListener("change", (event) => {
+  const card = event.target.closest("[data-group-id]");
+  if (!card || !canPublishCommands()) {
+    return;
+  }
+  const groupId = Number(card.dataset.groupId);
+
+  const liveInput = event.target.closest("[data-group-control]");
+  if (liveInput) {
+    const control = liveInput.dataset.groupControl;
+    delete liveInput.dataset.interacting;
+
+    if (control === "color") {
+      const rgb = hexRgb(liveInput.value);
+      if (rgb) {
+        groupPublisher(groupId, control).final(
+          `${rgb.red};${rgb.green};${rgb.blue}`,
+        );
+      }
+    } else {
+      groupPublisher(groupId, control).final(liveInput.value);
+    }
+    return;
+  }
+
+  const power = event.target.closest("[data-group-power]");
+  if (power) {
+    publishCommand(
+      groupCommandTopic(groupId, "power"),
+      power.checked ? "1" : "0",
+    );
+    return;
+  }
+
+  const name = event.target.closest("[data-group-name]");
+  if (name) {
+    publishCommand(groupCommandTopic(groupId, "name"), name.value);
+  }
+});
+
+elements.groupList.addEventListener(
+  "blur",
+  (event) => {
+    const liveInput = event.target.closest?.("[data-group-control]");
+    if (liveInput) {
+      delete liveInput.dataset.interacting;
+    }
+  },
+  true,
+);
+
+elements.groupList.addEventListener("click", (event) => {
+  const reset = event.target.closest("[data-group-reset]");
+  if (!reset || reset.disabled || !canPublishCommands()) {
+    return;
+  }
+
+  const card = reset.closest("[data-group-id]");
+  if (!card) {
+    return;
+  }
+
+  publishCommand(
+    groupCommandTopic(Number(card.dataset.groupId), "reset"),
+    "1",
+  );
+});
+
+const descriptor = mqttTransportDescriptor(window.location);
   const revision = configRevision(model);
   const source = selectedSource(model);
   const fixtures = fixtureViewModels(model);
-  const groups = groupItems(model);
+  const groups = groupViewModels(model);
   const scenes = sceneItems(model);
 
   elements.mqttEndpoint.textContent = descriptor.url;
@@ -496,6 +850,7 @@ function render() {
   renderConnection();
   renderSourceControls(source);
   renderFixtureControls(fixtures);
+  renderGroupControls(groups);
   renderDiagnostics();
   renderSettings();
 }
@@ -508,20 +863,36 @@ function parseSnapshot(payload) {
   return value;
 }
 
-function applyMqttSnapshot(topic, payload) {
-  const snapshot = parseSnapshot(payload);
+function applyMqttMessage(topic, payload) {
+  if (
+    topic === MQTT_CONFIG_TOPIC ||
+    topic === MQTT_STATE_TOPIC ||
+    topic === MQTT_STATUS_TOPIC
+  ) {
+    const snapshot = parseSnapshot(payload);
 
-  if (topic === MQTT_CONFIG_TOPIC) {
-    model = setConfigSnapshot(model, snapshot);
-  } else if (topic === MQTT_STATE_TOPIC) {
-    model = setStateSnapshot(model, snapshot);
-  } else if (topic === MQTT_STATUS_TOPIC) {
-    model = setStatusSnapshot(model, snapshot);
-  } else {
+    if (topic === MQTT_CONFIG_TOPIC) {
+      model = setConfigSnapshot(model, snapshot);
+    } else if (topic === MQTT_STATE_TOPIC) {
+      model = setStateSnapshot(model, snapshot);
+    } else {
+      model = setStatusSnapshot(model, snapshot);
+    }
+
+    render();
     return;
   }
 
-  render();
+  const groupState = parseGroupStateTopic(topic);
+  if (groupState) {
+    model = setGroupControlState(
+      model,
+      groupState.groupId,
+      groupState.control,
+      payload,
+    );
+    render();
+  }
 }
 
 for (const button of elements.navButtons) {
@@ -657,7 +1028,7 @@ const mqttClient = new MqttWebSocketClient({
   },
   onMessage(topic, payload) {
     try {
-      applyMqttSnapshot(topic, payload);
+      applyMqttMessage(topic, payload);
     } catch (error) {
       console.error(`DMXWB ignored invalid MQTT snapshot from ${topic}`, error);
     }
@@ -671,6 +1042,7 @@ mqttClient.subscribe([
   MQTT_CONFIG_TOPIC,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
+  MQTT_GROUP_STATE_TOPIC_FILTER,
 ]);
 
 window.addEventListener(

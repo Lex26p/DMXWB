@@ -503,9 +503,17 @@ h2 {
   background: #285b94;
 }
 
-.fixture-list {
+.fixture-list,
+.group-list {
   display: grid;
   gap: 10px;
+}
+
+.group-members {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fixture-card {

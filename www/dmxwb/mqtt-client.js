@@ -5,29 +5,74 @@ export const MQTT_STATE_TOPIC = "/dmxwb/state";
 export const MQTT_STATUS_TOPIC = "/dmxwb/status";
 export const MQTT_SYSTEM_SOURCE_COMMAND_TOPIC =
   "/devices/dmxwb/controls/source/on";
+export const MQTT_GROUP_STATE_TOPIC_FILTER =
+  "/devices/dmxwb_group_+/controls/+";
 
-export function fixtureCommandTopic(fixtureId, control) {
-  const id = Number(fixtureId);
+const LIVE_DEVICE_CONTROLS = new Set([
+  "name",
+  "power",
+  "red",
+  "green",
+  "blue",
+  "color",
+  "brightness",
+  "temperature",
+  "reset",
+]);
+
+function normalizePositiveId(value, label) {
+  const id = Number(value);
   if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new RangeError("fixture id must be a positive safe integer");
+    throw new RangeError(`${label} id must be a positive safe integer`);
+  }
+  return id;
+}
+
+function liveDeviceCommandTopic(prefix, idValue, control, label) {
+  const id = normalizePositiveId(idValue, label);
+  if (!LIVE_DEVICE_CONTROLS.has(control)) {
+    throw new RangeError(`unsupported ${label} control: ${control}`);
+  }
+  return `/devices/${prefix}_${id}/controls/${control}/on`;
+}
+
+// Fixture command shape: /devices/dmxwb_fixture_${id}/controls/${control}/on
+export function fixtureCommandTopic(fixtureId, control) {
+  return liveDeviceCommandTopic(
+    "dmxwb_fixture",
+    fixtureId,
+    control,
+    "Fixture",
+  );
+}
+
+export function groupCommandTopic(groupId, control) {
+  return liveDeviceCommandTopic(
+    "dmxwb_group",
+    groupId,
+    control,
+    "Group",
+  );
+}
+
+export function parseGroupStateTopic(topic) {
+  const match =
+    /^\/devices\/dmxwb_group_([1-9][0-9]*)\/controls\/(name|power|red|green|blue|color|brightness|temperature)$/.exec(
+      String(topic),
+    );
+  if (!match) {
+    return null;
   }
 
-  const allowed = new Set([
-    "name",
-    "power",
-    "red",
-    "green",
-    "blue",
-    "color",
-    "brightness",
-    "temperature",
-    "reset",
-  ]);
-  if (!allowed.has(control)) {
-    throw new RangeError(`unsupported Fixture control: ${control}`);
+  const id = Number(match[1]);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return null;
   }
 
-  return `/devices/dmxwb_fixture_${id}/controls/${control}/on`;
+  return Object.freeze({
+    groupId: id,
+    control: match[2],
+  });
 }
 
 const textEncoder = new TextEncoder();

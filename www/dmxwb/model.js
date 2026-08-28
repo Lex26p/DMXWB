@@ -31,6 +31,7 @@ export function createInitialModel() {
     configDraft: null,
     state: null,
     status: null,
+    groupStates: {},
   };
 }
 
@@ -110,6 +111,110 @@ export function fixtureRuntimeItems(model) {
 export function groupItems(model) {
   const items = model.config?.groups;
   return Array.isArray(items) ? items : [];
+}
+
+function parseIntegerRangeText(value, minimum, maximum) {
+  if (!/^[0-9]+$/.test(String(value))) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    return null;
+  }
+  return parsed;
+}
+
+export function setGroupControlState(model, groupIdValue, control, payload) {
+  const groupId = Number(groupIdValue);
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    return model;
+  }
+
+  let value;
+  if (control === "name") {
+    value = String(payload);
+  } else if (control === "power") {
+    if (payload !== "0" && payload !== "1") {
+      return model;
+    }
+    value = payload === "1";
+  } else if (control === "red" || control === "green" || control === "blue") {
+    value = parseIntegerRangeText(payload, 0, 255);
+    if (value === null) {
+      return model;
+    }
+  } else if (control === "brightness" || control === "temperature") {
+    value = parseIntegerRangeText(payload, 0, 100);
+    if (value === null) {
+      return model;
+    }
+  } else if (control === "color") {
+    const match = /^([0-9]+);([0-9]+);([0-9]+)$/.exec(String(payload));
+    if (!match) {
+      return model;
+    }
+    const components = match.slice(1).map((part) =>
+      parseIntegerRangeText(part, 0, 255),
+    );
+    if (components.some((part) => part === null)) {
+      return model;
+    }
+    value = components;
+  } else {
+    return model;
+  }
+
+  return {
+    ...model,
+    groupStates: {
+      ...model.groupStates,
+      [String(groupId)]: {
+        ...(model.groupStates[String(groupId)] ?? {}),
+        [control]: value,
+      },
+    },
+  };
+}
+
+export function groupViewModels(model) {
+  const fixtureNames = new Map(
+    fixtureConfigItems(model).map((fixture) => [
+      String(fixture.id),
+      fixture.name || `Fixture ${fixture.id}`,
+    ]),
+  );
+
+  return groupItems(model).map((group) => {
+    const state = model.groupStates[String(group.id)] ?? null;
+    const members = Array.isArray(group.members) ? [...group.members] : [];
+    return {
+      id: group.id,
+      name:
+        typeof state?.name === "string"
+          ? state.name
+          : group.name || `Group ${group.id}`,
+      members,
+      memberNames: members.map(
+        (memberId) =>
+          fixtureNames.get(String(memberId)) ?? `Fixture ${memberId}`,
+      ),
+      runtime: state
+        ? {
+            actualPower:
+              typeof state.power === "boolean" ? state.power : null,
+            red: Number.isInteger(state.red) ? state.red : null,
+            green: Number.isInteger(state.green) ? state.green : null,
+            blue: Number.isInteger(state.blue) ? state.blue : null,
+            brightness: Number.isInteger(state.brightness)
+              ? state.brightness
+              : null,
+            temperature: Number.isInteger(state.temperature)
+              ? state.temperature
+              : null,
+          }
+        : null,
+    };
+  });
 }
 
 export function sceneItems(model) {
