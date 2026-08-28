@@ -295,6 +295,206 @@ Still Deferred:
 - registered production Art-Net OEM Code;
 - final integrated/offline/24-hour acceptance.
 
+
+## DEV-012 execution plan — Decided before implementation
+
+DEV-012 is intentionally split before implementation. The gate combines production
+runtime consolidation, operational diagnostics, systemd lifecycle, artifact
+closure, installer work and real offline WB8 acceptance; treating all of that as
+one handoff would make scope control and failure isolation poor.
+
+The planned order is fixed unless new factual evidence requires an explicit plan
+revision under `AGENTS.md`.
+
+### DEV-012A — production daemon consolidation
+
+Scope:
+
+- make the real `dmxwb` target the integrated daemon rather than the historical
+  DEV-003/004/005 diagnostic CLI;
+- extract/reuse the already Confirmed MQTT + Art-Net + source router + DmxOutput +
+  persistence orchestration instead of maintaining a second production runtime;
+- preserve dynamic DMX Port and Art-Net Port-Address reconfiguration proved in
+  DEV-011F4B;
+- default production paths:
+  `/etc/dmxwb/config.json` and `/var/lib/dmxwb/state.json`;
+- preserve graceful signal handling and whole-snapshot/44 Hz invariants;
+- keep development/acceptance diagnostics outside the production runtime path.
+
+PASS:
+
+- native Linux build/tests PASS;
+- Bullseye ARM64 `dmxwb` is a real integrated target artifact and dynamically
+  requires the required MQTT runtime;
+- foreground WB8 smoke proves MQTT + physical DMX + Art-Net through the production
+  runtime path without systemd yet;
+- no duplicated independent integrated runtime remains as the production design.
+
+### DEV-012B — production diagnostics, logging and WB UI contract
+
+Scope:
+
+- implement only diagnostics required by `TECHNICAL_SPEC.md` section 20;
+- keep `/dmxwb/status` as the single structured diagnostic snapshot API;
+- no telemetry database, metrics server or SCADA/dashboard subsystem;
+- expose required DMX/MQTT/Art-Net/configuration state and recovery/error fields;
+- update status at a bounded low rate/event-driven cadence, never from the DMX
+  timing path;
+- stdout/stderr event logging suitable for journald;
+- log startup/shutdown, config load/save/reject, serial lost/recovered, MQTT
+  connect/lost/recovered, Art-Net source events, Scene apply and fatal errors;
+- do not log every DMX frame or slider movement;
+- preserve MQTT LWT `off`;
+- hide Fixture/Group/Scene devices/controls from standard WB HomeUI so only DMXWB
+  Status/Source is visible there.
+
+PASS:
+
+- host contract/tests PASS;
+- real WB8 retained status contains the required structured subsystem information;
+- standard WB UI shows only the intended DMXWB Status/Source surface;
+- browser Web remains a compact control/configuration UI, not a monitoring
+  dashboard.
+
+### DEV-012C — systemd lifecycle
+
+Scope:
+
+- add `deploy/dmxwb.service`;
+- `Type=simple`;
+- `Restart=on-failure`;
+- `RestartSec=2s`;
+- service must not require Mosquitto as a precondition for the DMX process to
+  start;
+- graceful SIGTERM flushes dirty state and closes MQTT/UDP/serial cleanly;
+- recoverable MQTT/Art-Net/serial/network failures remain in-process recovery;
+- systemd restart is reserved for real process exit/failure.
+
+PASS on WB8:
+
+- start/stop/restart PASS;
+- clean stop does not trigger an unwanted restart;
+- deliberate process crash is recovered by systemd;
+- MQTT broker restart does not restart the DMXWB process;
+- recoverable serial/network events do not require manual/systemd restart;
+- journald contains the expected bounded lifecycle/recovery events.
+
+### DEV-012D — reproducible production artifact and offline bundle closure
+
+Scope:
+
+- reproduce the production AArch64 binary on the laptop with the confirmed
+  Bullseye toolchain;
+- verify architecture, GLIBC compatibility and dynamic dependency closure;
+- determine which runtime libraries are guaranteed by the tested WB image and
+  which, if any, must be supplied locally in the bundle;
+- create a deterministic bundle layout containing the production binary, static
+  Web, systemd unit, installer, example/default config and required local runtime
+  files;
+- record artifact/toolchain identity and checksums;
+- no source compilation on WB8.
+
+Art-Net production identity checkpoint:
+
+- a registered production Art-Net OEM Code is required before a bundle may be
+  called production-ready;
+- a development placeholder may still be used by development acceptance tools,
+  but it must never be silently promoted into the production bundle;
+- if the registered OEM Code is still unavailable at this point, DEV-012 stops at
+  this checkpoint rather than inventing one.
+
+PASS:
+
+- repeated laptop build/bundle creation is reproducible enough to identify the
+  same inputs/artifacts;
+- bundle dependency audit is complete for the tested WB8 software image;
+- production bundle contains no development OEM placeholder.
+
+### DEV-012E — offline installer and filesystem/permission contract
+
+Scope:
+
+- add `deploy/install_wirenboard.sh`;
+- install only from local bundle contents;
+- create/use `/etc/dmxwb`, `/var/lib/dmxwb`, `/var/www/dmxwb`;
+- install production binary and `dmxwb.service`;
+- apply required permissions;
+- preserve an existing valid config/state rather than silently overwriting user
+  data;
+- fail clearly if required stock WB components are absent;
+- enable/start the service as required by the installation flow;
+- do not add an uninstall/update framework unless a later requirement explicitly
+  needs one.
+
+Installer must not execute or require:
+
+```text
+apt update
+online apt install
+git clone
+curl/wget downloads
+npm/Node frontend build
+compiler/CMake installation
+DMXWB source compilation on WB8
+Docker
+```
+
+PASS:
+
+- static installer audit PASS;
+- repeat install is safe for existing config/state;
+- local bundle contains everything the tested target needs beyond guaranteed stock
+  WB components;
+- no network-download path exists.
+
+### DEV-012F — real offline WB8 install/reboot acceptance
+
+Scope:
+
+- perform the roadmap's clean installation with external Internet physically
+  unavailable while keeping the required local LAN;
+- install only from the prepared local bundle;
+- record WB8 model/software version plus binary/toolchain/bundle identity;
+- verify service start and full WB8 reboot;
+- verify config/state restore;
+- verify local Mosquitto/reconnect;
+- verify Web after reboot;
+- verify basic physical DMX;
+- verify basic Art-Net input;
+- verify crash -> systemd recovery;
+- verify broker restart and serial recovery without application restart;
+- verify standard WB UI is not polluted by Fixture/Group/Scene devices;
+- verify target does not need compiler/CMake/Node/Docker.
+
+PASS:
+
+- clean offline install, reboot and basic operation all PASS;
+- no external download or source compilation occurs on WB8;
+- recoverable subsystem failures recover in-process;
+- systemd is needed only for a real process failure.
+
+The 24-hour test and full cross-subsystem final acceptance remain DEV-013 and are
+not pulled into DEV-012.
+
+### DEV-012G — gate closeout documentation
+
+Scope after DEV-012F PASS:
+
+- update `docs/PROJECT_STATE.md` with the accepted offline installation
+  configuration, artifact/toolchain identity and DEV-012 PASS;
+- update `README.md` with the actual production build/install/run commands;
+- update reusable reference documentation only if DEV-012 produced portable
+  deployment knowledge worth preserving;
+- do not change `TECHNICAL_SPEC.md` or `ROADMAP.md` unless the requirements or
+  roadmap genuinely changed.
+
+PASS:
+
+- documentation matches the accepted production installation;
+- current gate advances to DEV-013;
+- no new engineering functionality is introduced in the closeout commit.
+
+
 ## Current engineering gate
 
 ```text
