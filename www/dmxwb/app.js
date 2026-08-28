@@ -5,7 +5,8 @@ import {
   fixtureViewModels,
   groupViewModels,
   isLegacyArtNetUniverse,
-  sceneItems,
+  sceneSnapshotMatchesState,
+  sceneViewModels,
   selectedSource,
   setConfigSnapshot,
   setConnection,
@@ -13,9 +14,11 @@ import {
   setStateSnapshot,
   setStatusSnapshot,
   structuralSettings,
-} from "./model.js?v=011d2fix3";
+} from "./model.js?v=011e1";;
 import {
+  MQTT_CONFIG_RESULT_TOPIC,
   MQTT_CONFIG_TOPIC,
+  MQTT_SCENE_CREATE_TOPIC,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
   MQTT_SYSTEM_SOURCE_COMMAND_TOPIC,
@@ -25,17 +28,25 @@ import {
   groupStateTopics,
   mqttTransportDescriptor,
   parseGroupStateTopic,
-} from "./mqtt-client.js?v=011d2fix3";
+  sceneCommandTopic,
+  sceneLifecycleTopic,
+} from "./mqtt-client.js?v=011e1";;
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
 let groupStructureKey = "";
+let sceneStructureKey = "";
 const fixturePublishers = new Map();
 const groupPublishers = new Map();
 const LIVE_PUBLISH_INTERVAL_MS = 40; // 25/s, inside the required 20–30/s window.
 const LIVE_CONFIRMATION_TIMEOUT_MS = 2000;
 const pendingConfirmations = new Map();
 let renderFramePending = false;
+let sceneRequestCounter = 0;
+const pendingSceneLifecycle = new Map();
+const pendingSceneRenames = new Map();
+let pendingSceneApply = null;
+let sceneResult = { kind: "idle", text: "" };
 
 function pendingKey(kind, id, control) {
   return `${kind}:${id}:${control}`;
@@ -110,6 +121,10 @@ const elements = {
   fixtureList: document.querySelector("#fixture-list"),
   groupList: document.querySelector("#group-list"),
   sceneCountBadge: document.querySelector("#scene-count-badge"),
+  sceneList: document.querySelector("#scene-list"),
+  sceneCreateName: document.querySelector("#scene-create-name"),
+  sceneCreateButton: document.querySelector("#scene-create-button"),
+  sceneResult: document.querySelector("#scene-result"),
   diagnosticGrid: document.querySelector("#diagnostic-grid"),
   pageTitle: document.querySelector("#page-title"),
   pageSubtitle: document.querySelector("#page-subtitle"),
@@ -779,6 +794,273 @@ function renderGroupControls(groups) {
   updateGroupCards(groups);
 }
 
+
+function makeSceneRequestId(operation) {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) {
+    return `web-scene-${operation}-${uuid}`;
+  }
+
+  sceneRequestCounter += 1;
+  return `web-scene-${operation}-${Date.now().toString(36)}-${sceneRequestCounter}`;
+}
+
+function setSceneResult(kind, text) {
+  sceneResult = { kind, text };
+  scheduleRender();
+}
+
+function clearScenePending(reason = "") {
+  for (const pending of pendingSceneRenames.values()) {
+    window.clearTimeout(pending.timer);
+  }
+  pendingSceneRenames.clear();
+  pendingSceneLifecycle.clear();
+  pendingSceneApply = null;
+
+  if (reason) {
+    sceneResult = { kind: "error", text: reason };
+  }
+}
+
+function setPendingSceneRename(sceneId, expected) {
+  const old = pendingSceneRenames.get(sceneId);
+  if (old) {
+    window.clearTimeout(old.timer);
+  }
+
+  const timer = window.setTimeout(() => {
+    const current = pendingSceneRenames.get(sceneId);
+    if (current?.timer !== timer) {
+      return;
+    }
+    pendingSceneRenames.delete(sceneId);
+    sceneResult = {
+      kind: "error",
+      text: "Нет подтверждения нового имени сцены.",
+    };
+    scheduleRender();
+  }, 3000);
+
+  pendingSceneRenames.set(sceneId, {
+    expected,
+    timer,
+  });
+}
+
+function confirmSceneRenames(scenes) {
+  const byId = new Map(scenes.map((scene) => [scene.id, scene]));
+  for (const [sceneId, pending] of [...pendingSceneRenames.entries()]) {
+    const factual = byId.get(sceneId);
+    if (!factual || factual.name !== pending.expected) {
+      continue;
+    }
+    window.clearTimeout(pending.timer);
+    pendingSceneRenames.delete(sceneId);
+    sceneResult = {
+      kind: "success",
+      text: "Имя сцены подтверждено backend.",
+    };
+  }
+}
+
+function parseConfigResult(payload) {
+  const result = parseSnapshot(payload);
+  if (
+    typeof result.request_id !== "string" ||
+    typeof result.ok !== "boolean" ||
+    !Number.isSafeInteger(result.revision) ||
+    result.revision < 0 ||
+    typeof result.error_code !== "string" ||
+    typeof result.message !== "string"
+  ) {
+    throw new TypeError("config/result schema mismatch");
+  }
+  return result;
+}
+
+function handleSceneConfigResult(result) {
+  const pending = pendingSceneLifecycle.get(result.request_id);
+  if (!pending) {
+    return;
+  }
+
+  pendingSceneLifecycle.delete(result.request_id);
+  if (!result.ok) {
+    sceneResult = {
+      kind: "error",
+      text: result.message || result.error_code || "Операция сцены отклонена.",
+    };
+    scheduleRender();
+    return;
+  }
+
+  if (pending.operation === "create") {
+    elements.sceneCreateName.value = "";
+  }
+
+  sceneResult = {
+    kind: "success",
+    text: `Операция подтверждена · revision ${result.revision}`,
+  };
+  scheduleRender();
+}
+
+function publishSceneLifecycle(topic, payload, operation) {
+  if (!canPublishCommands()) {
+    return false;
+  }
+
+  const requestId = payload.request_id;
+  if (!publishCommand(topic, JSON.stringify(payload))) {
+    return false;
+  }
+
+  pendingSceneLifecycle.set(requestId, { operation });
+  sceneResult = {
+    kind: "pending",
+    text: "Ожидание подтверждения backend…",
+  };
+  scheduleRender();
+  return true;
+}
+
+function createSceneCard(scene) {
+  const card = document.createElement("article");
+  card.className = "scene-card";
+  card.dataset.sceneId = String(scene.id);
+
+  const identity = document.createElement("div");
+  identity.className = "scene-card__identity";
+
+  const name = document.createElement("input");
+  name.type = "text";
+  name.className = "scene-name";
+  name.dataset.sceneName = "";
+  name.setAttribute("aria-label", `Имя сцены ${scene.id}`);
+
+  const meta = document.createElement("span");
+  meta.className = "scene-card__meta";
+  meta.dataset.sceneMeta = "";
+
+  identity.append(name, meta);
+
+  const actions = document.createElement("div");
+  actions.className = "scene-actions";
+
+  for (const [action, title, className] of [
+    ["apply", "Применить", "primary-button"],
+    ["overwrite", "Перезаписать", "secondary-button"],
+    ["delete", "Удалить", "secondary-button scene-delete-button"],
+  ]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.dataset.sceneAction = action;
+    button.textContent = title;
+    actions.append(button);
+  }
+
+  card.append(identity, actions);
+  return card;
+}
+
+function sceneStructureSignature(scenes) {
+  return scenes.map((scene) => scene.id).join("|");
+}
+
+function rebuildSceneCards(scenes) {
+  elements.sceneList.replaceChildren();
+
+  if (scenes.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state empty-state--wide";
+    const title = document.createElement("strong");
+    title.textContent = "Нет сцен";
+    const text = document.createElement("span");
+    text.textContent = "Сохраните текущее состояние как новую сцену.";
+    empty.append(title, text);
+    elements.sceneList.append(empty);
+    return;
+  }
+
+  for (const scene of scenes) {
+    elements.sceneList.append(createSceneCard(scene));
+  }
+}
+
+function updateSceneCards(scenes) {
+  const connected = canPublishCommands();
+  const lifecycleBusy = pendingSceneLifecycle.size > 0;
+
+  for (const scene of scenes) {
+    const card = elements.sceneList.querySelector(
+      `[data-scene-id="${scene.id}"]`,
+    );
+    if (!card) {
+      continue;
+    }
+
+    const name = card.querySelector("[data-scene-name]");
+    const meta = card.querySelector("[data-scene-meta]");
+    const pendingRename = pendingSceneRenames.get(scene.id);
+
+    if (document.activeElement !== name) {
+      name.value = pendingRename?.expected ?? scene.name;
+    }
+    name.disabled = !connected || lifecycleBusy;
+
+    meta.textContent =
+      `${scene.snapshotCount} snapshot ${scene.snapshotCount === 1 ? "Fixture" : "Fixtures"}`;
+
+    for (const button of card.querySelectorAll("[data-scene-action]")) {
+      button.disabled = !connected || lifecycleBusy || pendingSceneApply !== null;
+    }
+  }
+}
+
+function renderSceneControls(scenes) {
+  confirmSceneRenames(scenes);
+
+  const signature = sceneStructureSignature(scenes);
+  if (signature !== sceneStructureKey) {
+    sceneStructureKey = signature;
+    rebuildSceneCards(scenes);
+  }
+  updateSceneCards(scenes);
+
+  const connected = canPublishCommands();
+  elements.sceneCreateName.disabled = !connected || pendingSceneLifecycle.size > 0;
+  elements.sceneCreateButton.disabled =
+    !connected || pendingSceneLifecycle.size > 0 || pendingSceneApply !== null;
+
+  elements.sceneResult.classList.toggle(
+    "scene-result--error",
+    sceneResult.kind === "error",
+  );
+  elements.sceneResult.classList.toggle(
+    "scene-result--success",
+    sceneResult.kind === "success",
+  );
+  elements.sceneResult.textContent = sceneResult.text;
+}
+
+function maybeConfirmSceneApply() {
+  if (!pendingSceneApply) {
+    return;
+  }
+
+  if (!sceneSnapshotMatchesState(model, pendingSceneApply.scene)) {
+    return;
+  }
+
+  pendingSceneApply = null;
+  sceneResult = {
+    kind: "success",
+    text: "Сцена применена и подтверждена runtime state.",
+  };
+}
+
 function renderSourceControls(source) {
   const connected = canPublishCommands();
   for (const button of elements.sourceButtons) {
@@ -851,7 +1133,7 @@ const descriptor = mqttTransportDescriptor(window.location);
   const source = selectedSource(model);
   const fixtures = fixtureViewModels(model);
   const groups = groupViewModels(model);
-  const scenes = sceneItems(model);
+  const scenes = sceneViewModels(model);
 
   elements.mqttEndpoint.textContent = descriptor.url;
   elements.configRevision.textContent =
@@ -868,6 +1150,7 @@ const descriptor = mqttTransportDescriptor(window.location);
   renderSourceControls(source);
   renderFixtureControls(fixtures);
   renderGroupControls(groups);
+  renderSceneControls(scenes);
   renderDiagnostics();
   renderSettings();
 }
@@ -881,6 +1164,11 @@ function parseSnapshot(payload) {
 }
 
 function applyMqttMessage(topic, payload) {
+  if (topic === MQTT_CONFIG_RESULT_TOPIC) {
+    handleSceneConfigResult(parseConfigResult(payload));
+    return;
+  }
+
   if (
     topic === MQTT_CONFIG_TOPIC ||
     topic === MQTT_STATE_TOPIC ||
@@ -902,6 +1190,7 @@ function applyMqttMessage(topic, payload) {
       );
     } else if (topic === MQTT_STATE_TOPIC) {
       model = setStateSnapshot(model, snapshot);
+      maybeConfirmSceneApply();
     } else {
       model = setStatusSnapshot(model, snapshot);
     }
@@ -936,6 +1225,113 @@ for (const button of elements.sourceButtons) {
     );
   });
 }
+
+
+elements.sceneCreateButton.addEventListener("click", () => {
+  if (!canPublishCommands()) {
+    return;
+  }
+
+  const requestId = makeSceneRequestId("create");
+  publishSceneLifecycle(
+    MQTT_SCENE_CREATE_TOPIC,
+    {
+      request_id: requestId,
+      name: elements.sceneCreateName.value,
+    },
+    "create",
+  );
+});
+
+elements.sceneCreateName.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !elements.sceneCreateButton.disabled) {
+    event.preventDefault();
+    elements.sceneCreateButton.click();
+  }
+});
+
+elements.sceneList.addEventListener("change", (event) => {
+  const name = event.target.closest("[data-scene-name]");
+  if (!name || !canPublishCommands()) {
+    return;
+  }
+
+  const card = name.closest("[data-scene-id]");
+  if (!card) {
+    return;
+  }
+  const sceneId = Number(card.dataset.sceneId);
+
+  if (publishCommand(sceneCommandTopic(sceneId, "name"), name.value)) {
+    setPendingSceneRename(sceneId, name.value);
+    sceneResult = {
+      kind: "pending",
+      text: "Ожидание подтверждения нового имени…",
+    };
+    scheduleRender();
+  }
+});
+
+elements.sceneList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-scene-action]");
+  if (!button || button.disabled || !canPublishCommands()) {
+    return;
+  }
+
+  const card = button.closest("[data-scene-id]");
+  if (!card) {
+    return;
+  }
+
+  const sceneId = Number(card.dataset.sceneId);
+  const scene = sceneViewModels(model).find((item) => item.id === sceneId);
+  if (!scene) {
+    return;
+  }
+
+  const action = button.dataset.sceneAction;
+  if (action === "apply") {
+    if (publishCommand(sceneCommandTopic(sceneId, "apply"), "1")) {
+      pendingSceneApply = {
+        scene: {
+          ...scene,
+          fixtures: scene.fixtures.map((fixture) => ({ ...fixture })),
+        },
+      };
+      sceneResult = {
+        kind: "pending",
+        text: "Ожидание подтверждения runtime state…",
+      };
+      scheduleRender();
+    }
+    return;
+  }
+
+  if (action === "overwrite") {
+    if (!window.confirm(`Перезаписать сцену «${scene.name}» текущим состоянием?`)) {
+      return;
+    }
+    const requestId = makeSceneRequestId("overwrite");
+    publishSceneLifecycle(
+      sceneLifecycleTopic(sceneId, "overwrite"),
+      { request_id: requestId },
+      "overwrite",
+    );
+    return;
+  }
+
+  if (action === "delete") {
+    if (!window.confirm(`Удалить сцену «${scene.name}»?`)) {
+      return;
+    }
+    const requestId = makeSceneRequestId("delete");
+    publishSceneLifecycle(
+      sceneLifecycleTopic(sceneId, "delete"),
+      { request_id: requestId },
+      "delete",
+    );
+  }
+});
 
 elements.groupList.addEventListener("pointerdown", (event) => {
   const input = event.target.closest("[data-group-control]");
@@ -1195,6 +1591,7 @@ const mqttClient = new MqttWebSocketClient({
     model = setConnection(model, connection);
     if (!connection.connected) {
       clearPendingConfirmations();
+      clearScenePending("Команда сцены не подтверждена: связь потеряна.");
     }
     scheduleRender();
   },
@@ -1212,6 +1609,7 @@ const mqttClient = new MqttWebSocketClient({
 
 mqttClient.subscribe([
   MQTT_CONFIG_TOPIC,
+  MQTT_CONFIG_RESULT_TOPIC,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
 ]);

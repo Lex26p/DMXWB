@@ -644,6 +644,98 @@ h2 {
   background: #f4f7fa;
 }
 
+.scene-create {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.scene-create__field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.scene-create__field > span {
+  color: #667085;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.scene-create__field input,
+.scene-name {
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid #cfd7e2;
+  border-radius: 8px;
+  color: inherit;
+  background: #ffffff;
+}
+
+.scene-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.scene-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid #dce2ea;
+  border-radius: 9px;
+  background: #fbfcfe;
+}
+
+.scene-card__identity {
+  min-width: 0;
+}
+
+.scene-name {
+  width: min(100%, 360px);
+  font-weight: 700;
+}
+
+.scene-card__meta {
+  display: block;
+  margin-top: 4px;
+  color: #7b8795;
+  font-size: 0.78rem;
+}
+
+.scene-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.scene-actions button {
+  min-height: 34px;
+}
+
+.scene-delete-button:not(:disabled) {
+  color: #9a3412;
+}
+
+.scene-result {
+  min-height: 1.15em;
+  margin: 4px 0 0;
+}
+
+.scene-result--success {
+  color: #16794b;
+}
+
+.scene-result--error {
+  color: #b42318;
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 168px minmax(0, 1fr);
@@ -660,6 +752,15 @@ h2 {
 
   .fixture-controls {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .scene-create,
+  .scene-card {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -839,5 +940,27 @@ h2 {
 
   .secondary-button:not(:disabled):hover {
     background: #202c3b;
+  }
+
+  .scene-create__field input,
+  .scene-name,
+  .scene-card {
+    border-color: #344155;
+    color: #d8e1ed;
+    background: #141e2c;
+  }
+
+  .scene-card__meta,
+  .scene-create__field > span {
+    color: #97a6b9;
+  }
+
+  .scene-result--success {
+    color: #63d5a2;
+  }
+
+  .scene-result--error,
+  .scene-delete-button:not(:disabled) {
+    color: #ff9b8e;
   }
 }

@@ -222,6 +222,55 @@ export function sceneItems(model) {
   return Array.isArray(items) ? items : [];
 }
 
+export function sceneViewModels(model) {
+  return sceneItems(model).map((scene) => ({
+    id: scene.id,
+    name: scene.name || `Scene ${scene.id}`,
+    fixtures: Array.isArray(scene.fixtures) ? scene.fixtures : [],
+    snapshotCount: Array.isArray(scene.fixtures) ? scene.fixtures.length : 0,
+  }));
+}
+
+export function sceneSnapshotMatchesState(model, scene) {
+  if (!scene || !Array.isArray(scene.fixtures)) {
+    return false;
+  }
+
+  const currentFixtureIds = new Set(
+    fixtureConfigItems(model).map((fixture) => String(fixture.id)),
+  );
+  const runtimeById = new Map(
+    fixtureRuntimeItems(model).map((fixture) => [String(fixture.id), fixture]),
+  );
+
+  for (const saved of scene.fixtures) {
+    const id = String(saved.fixture_id);
+    // Deleted Fixture records remain valid Scene history and are ignored by Apply.
+    if (!currentFixtureIds.has(id)) {
+      continue;
+    }
+
+    const runtime = runtimeById.get(id);
+    if (!runtime) {
+      return false;
+    }
+
+    if (
+      Boolean(runtime.requested_power) !== Boolean(saved.requested_power) ||
+      finiteInteger(runtime.red, -1) !== finiteInteger(saved.red, -2) ||
+      finiteInteger(runtime.green, -1) !== finiteInteger(saved.green, -2) ||
+      finiteInteger(runtime.blue, -1) !== finiteInteger(saved.blue, -2) ||
+      finiteInteger(runtime.white, -1) !== finiteInteger(saved.white, -2) ||
+      finiteInteger(runtime.brightness, -1) !==
+        finiteInteger(saved.brightness, -2)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function clampInteger(value, minimum, maximum, fallback) {
   const parsed = finiteInteger(value, fallback);
   return Math.max(minimum, Math.min(maximum, parsed));

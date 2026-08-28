@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>DMXWB</title>
-  <link rel="stylesheet" href="./styles.css?v=011d2fix3">
+  <link rel="stylesheet" href="./styles.css?v=011e1">
 </head>
 <body>
   <div class="app-shell">
@@ -130,9 +130,32 @@
           </div>
 
           <article class="card">
-            <div id="scene-list" class="empty-state empty-state--wide">
-              <strong>Нет данных</strong>
-              <span>Здесь отображаются сохранённые сцены.</span>
+            <div class="scene-create">
+              <label class="scene-create__field">
+                <span>Новая сцена</span>
+                <input
+                  id="scene-create-name"
+                  type="text"
+                  maxlength="120"
+                  placeholder="Название сцены"
+                  disabled
+                >
+              </label>
+              <button
+                id="scene-create-button"
+                class="primary-button"
+                type="button"
+                disabled
+              >Создать из текущего состояния</button>
+            </div>
+
+            <p id="scene-result" class="field-note scene-result" aria-live="polite"></p>
+
+            <div id="scene-list" class="scene-list">
+              <div class="empty-state empty-state--wide">
+                <strong>Нет данных</strong>
+                <span>Здесь отображаются сохранённые сцены.</span>
+              </div>
             </div>
           </article>
         </section>
@@ -183,6 +206,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=011d2fix3"></script>
+  <script type="module" src="./app.js?v=011e1"></script>
 </body>
 </html>

@@ -1,8 +1,10 @@
 export const MQTT_WEBSOCKET_PATH = "/mqtt";
 export const MQTT_PROTOCOL_NAME = "mqtt";
 export const MQTT_CONFIG_TOPIC = "/dmxwb/config";
+export const MQTT_CONFIG_RESULT_TOPIC = "/dmxwb/config/result";
 export const MQTT_STATE_TOPIC = "/dmxwb/state";
 export const MQTT_STATUS_TOPIC = "/dmxwb/status";
+export const MQTT_SCENE_CREATE_TOPIC = "/dmxwb/scenes/create";
 export const MQTT_SYSTEM_SOURCE_COMMAND_TOPIC =
   "/devices/dmxwb/controls/source/on";
 const LIVE_DEVICE_CONTROLS = new Set([
@@ -68,6 +70,22 @@ export function groupStateTopics(groupIdValue) {
   return GROUP_STATE_CONTROLS.map(
     (control) => `/devices/dmxwb_group_${groupId}/controls/${control}`,
   );
+}
+
+export function sceneCommandTopic(sceneIdValue, control) {
+  const sceneId = normalizePositiveId(sceneIdValue, "Scene");
+  if (control !== "name" && control !== "apply") {
+    throw new RangeError(`unsupported Scene control: ${control}`);
+  }
+  return `/devices/dmxwb_scene_${sceneId}/controls/${control}/on`;
+}
+
+export function sceneLifecycleTopic(sceneIdValue, action) {
+  const sceneId = normalizePositiveId(sceneIdValue, "Scene");
+  if (action !== "overwrite" && action !== "delete") {
+    throw new RangeError(`unsupported Scene lifecycle action: ${action}`);
+  }
+  return `/dmxwb/scenes/${sceneId}/${action}`;
 }
 
 export function parseGroupStateTopic(topic) {
