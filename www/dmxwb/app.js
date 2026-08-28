@@ -1,4 +1,5 @@
 import {
+  configDraftInfo,
   configRevision,
   createInitialModel,
   diagnosticSummary,
@@ -8,15 +9,19 @@ import {
   sceneSnapshotMatchesState,
   sceneViewModels,
   selectedSource,
+  resetConfigDraft,
+  resizeFixtureDraft,
   setConfigSnapshot,
   setConnection,
   setGroupControlState,
   setStateSnapshot,
   setStatusSnapshot,
   structuralSettings,
-} from "./model.js?v=011e2fix1";;
+  updateConfigDraft,
+} from "./model.js?v=011f1";;
 import {
   MQTT_CONFIG_RESULT_TOPIC,
+  MQTT_CONFIG_SET_TOPIC,
   MQTT_CONFIG_TOPIC,
   MQTT_SCENE_CREATE_TOPIC,
   MQTT_STATE_TOPIC,
@@ -30,7 +35,7 @@ import {
   parseGroupStateTopic,
   sceneCommandTopic,
   sceneLifecycleTopic,
-} from "./mqtt-client.js?v=011e2fix1";;
+} from "./mqtt-client.js?v=011f1";;
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -43,6 +48,9 @@ const LIVE_CONFIRMATION_TIMEOUT_MS = 2000;
 const pendingConfirmations = new Map();
 let renderFramePending = false;
 let sceneRequestCounter = 0;
+let configRequestCounter = 0;
+let pendingConfigSet = null;
+let settingsResult = { kind: "idle", text: "" };
 const pendingSceneLifecycle = new Map();
 const pendingSceneRenames = new Map();
 let pendingSceneApply = null;
@@ -137,6 +145,9 @@ const elements = {
     artnetUniverse: document.querySelector("#setting-artnet-universe"),
     draftBadge: document.querySelector("#draft-badge"),
     legacyNote: document.querySelector("#legacy-universe-note"),
+    result: document.querySelector("#settings-result"),
+    resetButton: document.querySelector("#settings-reset-button"),
+    applyButton: document.querySelector("#settings-apply-button"),
   },
 };
 
@@ -795,6 +806,101 @@ function renderGroupControls(groups) {
 }
 
 
+
+function makeConfigRequestId() {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) {
+    return `web-config-${uuid}`;
+  }
+
+  configRequestCounter += 1;
+  return `web-config-${Date.now().toString(36)}-${configRequestCounter}`;
+}
+
+function setSettingsResult(kind, text) {
+  settingsResult = { kind, text };
+  scheduleRender();
+}
+
+function clearPendingConfigSet(reason = "") {
+  const hadPending = pendingConfigSet !== null;
+  pendingConfigSet = null;
+  if (reason && hadPending) {
+    settingsResult = { kind: "error", text: reason };
+  }
+}
+
+function handleConfigSetResult(result) {
+  if (!pendingConfigSet || result.request_id !== pendingConfigSet.requestId) {
+    return false;
+  }
+
+  pendingConfigSet = null;
+  if (!result.ok) {
+    settingsResult = {
+      kind: "error",
+      text:
+        result.error_code === "revision_conflict"
+          ? `Конфликт revision: backend уже revision ${result.revision}. Сбросьте draft или повторите изменения на актуальной конфигурации.`
+          : result.message || result.error_code || "Конфигурация отклонена backend.",
+    };
+    scheduleRender();
+    return true;
+  }
+
+  model = resetConfigDraft(model);
+  settingsResult = {
+    kind: "success",
+    text: `Конфигурация применена · revision ${result.revision}`,
+  };
+  scheduleRender();
+  return true;
+}
+
+function parseUnsignedSetting(input, minimum, maximum) {
+  if (!/^[0-9]+$/.test(input.value)) {
+    return null;
+  }
+  const value = Number(input.value);
+  if (
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    return null;
+  }
+  return value;
+}
+
+function publishConfigDraft() {
+  const info = configDraftInfo(model);
+  if (!info?.dirty || pendingConfigSet || !canPublishCommands()) {
+    return false;
+  }
+
+  const requestId = makeConfigRequestId();
+  const payload = {
+    request_id: requestId,
+    expected_revision: info.baseRevision,
+    config: info.proposal,
+  };
+
+  if (!publishCommand(MQTT_CONFIG_SET_TOPIC, JSON.stringify(payload))) {
+    return false;
+  }
+
+  pendingConfigSet = {
+    requestId,
+    expectedRevision: info.baseRevision,
+  };
+  settingsResult = {
+    kind: "pending",
+    text: `Ожидание backend · base revision ${info.baseRevision}`,
+  };
+  scheduleRender();
+  return true;
+}
+
 function makeSceneRequestId(operation) {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) {
@@ -1109,15 +1215,27 @@ function renderDiagnostics() {
 
 function renderSettings() {
   const settings = structuralSettings(model);
+  const info = configDraftInfo(model);
   const fields = elements.settings;
 
-  if (!settings) {
-    fields.dmxPort.value = "";
+  if (!settings || !info) {
+    fields.dmxPort.value = "/dev/ttyRS485-1";
     fields.fixtureCount.value = "";
     fields.startAddress.value = "";
     fields.artnetUniverse.value = "";
     fields.draftBadge.textContent = "нет конфигурации";
     fields.legacyNote.textContent = "";
+    fields.result.textContent = "";
+    fields.applyButton.disabled = true;
+    fields.resetButton.disabled = true;
+    for (const input of [
+      fields.dmxPort,
+      fields.fixtureCount,
+      fields.startAddress,
+      fields.artnetUniverse,
+    ]) {
+      input.disabled = true;
+    }
     return;
   }
 
@@ -1125,10 +1243,43 @@ function renderSettings() {
   fields.fixtureCount.value = String(settings.fixtureCount);
   fields.startAddress.value = String(settings.startAddress);
   fields.artnetUniverse.value = String(settings.artnetUniverse);
-  fields.draftBadge.textContent = "локальный draft";
+
+  for (const input of [
+    fields.dmxPort,
+    fields.fixtureCount,
+    fields.startAddress,
+    fields.artnetUniverse,
+  ]) {
+    input.disabled = pendingConfigSet !== null;
+  }
+
+  if (!info.dirty) {
+    fields.draftBadge.textContent =
+      `без изменений · revision ${info.currentRevision}`;
+  } else if (info.stale) {
+    fields.draftBadge.textContent =
+      `draft · base ${info.baseRevision} / current ${info.currentRevision}`;
+  } else {
+    fields.draftBadge.textContent = `draft · revision ${info.baseRevision}`;
+  }
+
   fields.legacyNote.textContent = isLegacyArtNetUniverse(settings.artnetUniverse)
     ? "Art-Net Universe 0 — legacy compatibility."
     : "";
+
+  fields.result.classList.toggle(
+    "settings-result--error",
+    settingsResult.kind === "error",
+  );
+  fields.result.classList.toggle(
+    "settings-result--success",
+    settingsResult.kind === "success",
+  );
+  fields.result.textContent = settingsResult.text;
+
+  fields.applyButton.disabled =
+    !info.dirty || pendingConfigSet !== null || !canPublishCommands();
+  fields.resetButton.disabled = !info.dirty || pendingConfigSet !== null;
 }
 
 function render() {
@@ -1170,7 +1321,10 @@ function parseSnapshot(payload) {
 
 function applyMqttMessage(topic, payload) {
   if (topic === MQTT_CONFIG_RESULT_TOPIC) {
-    handleSceneConfigResult(parseConfigResult(payload));
+    const result = parseConfigResult(payload);
+    if (!handleConfigSetResult(result)) {
+      handleSceneConfigResult(result);
+    }
     return;
   }
 
@@ -1231,6 +1385,73 @@ for (const button of elements.sourceButtons) {
   });
 }
 
+
+
+elements.settings.dmxPort.addEventListener("change", () => {
+  model = updateConfigDraft(model, (draft) => {
+    draft.dmx ??= {};
+    draft.dmx.port = elements.settings.dmxPort.value;
+  });
+  settingsResult = { kind: "idle", text: "" };
+  scheduleRender();
+});
+
+elements.settings.fixtureCount.addEventListener("input", () => {
+  const count = parseUnsignedSetting(elements.settings.fixtureCount, 0, 75);
+  if (count === null) {
+    return;
+  }
+  try {
+    model = resizeFixtureDraft(model, count);
+    settingsResult = { kind: "idle", text: "" };
+    scheduleRender();
+  } catch (error) {
+    setSettingsResult("error", String(error?.message ?? error));
+  }
+});
+
+elements.settings.startAddress.addEventListener("input", () => {
+  const value = parseUnsignedSetting(elements.settings.startAddress, 1, 300);
+  if (value === null) {
+    return;
+  }
+  model = updateConfigDraft(model, (draft) => {
+    draft.fixtures ??= {};
+    draft.fixtures.start_address = value;
+  });
+  settingsResult = { kind: "idle", text: "" };
+  scheduleRender();
+});
+
+elements.settings.artnetUniverse.addEventListener("input", () => {
+  const value = parseUnsignedSetting(
+    elements.settings.artnetUniverse,
+    0,
+    32767,
+  );
+  if (value === null) {
+    return;
+  }
+  model = updateConfigDraft(model, (draft) => {
+    draft.artnet ??= {};
+    draft.artnet.universe = value;
+  });
+  settingsResult = { kind: "idle", text: "" };
+  scheduleRender();
+});
+
+elements.settings.resetButton.addEventListener("click", () => {
+  if (pendingConfigSet) {
+    return;
+  }
+  model = resetConfigDraft(model);
+  settingsResult = { kind: "idle", text: "" };
+  scheduleRender();
+});
+
+elements.settings.applyButton.addEventListener("click", () => {
+  publishConfigDraft();
+});
 
 elements.sceneCreateButton.addEventListener("click", () => {
   if (!canPublishCommands()) {
@@ -1596,6 +1817,9 @@ const mqttClient = new MqttWebSocketClient({
     model = setConnection(model, connection);
     if (!connection.connected) {
       clearPendingConfirmations();
+      clearPendingConfigSet(
+        "Изменение конфигурации не подтверждено: связь потеряна.",
+      );
       clearScenePending("Команда сцены не подтверждена: связь потеряна.");
     }
     scheduleRender();

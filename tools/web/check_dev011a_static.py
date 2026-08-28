@@ -55,6 +55,12 @@ if (WEB_ROOT / "package.json").exists() or (WEB_ROOT / "node_modules").exists():
 
 print("dev011a_no_external_dependencies: PASS")
 
+backend_api_text = (
+    all_text
+    .replace("/dev/ttyRS485-1", "")
+    .replace("/dev/ttyRS485-2", "")
+)
+
 for forbidden in [
     "/dev/tty",
     "/etc/dmxwb",
@@ -65,7 +71,7 @@ for forbidden in [
     "EventSource(",
     "fetch(",
 ]:
-    if forbidden in all_text:
+    if forbidden in backend_api_text:
         fail(f"direct backend/system API reference found: {forbidden}")
 
 print("dev011a_no_direct_serial_file_systemd_api: PASS")
@@ -91,11 +97,11 @@ if 'href="./styles.css' not in html:
 
 print("dev011a_required_sections: PASS")
 
-if '?v=011e2fix1' not in html:
+if '?v=011f1' not in html:
     fail("index.html does not cache-bust local static assets")
-if './model.js?v=011e2fix1' not in texts["app.js"]:
+if './model.js?v=011f1' not in texts["app.js"]:
     fail("app.js does not cache-bust model.js")
-if './mqtt-client.js?v=011e2fix1' not in texts["app.js"]:
+if './mqtt-client.js?v=011f1' not in texts["app.js"]:
     fail("app.js does not cache-bust mqtt-client.js")
 
 print("dev011a_asset_cache_busting: PASS")

@@ -461,14 +461,15 @@ h2 {
   font-weight: 680;
 }
 
-.form-grid input {
+.form-grid input,
+.form-grid select {
   min-height: 38px;
   width: 100%;
   padding: 0 9px;
   border: 1px solid #d2d8e2;
   border-radius: 7px;
-  color: #667085;
-  background: #f5f7fa;
+  color: #344054;
+  background: #ffffff;
   font-size: 0.9rem;
 }
 
@@ -478,6 +479,25 @@ h2 {
   justify-content: space-between;
   gap: 14px;
   margin-top: 12px;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-result {
+  min-height: 1.15em;
+  margin: 9px 0 0;
+}
+
+.settings-result--success {
+  color: #16794b;
+}
+
+.settings-result--error {
+  color: #b42318;
 }
 
 .primary-button {
@@ -908,10 +928,19 @@ h2 {
     color: #b9c4d1;
   }
 
-  .form-grid input {
+  .form-grid input,
+  .form-grid select {
     border-color: #344155;
-    color: #93a0b2;
+    color: #d8e1ed;
     background: #182230;
+  }
+
+  .settings-result--success {
+    color: #63d5a2;
+  }
+
+  .settings-result--error {
+    color: #ff9b8e;
   }
 
   .fixture-card {

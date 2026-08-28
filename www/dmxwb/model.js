@@ -29,6 +29,8 @@ export function createInitialModel() {
     connection: { ...EMPTY_CONNECTION },
     config: null,
     configDraft: null,
+    configDraftBaseRevision: null,
+    configDraftDirty: false,
     state: null,
     status: null,
     groupStates: {},
@@ -48,31 +50,127 @@ export function setConnection(model, connection) {
 
 export function setConfigSnapshot(model, config) {
   const snapshot = deepClone(config);
+  const revision = finiteInteger(snapshot?.revision, 0);
+
+  if (model.configDraftDirty && model.configDraft) {
+    // A newer retained config must never destroy an in-progress local draft.
+    // The preserved base revision intentionally makes a later Apply stale,
+    // so the backend can reject it with revision_conflict.
+    return {
+      ...model,
+      config: snapshot,
+    };
+  }
+
   return {
     ...model,
     config: snapshot,
     configDraft: deepClone(snapshot),
+    configDraftBaseRevision: revision,
+    configDraftDirty: false,
   };
 }
 
 export function resetConfigDraft(model) {
+  const revision = model.config
+    ? finiteInteger(model.config.revision, 0)
+    : null;
   return {
     ...model,
     configDraft: deepClone(model.config),
+    configDraftBaseRevision: revision,
+    configDraftDirty: false,
   };
 }
 
 export function updateConfigDraft(model, updater) {
-  if (!model.configDraft) {
+  if (!model.configDraft || !model.config) {
     return model;
   }
 
   const draft = deepClone(model.configDraft);
   updater(draft);
 
+  const currentRevision = finiteInteger(model.config.revision, 0);
+  const baseRevision = model.configDraftDirty
+    ? model.configDraftBaseRevision
+    : currentRevision;
+
+  // config.revision is part of the canonical full proposal and must match
+  // expected_revision in /dmxwb/config/set.
+  draft.revision = baseRevision;
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(model.config);
   return {
     ...model,
     configDraft: draft,
+    configDraftBaseRevision: dirty ? baseRevision : currentRevision,
+    configDraftDirty: dirty,
+  };
+}
+
+export function resizeFixtureDraft(model, fixtureCount) {
+  if (!Number.isSafeInteger(fixtureCount) || fixtureCount < 0) {
+    return model;
+  }
+
+  return updateConfigDraft(model, (draft) => {
+    draft.fixtures ??= { count: 0, start_address: 1, items: [] };
+    draft.fixtures.items = Array.isArray(draft.fixtures.items)
+      ? draft.fixtures.items
+      : [];
+    draft.id_counters ??= {
+      next_fixture_id: 1,
+      next_group_id: 1,
+      next_scene_id: 1,
+    };
+
+    const items = draft.fixtures.items;
+    while (items.length < fixtureCount) {
+      const id = Number(draft.id_counters.next_fixture_id);
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new RangeError("next_fixture_id is invalid");
+      }
+      items.push({ id, name: `Fixture ${id}` });
+      draft.id_counters.next_fixture_id = id + 1;
+    }
+
+    if (items.length > fixtureCount) {
+      items.splice(fixtureCount);
+      const activeIds = new Set(items.map((fixture) => String(fixture.id)));
+      if (Array.isArray(draft.groups)) {
+        for (const group of draft.groups) {
+          if (Array.isArray(group.members)) {
+            group.members = group.members.filter((id) =>
+              activeIds.has(String(id)),
+            );
+          }
+        }
+      }
+      // Scene snapshots are historical records and intentionally keep
+      // stable IDs of Fixtures that were removed.
+    }
+
+    draft.fixtures.count = fixtureCount;
+  });
+}
+
+export function configDraftInfo(model) {
+  if (!model.config || !model.configDraft) {
+    return null;
+  }
+
+  const currentRevision = finiteInteger(model.config.revision, 0);
+  const baseRevision = Number.isSafeInteger(model.configDraftBaseRevision)
+    ? model.configDraftBaseRevision
+    : currentRevision;
+
+  return {
+    currentRevision,
+    baseRevision,
+    dirty: Boolean(model.configDraftDirty),
+    stale: Boolean(model.configDraftDirty) && baseRevision !== currentRevision,
+    proposal: deepClone(model.configDraft),
   };
 }
 

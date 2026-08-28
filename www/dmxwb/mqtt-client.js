@@ -1,6 +1,7 @@
 export const MQTT_WEBSOCKET_PATH = "/mqtt";
 export const MQTT_PROTOCOL_NAME = "mqtt";
 export const MQTT_CONFIG_TOPIC = "/dmxwb/config";
+export const MQTT_CONFIG_SET_TOPIC = "/dmxwb/config/set";
 export const MQTT_CONFIG_RESULT_TOPIC = "/dmxwb/config/result";
 export const MQTT_STATE_TOPIC = "/dmxwb/state";
 export const MQTT_STATUS_TOPIC = "/dmxwb/status";

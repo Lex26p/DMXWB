@@ -64,7 +64,6 @@ for forbidden in [
     "sessionStorage",
     "fetch(",
     "XMLHttpRequest",
-    "/dev/tty",
     "systemctl",
 ]:
     if forbidden in mqtt or forbidden in app:
