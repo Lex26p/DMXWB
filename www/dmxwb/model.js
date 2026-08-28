@@ -2,9 +2,10 @@ export const SOURCE_MQTT = "mqtt";
 export const SOURCE_ARTNET = "artnet";
 
 const EMPTY_CONNECTION = Object.freeze({
-  state: "static",
+  state: "offline",
   connected: false,
-  message: "MQTT transport is not connected in DEV-011A",
+  url: "",
+  attempt: 0,
 });
 
 function deepClone(value) {

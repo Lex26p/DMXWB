@@ -7,9 +7,19 @@ import {
   isLegacyArtNetUniverse,
   sceneItems,
   selectedSource,
+  setConfigSnapshot,
+  setConnection,
+  setStateSnapshot,
+  setStatusSnapshot,
   structuralSettings,
 } from "./model.js";
-import { mqttTransportDescriptor } from "./mqtt-client.js";
+import {
+  MQTT_CONFIG_TOPIC,
+  MQTT_STATE_TOPIC,
+  MQTT_STATUS_TOPIC,
+  MqttWebSocketClient,
+  mqttTransportDescriptor,
+} from "./mqtt-client.js";
 
 let model = createInitialModel();
 
@@ -25,6 +35,8 @@ const elements = {
   diagnosticGrid: document.querySelector("#diagnostic-grid"),
   pageTitle: document.querySelector("#page-title"),
   pageSubtitle: document.querySelector("#page-subtitle"),
+  connectionIndicator: document.querySelector("#connection-indicator"),
+  connectionTitle: document.querySelector("#connection-title"),
   settings: {
     dmxPort: document.querySelector("#setting-dmx-port"),
     fixtureCount: document.querySelector("#setting-fixture-count"),
@@ -59,6 +71,36 @@ function activateSection(sectionName) {
   const meta = sectionMeta[sectionName] ?? sectionMeta.control;
   elements.pageTitle.textContent = meta[0];
   elements.pageSubtitle.textContent = meta[1];
+}
+
+function renderConnection() {
+  const connection = model.connection;
+  const labels = {
+    connected: "Связь установлена",
+    connecting: "Подключение…",
+    reconnecting: "Переподключение…",
+    offline: "Нет связи",
+  };
+
+  elements.connectionTitle.textContent =
+    labels[connection.state] ?? labels.offline;
+
+  elements.connectionIndicator.classList.remove(
+    "status-dot--online",
+    "status-dot--connecting",
+    "status-dot--offline",
+  );
+
+  if (connection.connected) {
+    elements.connectionIndicator.classList.add("status-dot--online");
+  } else if (
+    connection.state === "connecting" ||
+    connection.state === "reconnecting"
+  ) {
+    elements.connectionIndicator.classList.add("status-dot--connecting");
+  } else {
+    elements.connectionIndicator.classList.add("status-dot--offline");
+  }
 }
 
 function renderDiagnostics() {
@@ -131,8 +173,33 @@ function render() {
     `${fixtures.length} светильников · ${groups.length} групп`;
   elements.sceneCountBadge.textContent = `${scenes.length} сцен`;
 
+  renderConnection();
   renderDiagnostics();
   renderSettings();
+}
+
+function parseSnapshot(payload) {
+  const value = JSON.parse(payload);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("MQTT snapshot must be a JSON object");
+  }
+  return value;
+}
+
+function applyMqttSnapshot(topic, payload) {
+  const snapshot = parseSnapshot(payload);
+
+  if (topic === MQTT_CONFIG_TOPIC) {
+    model = setConfigSnapshot(model, snapshot);
+  } else if (topic === MQTT_STATE_TOPIC) {
+    model = setStateSnapshot(model, snapshot);
+  } else if (topic === MQTT_STATUS_TOPIC) {
+    model = setStatusSnapshot(model, snapshot);
+  } else {
+    return;
+  }
+
+  render();
 }
 
 for (const button of elements.navButtons) {
@@ -141,4 +208,38 @@ for (const button of elements.navButtons) {
   });
 }
 
+const descriptor = mqttTransportDescriptor(window.location);
+const mqttClient = new MqttWebSocketClient({
+  url: descriptor.url,
+  onConnectionChange(connection) {
+    model = setConnection(model, connection);
+    render();
+  },
+  onMessage(topic, payload) {
+    try {
+      applyMqttSnapshot(topic, payload);
+    } catch (error) {
+      console.error(`DMXWB ignored invalid MQTT snapshot from ${topic}`, error);
+    }
+  },
+  onProtocolError(error) {
+    console.error("DMXWB MQTT transport error", error);
+  },
+});
+
+mqttClient.subscribe([
+  MQTT_CONFIG_TOPIC,
+  MQTT_STATE_TOPIC,
+  MQTT_STATUS_TOPIC,
+]);
+
+window.addEventListener(
+  "beforeunload",
+  () => {
+    mqttClient.stop();
+  },
+  { once: true },
+);
+
 render();
+mqttClient.start();

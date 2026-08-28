@@ -215,6 +215,21 @@ input:disabled {
   box-shadow: 0 0 0 3px rgba(152, 162, 179, 0.14);
 }
 
+.status-dot--online {
+  background: #28a36a;
+  box-shadow: 0 0 0 3px rgba(40, 163, 106, 0.16);
+}
+
+.status-dot--connecting {
+  background: #d49b28;
+  box-shadow: 0 0 0 3px rgba(212, 155, 40, 0.16);
+}
+
+.status-dot--offline {
+  background: #98a2b3;
+  box-shadow: 0 0 0 3px rgba(152, 162, 179, 0.14);
+}
+
 main {
   min-width: 0;
   padding: 14px 18px 18px;
