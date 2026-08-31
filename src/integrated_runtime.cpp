@@ -2,19 +2,27 @@
 
 #include "dmxwb/artnet_source_coordinator.hpp"
 #include "dmxwb/artnet_transport_linux.hpp"
+#include "dmxwb/mqtt_contract.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
 namespace dmxwb {
 namespace {
+
+constexpr auto kOperationalStatusPublishInterval = std::chrono::seconds{1};
+constexpr auto kOperationalStatusOfflineRetryInterval = std::chrono::milliseconds{250};
 
 class RandomPollReplyDelaySource final : public IArtNetPollReplyDelaySource {
 public:
@@ -156,6 +164,59 @@ private:
     std::atomic<std::uint64_t> reconfigure_failures_{0};
 };
 
+void append_json_string(std::string& output, std::string_view value) {
+    constexpr char hex[] = "0123456789abcdef";
+    output.push_back('"');
+    for (const auto character : value) {
+        const auto byte = static_cast<unsigned char>(character);
+        switch (byte) {
+            case '"': output += "\\\""; break;
+            case '\\': output += "\\\\"; break;
+            case '\b': output += "\\b"; break;
+            case '\f': output += "\\f"; break;
+            case '\n': output += "\\n"; break;
+            case '\r': output += "\\r"; break;
+            case '\t': output += "\\t"; break;
+            default:
+                if (byte < 0x20U) {
+                    output += "\\u00";
+                    output.push_back(hex[(byte >> 4U) & 0x0FU]);
+                    output.push_back(hex[byte & 0x0FU]);
+                } else {
+                    output.push_back(static_cast<char>(byte));
+                }
+                break;
+        }
+    }
+    output.push_back('"');
+}
+
+[[nodiscard]] std::string_view artnet_source_state_name(ArtNetSourceState state) noexcept {
+    switch (state) {
+        case ArtNetSourceState::waiting: return "WAITING";
+        case ArtNetSourceState::active: return "ACTIVE";
+        case ArtNetSourceState::lost: return "LOST";
+        case ArtNetSourceState::conflict: return "CONFLICT";
+    }
+    return "WAITING";
+}
+
+[[nodiscard]] std::string_view artnet_sync_mode_name(ArtNetSyncMode mode) noexcept {
+    return mode == ArtNetSyncMode::synchronous ? "SYNC" : "ASYNC";
+}
+
+[[nodiscard]] std::string ipv4_address_string(const ArtNetIpv4Address& address) {
+    return std::to_string(address.octets[0]) + "." +
+           std::to_string(address.octets[1]) + "." +
+           std::to_string(address.octets[2]) + "." +
+           std::to_string(address.octets[3]);
+}
+
+struct OperationalStatusPayload final {
+    MqttApplicationStatus application{MqttApplicationStatus::running};
+    std::string json;
+};
+
 }  // namespace
 
 class IntegratedRuntime::Impl final {
@@ -247,6 +308,7 @@ public:
         }
 
         started_flag = true;
+        next_operational_status_publish = std::chrono::steady_clock::now();
         return true;
     }
 
@@ -262,6 +324,7 @@ public:
         if (current_config.dmx_port != applied_dmx_port) {
             if (!physical_sink.reconfigure_port(current_config.dmx_port)) {
                 set_error("Cannot apply configured DMX Port without restart");
+                publish_operational_status_now(false);
                 return false;
             }
             applied_dmx_port = current_config.dmx_port;
@@ -270,6 +333,7 @@ public:
         if (current_config.artnet_universe != applied_artnet_universe) {
             if (!reconfigure_artnet_universe(current_config.artnet_universe)) {
                 set_error("Cannot apply configured Art-Net Universe without restart");
+                publish_operational_status_now(false);
                 return false;
             }
             applied_artnet_universe = current_config.artnet_universe;
@@ -277,9 +341,11 @@ public:
 
         if (physical_sink.ever_started() && !physical_sink.output().running()) {
             set_error("DmxOutput worker stopped unexpectedly");
+            publish_operational_status_now(false);
             return false;
         }
 
+        publish_operational_status_if_due();
         return true;
     }
 
@@ -302,8 +368,9 @@ public:
         }
 
         flush_result = mqtt_runtime.flush_state();
-        mqtt.stop();
         physical_sink.stop();
+        publish_operational_status_now(true);
+        mqtt.stop();
 
         started_flag = false;
         shutdown_done = true;
@@ -315,7 +382,10 @@ public:
         try {
             artnet_worker = std::thread{[this] {
                 while (!artnet_stop.load(std::memory_order_acquire)) {
-                    artnet_source->step(ArtNetCore::clock::now());
+                    {
+                        std::lock_guard lock{artnet_mutex};
+                        artnet_source->step(ArtNetCore::clock::now());
+                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds{2});
                 }
             }};
@@ -388,13 +458,17 @@ public:
         IntegratedRuntimeDiagnostics result;
         result.mqtt = mqtt.diagnostics();
         result.mqtt_runtime = mqtt_runtime.diagnostics();
-        result.artnet = artnet_runtime->diagnostics();
-        result.artnet_source = artnet_source->diagnostics();
+        {
+            std::lock_guard lock{artnet_mutex};
+            result.artnet = artnet_runtime->diagnostics();
+            result.artnet_source = artnet_source->diagnostics();
+            result.artnet_source_state = artnet_runtime->core().source_state();
+            result.artnet_sync_mode = artnet_runtime->core().sync_mode();
+            result.artnet_transport_open_after_shutdown =
+                artnet_runtime->diagnostics().transport_open;
+        }
         result.router = router.diagnostics();
         result.dmx = physical_sink.output().diagnostics();
-
-        result.artnet_source_state = artnet_runtime->core().source_state();
-        result.artnet_sync_mode = artnet_runtime->core().sync_mode();
 
         result.startup_artnet_output_deferred =
             startup_artnet_output_deferred_value;
@@ -413,9 +487,211 @@ public:
         result.applied_artnet_port_address = applied_artnet_universe;
         result.artnet_transport_open_before_shutdown =
             artnet_transport_was_open;
-        result.artnet_transport_open_after_shutdown =
-            artnet_runtime->diagnostics().transport_open;
         return result;
+    }
+
+    [[nodiscard]] OperationalStatusPayload build_operational_status(bool stopping) const {
+        const auto diag = diagnostics();
+        std::optional<ArtNetSource> active_artnet_source;
+        {
+            std::lock_guard lock{artnet_mutex};
+            active_artnet_source = artnet_runtime->core().active_source();
+        }
+
+        const bool config_ok = persistence.startup_status().ok();
+        const bool dmx_running = physical_sink.output().running();
+        const bool dmx_ready = dmx_running && diag.dmx.serial_open;
+
+        std::string_view dmx_detail_state = "waiting";
+        if (stopping) {
+            dmx_detail_state = "off";
+        } else if (physical_sink.ever_started()) {
+            dmx_detail_state = dmx_ready ? "running" : "error";
+        }
+
+        const auto mqtt_detail_state =
+            stopping ? std::string_view{"offline"} :
+            (diag.mqtt.connected ? std::string_view{"connected"} : std::string_view{"reconnecting"});
+        const auto artnet_state = artnet_source_state_name(diag.artnet_source_state);
+        const std::string_view artnet_top_state =
+            stopping ? std::string_view{"off"} :
+            (diag.artnet.transport_open ? artnet_state : std::string_view{"error"});
+
+        MqttApplicationStatus application = MqttApplicationStatus::running;
+        if (stopping) {
+            application = MqttApplicationStatus::off;
+        } else if (!config_ok || dmx_detail_state == "error" ||
+                   (diag.router.selected_source == PersistedSource::mqtt && !diag.mqtt.connected) ||
+                   (diag.router.selected_source == PersistedSource::artnet &&
+                    (!diag.artnet.transport_open ||
+                     diag.artnet_source_state == ArtNetSourceState::lost ||
+                     diag.artnet_source_state == ArtNetSourceState::conflict))) {
+            application = MqttApplicationStatus::error;
+        }
+
+        std::string last_error;
+        if (!stopping) {
+            if (!last_error_value.empty()) {
+                last_error = last_error_value;
+            } else if (dmx_detail_state == "error" && !diag.dmx.last_error.empty()) {
+                last_error = diag.dmx.last_error;
+            } else if (diag.router.selected_source == PersistedSource::mqtt &&
+                       !diag.mqtt.connected && !diag.mqtt.last_error.empty()) {
+                last_error = diag.mqtt.last_error;
+            } else if (diag.router.selected_source == PersistedSource::artnet &&
+                       !diag.artnet.transport_open) {
+                last_error = "Art-Net transport unavailable";
+            } else if (diag.router.selected_source == PersistedSource::artnet &&
+                       diag.artnet_source_state == ArtNetSourceState::lost) {
+                last_error = "Art-Net source lost";
+            } else if (diag.router.selected_source == PersistedSource::artnet &&
+                       diag.artnet_source_state == ArtNetSourceState::conflict) {
+                last_error = "Art-Net source conflict";
+            } else if (!config_ok) {
+                last_error = "Persistence startup fallback active";
+            }
+        }
+
+        std::string_view dmx_recovery = "waiting";
+        if (stopping) {
+            dmx_recovery = "off";
+        } else if (dmx_ready) {
+            dmx_recovery = diag.dmx.recoveries == 0 ? "ok" : "recovered";
+        } else if (dmx_running) {
+            dmx_recovery = "reconnecting";
+        } else if (physical_sink.ever_started()) {
+            dmx_recovery = "error";
+        }
+
+        const std::string_view mqtt_recovery =
+            stopping ? "off" :
+            (diag.mqtt.connected ?
+                (diag.mqtt.disconnects == 0 ? "ok" : "recovered") :
+                "reconnecting");
+        const std::string_view artnet_recovery =
+            stopping ? "off" :
+            (diag.artnet.transport_open ?
+                (diag.artnet.transport_recoveries == 0 ? "ok" : "recovered") :
+                "reconnecting");
+
+        // Art-Net is a latest-state source rather than a FIFO: each committed
+        // snapshot after the first replaces the previously current network snapshot.
+        const auto snapshots_superseded =
+            diag.artnet.snapshots_published > 0 ? diag.artnet.snapshots_published - 1U : 0U;
+
+        std::string output{"{\"application\":"};
+        append_json_string(output, mqtt_application_status_name(application));
+        output += ",\"dmx\":";
+        append_json_string(
+            output,
+            stopping ? std::string_view{"off"} :
+            (dmx_detail_state == "running" ? std::string_view{"running"} :
+             dmx_detail_state == "waiting" ? std::string_view{"off"} : std::string_view{"error"}));
+        output += ",\"mqtt\":";
+        append_json_string(output, stopping ? std::string_view{"offline"} :
+            (diag.mqtt.connected ? std::string_view{"connected"} : std::string_view{"offline"}));
+        output += ",\"artnet\":";
+        append_json_string(output, artnet_top_state);
+        output += ",\"configuration\":";
+        append_json_string(output, config_ok ? std::string_view{"ok"} : std::string_view{"fallback"});
+        output += ",\"last_error\":";
+        append_json_string(output, last_error);
+        output += ",\"diagnostics\":{\"selected_source\":";
+        append_json_string(output, persisted_source_name(diag.router.selected_source));
+
+        output += ",\"dmx\":{\"state\":";
+        append_json_string(output, dmx_detail_state);
+        output += ",\"port\":";
+        append_json_string(output, applied_dmx_port);
+        output += ",\"frames_sent\":" + std::to_string(diag.dmx.frames_sent);
+        output += ",\"last_error\":";
+        append_json_string(output, diag.dmx.last_error);
+        output += ",\"recovery_state\":";
+        append_json_string(output, dmx_recovery);
+        output += ",\"open_failures\":" + std::to_string(diag.dmx.open_failures);
+        output += ",\"send_failures\":" + std::to_string(diag.dmx.send_failures);
+        output += ",\"recoveries\":" + std::to_string(diag.dmx.recoveries);
+        output += ",\"missed_deadlines\":" + std::to_string(diag.dmx.missed_deadlines) + '}';
+
+        output += ",\"mqtt\":{\"state\":";
+        append_json_string(output, mqtt_detail_state);
+        output += ",\"connected\":";
+        output += diag.mqtt.connected && !stopping ? "true" : "false";
+        output += ",\"recovery_state\":";
+        append_json_string(output, mqtt_recovery);
+        output += ",\"successful_connections\":" + std::to_string(diag.mqtt.successful_connections);
+        output += ",\"disconnects\":" + std::to_string(diag.mqtt.disconnects);
+        output += ",\"last_error\":";
+        append_json_string(output, diag.mqtt.last_error);
+        output += '}';
+
+        output += ",\"artnet\":{\"state\":";
+        append_json_string(output, artnet_state);
+        output += ",\"universe\":" + std::to_string(applied_artnet_universe);
+        output += ",\"active_source_ip\":";
+        if (active_artnet_source.has_value()) {
+            append_json_string(output, ipv4_address_string(active_artnet_source->ip));
+        } else {
+            output += "null";
+        }
+        output += ",\"packets_received\":" + std::to_string(diag.artnet.datagrams_received);
+        output += ",\"snapshots_superseded\":" + std::to_string(snapshots_superseded);
+        output += ",\"recovery_state\":";
+        append_json_string(output, artnet_recovery);
+        output += ",\"transport_open\":";
+        output += diag.artnet.transport_open ? "true" : "false";
+        output += ",\"receive_errors\":" + std::to_string(diag.artnet.receive_errors);
+        output += ",\"send_errors\":" + std::to_string(diag.artnet.send_errors);
+        output += ",\"transport_recoveries\":" + std::to_string(diag.artnet.transport_recoveries);
+        output += ",\"sync_mode\":";
+        append_json_string(output, artnet_sync_mode_name(diag.artnet_sync_mode));
+        output += '}';
+
+        output += ",\"configuration\":{\"state\":";
+        append_json_string(output, config_ok ? std::string_view{"ok"} : std::string_view{"fallback"});
+        output += ",\"revision\":" + std::to_string(persistence.config().revision);
+        output += ",\"config_path\":";
+        append_json_string(output, persistence.config_path());
+        output += ",\"state_path\":";
+        append_json_string(output, persistence.state_path());
+        output += "}}}";
+
+        return {application, std::move(output)};
+    }
+
+    void publish_operational_status_if_due() {
+        const auto now = std::chrono::steady_clock::now();
+        if (next_operational_status_publish.has_value() &&
+            now < *next_operational_status_publish) {
+            return;
+        }
+
+        if (!mqtt.connected()) {
+            next_operational_status_publish = now + kOperationalStatusOfflineRetryInterval;
+            return;
+        }
+
+        publish_operational_status_now(false);
+        next_operational_status_publish = now + kOperationalStatusPublishInterval;
+    }
+
+    void publish_operational_status_now(bool stopping) {
+        if (!mqtt.connected()) {
+            return;
+        }
+
+        const auto payload = build_operational_status(stopping);
+        const std::array<MqttPublication, 2> publications{{
+            MqttPublication{
+                std::string{kMqttStatusTopic},
+                payload.json,
+                true},
+            MqttPublication{
+                "/devices/dmxwb/controls/status",
+                std::string{mqtt_application_status_name(payload.application)},
+                true},
+        }};
+        (void)mqtt.publish_all(publications);
     }
 
     IntegratedRuntimeConfig config;
@@ -433,6 +709,7 @@ public:
     ArtNetRuntimeConfig artnet_config;
     std::unique_ptr<ArtNetRuntime> artnet_runtime;
     std::unique_ptr<ArtNetSourceCoordinator> artnet_source;
+    mutable std::mutex artnet_mutex;
 
     std::atomic_bool artnet_stop{false};
     std::thread artnet_worker;
@@ -442,6 +719,7 @@ public:
     std::uint64_t artnet_universe_reconfigurations{0};
     std::uint64_t artnet_universe_reconfigure_failures{0};
 
+    std::optional<std::chrono::steady_clock::time_point> next_operational_status_publish;
     bool startup_artnet_output_deferred_value{false};
     bool artnet_transport_was_open{false};
     bool started_flag{false};

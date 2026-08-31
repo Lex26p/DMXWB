@@ -5,20 +5,20 @@
 ## Repository source base
 
 ```text
-e850cee8633b2d18c89b63869524a2408dcfc5ef
-Normalize DEV-012 execution plan
+eb5c9030d31b09d5ea2c46ca0dc1052c3426168d
+Confirm DEV-012A production daemon acceptance
 ```
 
 ## Last confirmed engineering PASS
 
 ```text
-DEV-012A — production daemon and foreground acceptance
+DEV-012C — offline bundle and installer
 ```
 
-DEV-012A is **Confirmed** by native Linux tests, Bullseye ARM64 artifact checks and
-real WB8 foreground MQTT/Art-Net/physical acceptance using the production `dmxwb`
-executable. DEV-011 remains the Confirmed functional baseline for the static Web and
-its MQTT-only control path.
+DEV-012B is **Confirmed** by the static operational contract, native Linux tests,
+Bullseye ARM64 artifact checks and real WB8 systemd/recovery acceptance using the
+production `dmxwb` executable. DEV-012A remains the Confirmed production foreground
+baseline; DEV-011 remains the Confirmed functional Web/MQTT baseline.
 
 ## Current engineering gate
 
@@ -271,6 +271,86 @@ production dmxwb startup
 The acceptance helper preserved and restored the retained MQTT topics it touched.
 No systemd service was involved; service lifecycle belongs to DEV-012B.
 
+## DEV-012B acceptance result
+
+DEV-012B is **Confirmed**.
+
+Acceptance source base:
+
+```text
+eb5c9030d31b09d5ea2c46ca0dc1052c3426168d
+Confirm DEV-012A production daemon acceptance
+```
+
+The DEV-012B implementation was tested from the modified worktree based on that
+commit and is intended to be committed together with this acceptance record.
+
+WB8 report:
+
+```text
+docs/DEV012B_SYSTEMD_REPORT.txt
+=== DMXWB DEV-012B SYSTEMD + DIAGNOSTICS PASS ===
+```
+
+Confirmed build/toolchain facts:
+
+- DEV-012B static operational contract PASS;
+- native Linux build with warnings-as-errors PASS;
+- `16/16` CTest tests PASS;
+- Bullseye GCC `10.2.1` AArch64 production build PASS;
+- production `dmxwb` is ELF AArch64;
+- maximum required GLIBC symbol version is `GLIBC_2.17`;
+- production `dmxwb` dynamically requires `libmosquitto.so.1`;
+- production artifact SHA256:
+  `55278d3bca2f1a262cecf29608480bde2e89a238601d9f3b4aaaf8dfa65b20b9`.
+
+Confirmed real WB8 service/recovery path:
+
+```text
+systemctl start
+    -> production dmxwb active
+    -> retained operational /dmxwb/status
+    -> MQTT RED -> physical RED
+
+clean systemctl stop
+    -> no unwanted restart
+    -> persistent state flush
+
+second start
+    -> saved RED restored
+
+systemctl restart
+    -> new process PID
+
+SIGKILL production process
+    -> systemd automatic recovery
+    -> new process PID
+    -> physical RED restored
+
+restart Mosquitto
+    -> DMXWB PID unchanged
+    -> MQTT reconnects in-process
+    -> physical DMX remains stable
+
+journald
+    -> bounded lifecycle/recovery events
+
+standard WB HomeUI
+    -> only intended DMXWB Status/Source surface
+
+final Power OFF
+    -> clean service stop
+    -> original WB8 environment restored
+```
+
+The WB8 run additionally Confirmed MQTT recovery diagnostics with one disconnect and
+two successful connections while the DMXWB process PID remained unchanged.
+
+DEV-012B introduced no separate metrics server, telemetry database, monitoring
+service or dashboard. Existing runtime diagnostics are exposed only as required
+operational state, and Fixture/Group/Scene controls remain hidden from standard WB
+HomeUI.
+
 ## DEV-012 execution plan
 
 ### DEV-012A — production daemon and foreground acceptance — Confirmed
@@ -302,7 +382,7 @@ PASS:
   - clean SIGINT/SIGTERM shutdown and state flush;
 - no independent duplicate production runtime remains.
 
-### DEV-012B — systemd and essential operational diagnostics
+### DEV-012B — systemd and essential operational diagnostics — Confirmed
 
 Scope:
 
@@ -429,10 +509,8 @@ The full cross-subsystem acceptance and 24-hour run remain in DEV-013.
 
 Until DEV-012 is Confirmed:
 
-- production systemd lifecycle;
 - fully offline bundle/installer acceptance;
 - reboot acceptance;
-- production operational logging/status acceptance;
 - registered production Art-Net OEM identity if not yet assigned.
 
 After DEV-012:

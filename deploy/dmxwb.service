@@ -1,0 +1,16 @@
+[Unit]
+Description=DMXWB DMX512 gateway for Wiren Board
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dmxwb
+Restart=on-failure
+RestartSec=2s
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

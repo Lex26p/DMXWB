@@ -1,0 +1,44 @@
+=== DMXWB DEV-012B SYSTEMD + ESSENTIAL DIAGNOSTICS ACCEPTANCE ===
+generated_utc: 2026-08-31T12:53:01Z
+source_head: eb5c9030d31b09d5ea2c46ca0dc1052c3426168d
+source_worktree: modified
+artifact_sha256: 55278d3bca2f1a262cecf29608480bde2e89a238601d9f3b4aaaf8dfa65b20b9
+target: root@10.200.200.1
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+artnet_port_address: 0
+fixed_refresh_hz: 44
+dev012b_systemd_unit_contract: PASS
+dev012b_no_mosquitto_systemd_dependency: PASS
+dev012b_bounded_journald_event_contract: PASS
+dev012b_structured_retained_status_contract: PASS
+dev012b_artnet_diagnostics_thread_guard: PASS
+dev012b_standard_wb_homeui_hidden_controls_contract: PASS
+dev012b_no_monitoring_subsystem: PASS
+=== DMXWB DEV-012B STATIC OPERATIONAL CONTRACT PASS ===
+local_static_operational_contract: PASS
+target_identity: RELEASE_NAME=wb-2606SUITE=stableTARGET=wb8/bullseyeREPO_PREFIX=
+no_running_dmxwb_process: PASS
+original_retained_topics_captured: PASS
+production_binary_installed_sha256: PASS (55278d3bca2f1a262cecf29608480bde2e89a238601d9f3b4aaaf8dfa65b20b9)
+systemctl_start: PASS (pid=107329)
+retained_operational_status: PASS
+systemd_start_physical_red_user: PASS
+systemctl_clean_stop_no_restart: PASS
+systemctl_clean_stop_state_flush: PASS
+systemd_second_start_state_restore_user: PASS
+systemctl_restart: PASS (108539 -> 108971)
+systemd_crash_recovery: PASS (108971 -> 109659)
+systemd_crash_recovery_physical_user: PASS
+mosquitto_restart_without_dmxwb_restart: PASS (pid=109659)
+mqtt_reconnect_diagnostics: PASS (disconnects=1, connections=2)
+mqtt_restart_physical_continuity_user: PASS
+standard_wb_homeui_status_source_only_user: PASS
+journald_lifecycle_events: PASS
+journald_mqtt_recovery_events: PASS
+journald_startup_count: 4
+final_power_off_user: PASS
+final_clean_service_stop: PASS
+original_environment_restored: PASS
+dev012b_systemd_diagnostics_result: PASS
+=== DMXWB DEV-012B SYSTEMD + DIAGNOSTICS PASS ===
