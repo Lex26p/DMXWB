@@ -5,14 +5,14 @@
 ## Repository source base
 
 ```text
-eb5c9030d31b09d5ea2c46ca0dc1052c3426168d
-Confirm DEV-012A production daemon acceptance
+0c4e9f2ea0c06785d0a3ce5c714d46a0ef29ab4d
+Complete DEV-012B systemd diagnostics
 ```
 
 ## Last confirmed engineering PASS
 
 ```text
-DEV-012C — offline bundle and installer
+DEV-012B — systemd and essential operational diagnostics
 ```
 
 DEV-012B is **Confirmed** by the static operational contract, native Linux tests,
@@ -33,8 +33,14 @@ without source compilation on WB8.
 The current active step is:
 
 ```text
-DEV-012B — systemd and essential operational diagnostics
+DEV-012B1 — production diagnostics contract correction
 ```
+
+Before DEV-012C, DEV-012 has a fixed corrective sequence for separating
+engineering/test instrumentation from production operational diagnostics.
+DEV-012B remains Confirmed for its proven systemd lifecycle and recovery behavior;
+the corrective sequence narrows production observability without invalidating that
+hardware/service acceptance.
 
 ## Current confirmed product architecture
 
@@ -347,9 +353,12 @@ The WB8 run additionally Confirmed MQTT recovery diagnostics with one disconnect
 two successful connections while the DMXWB process PID remained unchanged.
 
 DEV-012B introduced no separate metrics server, telemetry database, monitoring
-service or dashboard. Existing runtime diagnostics are exposed only as required
-operational state, and Fixture/Group/Scene controls remain hidden from standard WB
-HomeUI.
+service or dashboard, and Fixture/Group/Scene controls remain hidden from standard
+WB HomeUI. A post-PASS audit of the production observability path found that
+cumulative engineering/test counters are still accumulated and exposed by the
+production runtime. This does not invalidate the Confirmed systemd/recovery behavior,
+but it must be corrected before DEV-012C. The fixed corrective sequence is
+DEV-012B1 -> DEV-012B2 -> DEV-012B3.
 
 ## DEV-012 execution plan
 
@@ -418,6 +427,82 @@ PASS on WB8:
 - required retained status is present and factual;
 - journald contains bounded startup/shutdown/recovery/error events;
 - standard WB HomeUI exposes only the intended DMXWB Status/Source surface.
+
+### DEV-012B1 — production diagnostics contract correction
+
+Scope:
+
+- update `docs/TECHNICAL_SPEC.md` so production diagnostics and engineering/test
+  instrumentation are explicitly separate concepts;
+- production `dmxwb` must expose factual current state, current configuration,
+  current source, last error and recovery state only where operationally useful;
+- cumulative test/acceptance counters such as lifetime frame, packet, command,
+  publication, snapshot and source-switch totals are not part of the production
+  contract;
+- preserve algorithmic revisions/generations, protocol sequence state, config
+  revision and stable Fixture/Group/Scene ID generators because they are runtime
+  state rather than telemetry;
+- do not change C++ implementation in B1.
+
+PASS:
+
+- `TECHNICAL_SPEC.md` no longer requires cumulative engineering counters in
+  production;
+- allowed production operational state is explicit;
+- required algorithmic revisions/generations/IDs remain required;
+- documentation has no contradictory production counter requirement;
+- active step advances to DEV-012B2.
+
+### DEV-012B2 — production / engineering instrumentation separation
+
+Scope:
+
+- preserve engineering counters required by unit/integration/acceptance tests;
+- build production `dmxwb` without accumulating test-only counters;
+- remove test-only counter updates from production DMX, Art-Net, MQTT, router and
+  coordinator paths, especially from the physical DMX hot path;
+- do not duplicate DMX/MQTT/Art-Net algorithms to achieve the separation;
+- make `/dmxwb/status` factual state-oriented rather than lifetime-statistics
+  oriented;
+- derive production recovery logging from state transitions, not historical counter
+  deltas;
+- update static/build/acceptance checks to the corrected contract;
+- add a build-level assertion that the production status contract does not expose
+  forbidden cumulative telemetry fields.
+
+PASS:
+
+- native Linux warnings-as-errors build PASS;
+- all existing host tests PASS with engineering instrumentation available;
+- production build does not accumulate the forbidden test-only counters;
+- production `/dmxwb/status` contains no forbidden cumulative telemetry fields;
+- Bullseye ARM64 build and architecture/GLIBC/dependency audit PASS;
+- active step advances to DEV-012B3.
+
+### DEV-012B3 — WB8 regression after counter isolation
+
+Scope:
+
+- run the corrected production `dmxwb` on the real WB8 through systemd;
+- verify MQTT -> physical DMX, Art-Net -> physical DMX and explicit Source
+  switching;
+- restart Mosquitto and verify in-process MQTT recovery without changing the
+  `dmxwb` PID and without interrupting physical DMX;
+- verify `/dmxwb/status` remains factual and contains no forbidden cumulative
+  counters;
+- verify journald contains bounded lifecycle/error/recovery transition events rather
+  than telemetry streaming;
+- verify clean stop, state flush and serial release.
+
+PASS:
+
+- production behavior proven by DEV-012A/DEV-012B remains intact;
+- MQTT broker recovery remains in-process;
+- physical DMX remains continuous through the recovery check;
+- production status contains no forbidden cumulative counters;
+- journald remains bounded and operational;
+- clean shutdown/state flush/serial release PASS;
+- active step advances to DEV-012C.
 
 ### DEV-012C — offline bundle and installer
 

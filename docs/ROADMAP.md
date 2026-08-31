@@ -1,8 +1,8 @@
 # DMXWB DEVELOPMENT ROADMAP
 
 **Статус:** рабочая дорожная карта реализации утверждённого `TECHNICAL_SPEC.md`  
-**База актуализации дорожной карты:** `22d4befec0884366132355a390879bf89e8255b4`  
-**Дата актуализации:** 2026-08-20  
+**База актуализации дорожной карты:** `0c4e9f2ea0c06785d0a3ce5c714d46a0ef29ab4d`  
+**Дата актуализации:** 2026-08-31  
 **Цель:** последовательно реализовать полное приложение DMXWB с проверяемым PASS/FAIL после каждого значимого engineering gate.
 
 Дорожная карта является рабочей инструкцией по порядку разработки. Источник истины — актуальное состояние репозитория. Перед каждым шагом необходимо прочитать `AGENTS.md`, `PROJECT_STATE.md`, относящиеся к задаче части `TECHNICAL_SPEC.md` и настоящий roadmap.
@@ -687,6 +687,82 @@ Web не имеет прямого serial/file/systemd API и не нужен д
 Оформить DMXWB как штатно устанавливаемый daemon WB8 и доказать полностью офлайн installation bundle.
 
 К этому gate target build path на ноутбуке уже должен быть подтверждён ранними hardware gates. DEV-012 доводит его до воспроизводимого production artifact/bundle, а не переносит compilation на WB8.
+
+## Текущий execution order после Confirmed DEV-012B
+
+DEV-012A и DEV-012B уже Confirmed. До начала offline bundle необходимо завершить корректировку production diagnostics, выявленную после DEV-012B.
+
+Фиксированный порядок:
+
+```text
+DEV-012A   production daemon and foreground acceptance — Confirmed
+DEV-012B   systemd and essential operational diagnostics — Confirmed
+DEV-012B1  production diagnostics contract correction
+DEV-012B2  production / engineering instrumentation separation
+DEV-012B3  WB8 regression after counter isolation
+DEV-012C   offline bundle and installer
+DEV-012D   offline WB8 acceptance and gate closeout
+```
+
+### DEV-012B1 — production diagnostics contract correction
+
+Scope:
+
+- согласовать в `TECHNICAL_SPEC.md` разделение production operational state и engineering/test instrumentation;
+- исключить cumulative test/acceptance counters из production contract;
+- сохранить algorithmic revisions/generations, protocol sequence state, config revision и stable Fixture/Group/Scene ID generators;
+- production diagnostics должны описывать factual current state, конфигурацию, source, ошибки и recovery state, а не lifetime telemetry;
+- C++ implementation в B1 не изменяется.
+
+PASS:
+
+- `TECHNICAL_SPEC.md` больше не требует cumulative engineering counters в production;
+- допустимый production operational state описан явно;
+- algorithmic revisions/generations/IDs не ошибочно классифицированы как telemetry;
+- активный шаг переходит к DEV-012B2.
+
+### DEV-012B2 — production / engineering instrumentation separation
+
+Scope:
+
+- сохранить engineering counters, необходимые unit/integration/acceptance tests;
+- production `dmxwb` не должен накапливать test-only counters;
+- убрать test-only instrumentation из production DMX, Art-Net, MQTT, router/coordinator paths, особенно из physical DMX hot path;
+- не создавать вторую реализацию DMX/MQTT/Art-Net algorithms;
+- `/dmxwb/status` должен быть factual state-oriented;
+- journald recovery events определяются по переходам состояния, а не historical counter deltas;
+- static/build/acceptance checks обновляются под исправленный contract;
+- production build должен проверяться на отсутствие запрещённых cumulative telemetry fields.
+
+PASS:
+
+- native Linux warnings-as-errors build PASS;
+- все host tests PASS с engineering instrumentation;
+- production build не накапливает test-only counters;
+- production `/dmxwb/status` не содержит запрещённых cumulative telemetry fields;
+- Bullseye ARM64 build и architecture/GLIBC/dependency audit PASS;
+- активный шаг переходит к DEV-012B3.
+
+### DEV-012B3 — WB8 regression after counter isolation
+
+Scope:
+
+- проверить corrected production `dmxwb` через systemd на реальном WB8;
+- MQTT -> physical DMX, Art-Net -> physical DMX и explicit Source switching;
+- restart Mosquitto -> in-process MQTT recovery без смены PID `dmxwb` и без остановки physical DMX;
+- `/dmxwb/status` остаётся factual и не содержит запрещённых cumulative counters;
+- journald содержит bounded lifecycle/error/recovery transition events, а не telemetry stream;
+- clean stop, state flush и serial release.
+
+PASS:
+
+- production behavior, подтверждённый DEV-012A/DEV-012B, остаётся рабочим;
+- MQTT broker recovery остаётся in-process;
+- physical DMX остаётся непрерывным в recovery check;
+- production status не содержит запрещённых cumulative counters;
+- journald остаётся bounded и operational;
+- clean shutdown/state flush/serial release PASS;
+- активный шаг переходит к DEV-012C.
 
 ## Реализовать
 
