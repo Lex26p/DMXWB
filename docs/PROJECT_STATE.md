@@ -5,19 +5,20 @@
 ## Repository source base
 
 ```text
-bdb88d9f3ef4ec21785ae14de5cd45208a527905
-Complete production daemon consolidation
+e850cee8633b2d18c89b63869524a2408dcfc5ef
+Normalize DEV-012 execution plan
 ```
 
 ## Last confirmed engineering PASS
 
 ```text
-DEV-011 — static MQTT-only Web UI
+DEV-012A — production daemon and foreground acceptance
 ```
 
-DEV-011 is **Confirmed** by host/static checks and real WB8 browser/MQTT/physical
-acceptance. The Web remains a static MQTT-only client and does not enter the DMX
-timing path.
+DEV-012A is **Confirmed** by native Linux tests, Bullseye ARM64 artifact checks and
+real WB8 foreground MQTT/Art-Net/physical acceptance using the production `dmxwb`
+executable. DEV-011 remains the Confirmed functional baseline for the static Web and
+its MQTT-only control path.
 
 ## Current engineering gate
 
@@ -32,12 +33,8 @@ without source compilation on WB8.
 The current active step is:
 
 ```text
-DEV-012A — production daemon and foreground acceptance
+DEV-012B — systemd and essential operational diagnostics
 ```
-
-Commit `bdb88d9f3ef4ec21785ae14de5cd45208a527905` contains the production daemon
-consolidation implementation. DEV-012A is not yet **Confirmed** until its required
-foreground WB8 acceptance passes.
 
 ## Current confirmed product architecture
 
@@ -221,9 +218,62 @@ Production `dmxwb` currently keeps ArtDmx input active without inventing an
 unregistered Art-Net OEM identity. Production ArtPollReply advertisement must use
 a registered OEM Code when that identity is available.
 
+## DEV-012A acceptance result
+
+DEV-012A is **Confirmed**.
+
+Implementation base:
+
+```text
+bdb88d9f3ef4ec21785ae14de5cd45208a527905
+Complete production daemon consolidation
+```
+
+Acceptance source head:
+
+```text
+e850cee8633b2d18c89b63869524a2408dcfc5ef
+```
+
+Foreground WB8 report:
+
+```text
+docs/DEV012A_PRODUCTION_FOREGROUND_REPORT.txt
+=== DMXWB DEV-012A PRODUCTION FOREGROUND PASS ===
+```
+
+Confirmed build/toolchain facts:
+
+- native Linux build with warnings-as-errors PASS;
+- `16/16` CTest tests PASS;
+- Bullseye GCC `10.2.1` AArch64 production build PASS;
+- Bullseye ARM64 `libmosquitto` version `2.0.11`;
+- production `dmxwb` is ELF AArch64;
+- maximum required GLIBC symbol version is `GLIBC_2.17`;
+- production `dmxwb` dynamically requires `libmosquitto.so.1`;
+- production artifact SHA256:
+  `193f44b037a72dbc26f64c04c8720b841838690714d5f2c7f47ab89589ad6e91`.
+
+Confirmed real WB8 foreground path through the production executable:
+
+```text
+production dmxwb startup
+    -> MQTT Fixture RED -> physical RED
+    -> Source ART-NET + ArtDmx BLUE -> physical BLUE
+    -> inactive MQTT state updated to GREEN while physical remains BLUE
+    -> Source WB MQTT -> latest GREEN becomes physical
+    -> final Power OFF
+    -> SIGTERM
+    -> persistent state flush
+    -> serial port released
+```
+
+The acceptance helper preserved and restored the retained MQTT topics it touched.
+No systemd service was involved; service lifecycle belongs to DEV-012B.
+
 ## DEV-012 execution plan
 
-### DEV-012A — production daemon and foreground acceptance
+### DEV-012A — production daemon and foreground acceptance — Confirmed
 
 Scope:
 

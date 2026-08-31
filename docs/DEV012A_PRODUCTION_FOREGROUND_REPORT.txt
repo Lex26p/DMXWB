@@ -1,0 +1,38 @@
+=== DMXWB DEV-012A PRODUCTION FOREGROUND ACCEPTANCE ===
+generated_utc: 2026-08-31T12:13:26Z
+source_head: e850cee8633b2d18c89b63869524a2408dcfc5ef
+source_worktree: modified
+artifact_sha256: 193f44b037a72dbc26f64c04c8720b841838690714d5f2c7f47ab89589ad6e91
+target: root@10.200.200.1
+artnet_host: 10.200.200.1
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+artnet_port_address: 0
+fixed_refresh_hz: 44
+production_executable: dmxwb
+no_running_dmxwb_process: PASS
+original_retained_topics_captured: PASS
+target_version: dmxwb 0.1.0
+production_runtime_started: PASS
+production_retained_status: PASS
+initial_source_mqtt: PASS
+mqtt_red_physical_user: PASS
+mqtt_red_factual_state: PASS
+artnet_blue_physical_user: PASS
+artnet_udp_input_production_path: PASS
+inactive_mqtt_updates_while_artnet_user: PASS
+inactive_mqtt_state_updated: PASS
+artnet_to_mqtt_green_physical_user: PASS
+explicit_source_switch_latest_mqtt: PASS
+final_power_off_user: PASS
+sigterm_clean_exit: PASS
+persistent_state_flush: PASS
+serial_port_released_after_shutdown: PASS
+--- production runtime log ---
+dmxwb: running
+config_path: /tmp/dmxwb-dev012a-production/config.json
+state_path: /tmp/dmxwb-dev012a-production/state.json
+dmxwb: stopped
+original_retained_topics_restored: PASS
+dev012a_production_foreground_result: PASS
+=== DMXWB DEV-012A PRODUCTION FOREGROUND PASS ===
