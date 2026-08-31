@@ -9,6 +9,7 @@ MARKER="${ROOTFS}/.dmxwb-bullseye-cross-arm64-ready"
 CHROOT_SOURCE="${ROOTFS}/work/dmxwb"
 OUTPUT_DIR="${REPO_ROOT}/artifacts/wb8-bullseye-arm64"
 OUTPUT_BIN="${OUTPUT_DIR}/dmxwb"
+OUTPUT_HARDWARE_DIAGNOSTICS="${OUTPUT_DIR}/dmxwb-hardware-diagnostics"
 OUTPUT_MQTT_ACCEPTANCE="${OUTPUT_DIR}/dmxwb-mqtt-acceptance"
 HOST_BUILD="${REPO_ROOT}/build-linux-wb8"
 
@@ -18,7 +19,7 @@ if [[ ! -f "${MARKER}" ]]; then
     exit 1
 fi
 
-for command_name in cmake tar readelf file sha256sum; do
+for command_name in cmake tar readelf file sha256sum grep; do
     if ! command -v "${command_name}" >/dev/null 2>&1; then
         echo "Missing host command: ${command_name}" >&2
         exit 1
@@ -44,6 +45,10 @@ cmake -S "${REPO_ROOT}" -B "${HOST_BUILD}" \
 cmake --build "${HOST_BUILD}" -j2
 ctest --test-dir "${HOST_BUILD}" --output-on-failure
 "${HOST_BUILD}/dmxwb" --version
+"${HOST_BUILD}/dmxwb" --help | grep -Fq '/etc/dmxwb/config.json'
+"${HOST_BUILD}/dmxwb" --help | grep -Fq '/var/lib/dmxwb/state.json'
+"${HOST_BUILD}/dmxwb-hardware-diagnostics" --version
+"${HOST_BUILD}/dmxwb-dev010-source-acceptance" --help >/dev/null
 
 echo
 echo "=== Bullseye GCC 10 ARM64 cross build ==="
@@ -73,14 +78,28 @@ sudo chroot "${ROOTFS}" /bin/bash -lc '
         -DBUILD_TESTING=OFF \
         -DDMXWB_WARNINGS_AS_ERRORS=ON \
         -DDMXWB_STATIC_GNU_RUNTIME=ON
-    cmake --build build-wb8 -j2 --target dmxwb dmxwb_mqtt_acceptance
+    cmake --build build-wb8 -j2 --target \
+        dmxwb \
+        dmxwb_hardware_diagnostics \
+        dmxwb_mqtt_acceptance
 '
 
 mkdir -p "${OUTPUT_DIR}"
 sudo cp "${CHROOT_SOURCE}/build-wb8/dmxwb" "${OUTPUT_BIN}"
-sudo cp "${CHROOT_SOURCE}/build-wb8/dmxwb-mqtt-acceptance" "${OUTPUT_MQTT_ACCEPTANCE}"
-sudo chown "$(id -u):$(id -g)" "${OUTPUT_BIN}" "${OUTPUT_MQTT_ACCEPTANCE}"
-chmod 0755 "${OUTPUT_BIN}" "${OUTPUT_MQTT_ACCEPTANCE}"
+sudo cp \
+    "${CHROOT_SOURCE}/build-wb8/dmxwb-hardware-diagnostics" \
+    "${OUTPUT_HARDWARE_DIAGNOSTICS}"
+sudo cp \
+    "${CHROOT_SOURCE}/build-wb8/dmxwb-mqtt-acceptance" \
+    "${OUTPUT_MQTT_ACCEPTANCE}"
+sudo chown "$(id -u):$(id -g)" \
+    "${OUTPUT_BIN}" \
+    "${OUTPUT_HARDWARE_DIAGNOSTICS}" \
+    "${OUTPUT_MQTT_ACCEPTANCE}"
+chmod 0755 \
+    "${OUTPUT_BIN}" \
+    "${OUTPUT_HARDWARE_DIAGNOSTICS}" \
+    "${OUTPUT_MQTT_ACCEPTANCE}"
 
 verify_artifact() {
     local artifact="$1"
@@ -103,19 +122,29 @@ verify_artifact() {
     fi
 
     local max_glibc
-    max_glibc="$(readelf --version-info "${artifact}" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sort -V | tail -n1 || true)"
+    max_glibc="$(
+        readelf --version-info "${artifact}" \
+            | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' \
+            | sort -V \
+            | tail -n1 \
+            || true
+    )"
     if [[ -z "${max_glibc}" ]]; then
         echo "Could not determine GLIBC requirement." >&2
         exit 1
     fi
-    if [[ "$(printf '%s\n%s\n' "${max_glibc}" 'GLIBC_2.31' | sort -V | tail -n1)" != 'GLIBC_2.31' ]]; then
+    if [[ "$(
+        printf '%s\n%s\n' "${max_glibc}" 'GLIBC_2.31' \
+            | sort -V \
+            | tail -n1
+    )" != 'GLIBC_2.31' ]]; then
         echo "Binary requires ${max_glibc}, newer than Bullseye GLIBC_2.31." >&2
         exit 1
     fi
 
     if [[ "${require_mosquitto}" == "yes" ]] && \
        ! readelf -d "${artifact}" | grep -Fq 'libmosquitto.so.1'; then
-        echo "MQTT acceptance binary does not dynamically require libmosquitto.so.1." >&2
+        echo "Artifact does not dynamically require libmosquitto.so.1." >&2
         readelf -d "${artifact}" | grep NEEDED || true
         exit 1
     fi
@@ -126,7 +155,11 @@ verify_artifact() {
     sha256sum "${artifact}"
 }
 
-verify_artifact "${OUTPUT_BIN}" no
+# DEV-012A production dmxwb is now the integrated MQTT runtime and therefore
+# must carry the MQTT dynamic dependency. The separate historical hardware
+# diagnostic executable remains MQTT-independent.
+verify_artifact "${OUTPUT_BIN}" yes
+verify_artifact "${OUTPUT_HARDWARE_DIAGNOSTICS}" no
 verify_artifact "${OUTPUT_MQTT_ACCEPTANCE}" yes
 
 echo "WB8 laptop cross build completed."

@@ -18,7 +18,10 @@ if result.returncode != 0:
 router_h = (REPO_ROOT / "include/dmxwb/dmx_source_router.hpp").read_text(encoding="utf-8")
 router_cpp = (REPO_ROOT / "src/dmx_source_router.cpp").read_text(encoding="utf-8")
 router_test = (REPO_ROOT / "tests/test_dmx_source_router.cpp").read_text(encoding="utf-8")
-runtime = (REPO_ROOT / "src/dev010_source_acceptance_main.cpp").read_text(encoding="utf-8")
+shared_runtime = (REPO_ROOT / "src/integrated_runtime.cpp").read_text(encoding="utf-8")
+acceptance_frontend = (
+    REPO_ROOT / "src/dev010_source_acceptance_main.cpp"
+).read_text(encoding="utf-8")
 
 for token in [
     "clear_artnet_snapshot",
@@ -35,20 +38,31 @@ for token in [
     if token not in router_test:
         fail(f"router reconfiguration test missing {token}")
 
+# DEV-012A moves the already-proven structural transport application from the
+# DEV-010 acceptance executable into the shared integrated runtime. Check the
+# actual owner of that behavior rather than requiring production orchestration
+# to remain embedded in an acceptance main().
 for token in [
     "reconfigure_port(std::string port)",
     "latest_snapshot_ = snapshot",
-    "runtime_dmx_port_applied",
-    "runtime_artnet_port_address_applied",
     "current_config.dmx_port != applied_dmx_port",
     "current_config.artnet_universe != applied_artnet_universe",
     "router.clear_artnet_snapshot()",
     "ArtNetRuntime::create(",
+]:
+    if token not in shared_runtime:
+        fail(f"shared runtime structural apply missing {token}")
+
+# The acceptance frontend keeps the stable diagnostic markers consumed by the
+# existing WB8 helpers, but no longer owns the transport reconfiguration logic.
+for token in [
+    "runtime_dmx_port_applied",
+    "runtime_artnet_port_address_applied",
     "final_dmx_port_reconfigure_failures",
     "final_artnet_universe_reconfigure_failures",
 ]:
-    if token not in runtime:
-        fail(f"runtime structural apply missing {token}")
+    if token not in acceptance_frontend:
+        fail(f"acceptance runtime marker missing {token}")
 
 # Transport-specific config application belongs in the C++ runtime, never Web.
 web_app = (REPO_ROOT / "www/dmxwb/app.js").read_text(encoding="utf-8")
