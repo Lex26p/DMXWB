@@ -12,6 +12,15 @@ OUTPUT_BIN="${OUTPUT_DIR}/dmxwb"
 OUTPUT_HARDWARE_DIAGNOSTICS="${OUTPUT_DIR}/dmxwb-hardware-diagnostics"
 OUTPUT_MQTT_ACCEPTANCE="${OUTPUT_DIR}/dmxwb-mqtt-acceptance"
 HOST_BUILD="${REPO_ROOT}/build-linux-wb8"
+PRODUCTION_ONLY=0
+
+if [[ $# -gt 1 ]] || [[ $# -eq 1 && "$1" != "--production-only" ]]; then
+    echo "Usage: bash tools/wb8/build_bullseye_arm64.sh [--production-only]" >&2
+    exit 2
+fi
+if [[ $# -eq 1 ]]; then
+    PRODUCTION_ONLY=1
+fi
 
 if [[ ! -f "${MARKER}" ]]; then
     echo "WB8 Bullseye cross-build rootfs is not ready: ${ROOTFS}" >&2
@@ -37,18 +46,20 @@ if ! sudo chroot "${ROOTFS}" /bin/bash -lc '
     exit 1
 fi
 
-echo "=== Native Linux verification ==="
-rm -rf "${HOST_BUILD}"
-cmake -S "${REPO_ROOT}" -B "${HOST_BUILD}" \
-    -DBUILD_TESTING=ON \
-    -DDMXWB_WARNINGS_AS_ERRORS=ON
-cmake --build "${HOST_BUILD}" -j2
-ctest --test-dir "${HOST_BUILD}" --output-on-failure
-"${HOST_BUILD}/dmxwb" --version
-"${HOST_BUILD}/dmxwb" --help | grep -Fq '/etc/dmxwb/config.json'
-"${HOST_BUILD}/dmxwb" --help | grep -Fq '/var/lib/dmxwb/state.json'
-"${HOST_BUILD}/dmxwb-hardware-diagnostics" --version
-"${HOST_BUILD}/dmxwb-dev010-source-acceptance" --help >/dev/null
+if (( PRODUCTION_ONLY == 0 )); then
+    echo "=== Native Linux verification ==="
+    rm -rf "${HOST_BUILD}"
+    cmake -S "${REPO_ROOT}" -B "${HOST_BUILD}" \
+        -DBUILD_TESTING=ON \
+        -DDMXWB_WARNINGS_AS_ERRORS=ON
+    cmake --build "${HOST_BUILD}" -j2
+    ctest --test-dir "${HOST_BUILD}" --output-on-failure
+    "${HOST_BUILD}/dmxwb" --version
+    "${HOST_BUILD}/dmxwb" --help | grep -Fq '/etc/dmxwb/config.json'
+    "${HOST_BUILD}/dmxwb" --help | grep -Fq '/var/lib/dmxwb/state.json'
+    "${HOST_BUILD}/dmxwb-hardware-diagnostics" --version
+    "${HOST_BUILD}/dmxwb-dev010-source-acceptance" --help >/dev/null
+fi
 
 echo
 echo "=== Bullseye GCC 10 ARM64 cross build ==="
@@ -65,41 +76,61 @@ tar \
     -C "${REPO_ROOT}" -cf - . \
     | sudo tar -C "${CHROOT_SOURCE}" -xf -
 
-sudo chroot "${ROOTFS}" /bin/bash -lc '
-    set -euo pipefail
-    export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-    cd /work/dmxwb
-    rm -rf build-wb8
-    cmake -S . -B build-wb8 \
-        -DCMAKE_SYSTEM_NAME=Linux \
-        -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-        -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_TESTING=OFF \
-        -DDMXWB_WARNINGS_AS_ERRORS=ON \
-        -DDMXWB_STATIC_GNU_RUNTIME=ON
-    cmake --build build-wb8 -j2 --target \
-        dmxwb \
-        dmxwb_hardware_diagnostics \
-        dmxwb_mqtt_acceptance
-'
+if (( PRODUCTION_ONLY == 1 )); then
+    sudo chroot "${ROOTFS}" /bin/bash -lc '
+        set -euo pipefail
+        export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+        cd /work/dmxwb
+        rm -rf build-wb8
+        cmake -S . -B build-wb8 \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DDMXWB_WARNINGS_AS_ERRORS=ON \
+            -DDMXWB_STATIC_GNU_RUNTIME=ON
+        cmake --build build-wb8 -j2 --target dmxwb
+    '
+else
+    sudo chroot "${ROOTFS}" /bin/bash -lc '
+        set -euo pipefail
+        export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+        cd /work/dmxwb
+        rm -rf build-wb8
+        cmake -S . -B build-wb8 \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DDMXWB_WARNINGS_AS_ERRORS=ON \
+            -DDMXWB_STATIC_GNU_RUNTIME=ON
+        cmake --build build-wb8 -j2 --target \
+            dmxwb \
+            dmxwb_hardware_diagnostics \
+            dmxwb_mqtt_acceptance
+    '
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 sudo cp "${CHROOT_SOURCE}/build-wb8/dmxwb" "${OUTPUT_BIN}"
-sudo cp \
-    "${CHROOT_SOURCE}/build-wb8/dmxwb-hardware-diagnostics" \
-    "${OUTPUT_HARDWARE_DIAGNOSTICS}"
-sudo cp \
-    "${CHROOT_SOURCE}/build-wb8/dmxwb-mqtt-acceptance" \
-    "${OUTPUT_MQTT_ACCEPTANCE}"
-sudo chown "$(id -u):$(id -g)" \
-    "${OUTPUT_BIN}" \
-    "${OUTPUT_HARDWARE_DIAGNOSTICS}" \
-    "${OUTPUT_MQTT_ACCEPTANCE}"
-chmod 0755 \
-    "${OUTPUT_BIN}" \
-    "${OUTPUT_HARDWARE_DIAGNOSTICS}" \
-    "${OUTPUT_MQTT_ACCEPTANCE}"
+sudo chown "$(id -u):$(id -g)" "${OUTPUT_BIN}"
+chmod 0755 "${OUTPUT_BIN}"
+if (( PRODUCTION_ONLY == 0 )); then
+    sudo cp \
+        "${CHROOT_SOURCE}/build-wb8/dmxwb-hardware-diagnostics" \
+        "${OUTPUT_HARDWARE_DIAGNOSTICS}"
+    sudo cp \
+        "${CHROOT_SOURCE}/build-wb8/dmxwb-mqtt-acceptance" \
+        "${OUTPUT_MQTT_ACCEPTANCE}"
+    sudo chown "$(id -u):$(id -g)" \
+        "${OUTPUT_HARDWARE_DIAGNOSTICS}" \
+        "${OUTPUT_MQTT_ACCEPTANCE}"
+    chmod 0755 \
+        "${OUTPUT_HARDWARE_DIAGNOSTICS}" \
+        "${OUTPUT_MQTT_ACCEPTANCE}"
+fi
 
 verify_artifact() {
     local artifact="$1"
@@ -159,8 +190,10 @@ verify_artifact() {
 # must carry the MQTT dynamic dependency. The separate historical hardware
 # diagnostic executable remains MQTT-independent.
 verify_artifact "${OUTPUT_BIN}" yes
-verify_artifact "${OUTPUT_HARDWARE_DIAGNOSTICS}" no
-verify_artifact "${OUTPUT_MQTT_ACCEPTANCE}" yes
+if (( PRODUCTION_ONLY == 0 )); then
+    verify_artifact "${OUTPUT_HARDWARE_DIAGNOSTICS}" no
+    verify_artifact "${OUTPUT_MQTT_ACCEPTANCE}" yes
+fi
 
 echo "WB8 laptop cross build completed."
 echo "Run tools/wb8/verify_on_target.sh for target CLI verification when required by the current gate."

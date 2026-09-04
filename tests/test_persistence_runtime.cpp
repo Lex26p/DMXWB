@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -203,6 +204,51 @@ void test_forced_flush_persists_shutdown_state() {
     }
 }
 
+void test_runtime_persistence_health_recovers_without_restart() {
+    using namespace std::chrono_literals;
+
+    TempDirectory temp;
+    if (!temp.valid()) {
+        expect_true(false, "runtime health temporary directory created");
+        return;
+    }
+
+    const auto config_path = temp.file("config.json");
+    const auto state_path = temp.file("state.json");
+    const auto config = make_two_fixture_config();
+    const auto state = make_two_fixture_state(config);
+    expect_true(write_initial_files(config_path, state_path, config, state),
+                "runtime health initial files written");
+
+    dmxwb::PersistenceRuntime runtime{config_path, state_path};
+    const dmxwb::PersistenceRuntime::time_point t0{};
+    runtime.mark_fixture_state_changed(t0);
+
+    const std::filesystem::path blocking_temp{state_path + ".tmp"};
+    std::error_code ec;
+    expect_true(std::filesystem::create_directory(blocking_temp, ec),
+                "runtime health state temp blocker created");
+    auto result = runtime.save_state_if_due(t0 + 2s);
+    expect_true(result.action == dmxwb::StateSaveAction::failed,
+                "runtime exposes due state write failure");
+    expect_true(!runtime.operational_status().ok() &&
+                    !runtime.operational_status().fallback_active &&
+                    !runtime.operational_status().last_error().empty(),
+                "runtime persistence health reports current write error without false fallback");
+
+    result = runtime.save_state_if_due(t0 + 3s);
+    expect_true(result.action == dmxwb::StateSaveAction::not_due,
+                "runtime persistence retry is suppressed during backoff");
+    std::filesystem::remove(blocking_temp, ec);
+    result = runtime.save_state_if_due(t0 + 4s);
+    expect_true(result.action == dmxwb::StateSaveAction::saved,
+                "runtime saves pending state after storage recovery");
+    expect_true(runtime.operational_status().ok() &&
+                    runtime.operational_status().last_error().empty() &&
+                    !runtime.state_dirty(),
+                "successful retry restores factual persistence health without restart");
+}
+
 void test_config_transaction_is_atomic_and_preserves_matching_state() {
     TempDirectory temp;
     if (!temp.valid()) {
@@ -256,7 +302,8 @@ void test_config_transaction_is_atomic_and_preserves_matching_state() {
         expect_true(!fresh->requested_power(), "new configured fixture starts safely OFF");
         expect_true(fresh->saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 255}, "new configured fixture gets default saved RGBW");
     }
-    expect_true(runtime.state_dirty(), "structural config change marks state dirty for matching state-file rewrite");
+    expect_true(!runtime.state_dirty(),
+        "successful config transaction durably writes its matching state immediately");
 
     const auto disk_config = dmxwb::load_config_file(config_path);
     expect_true(disk_config.ok(), "runtime committed config reloads from disk");
@@ -265,11 +312,230 @@ void test_config_transaction_is_atomic_and_preserves_matching_state() {
     }
 
     const auto flush = runtime.flush_state();
-    expect_true(flush.action == dmxwb::StateSaveAction::saved, "config transaction state flush succeeds");
+    expect_true(flush.action == dmxwb::StateSaveAction::not_dirty,
+        "successful config transaction needs no deferred state flush");
     dmxwb::PersistenceRuntime restarted{config_path, state_path};
     expect_true(restarted.startup_status().ok(), "restart accepts transaction-updated config/state pair");
     expect_true(restarted.fixtures().fixture_count() == 3, "restart restores transaction-updated fixture count");
     expect_true(restarted.fixtures().next_fixture_id() == 22, "restart restores transaction-updated ID counter");
+}
+
+void test_config_transaction_rejects_stable_id_reuse() {
+    TempDirectory temp;
+    if (!temp.valid()) {
+        expect_true(false, "stable ID transaction temporary directory created");
+        return;
+    }
+
+    const auto config_path = temp.file("config.json");
+    const auto state_path = temp.file("state.json");
+    const auto config = make_two_fixture_config();
+    const auto state = make_two_fixture_state(config);
+    expect_true(write_initial_files(config_path, state_path, config, state),
+                "stable ID transaction initial files written");
+
+    dmxwb::PersistenceRuntime runtime{config_path, state_path};
+    auto removed = runtime.config();
+    removed.fixture_count = 1;
+    removed.fixtures.pop_back();
+    const auto removal = runtime.apply_config_transaction(
+        runtime.config().revision,
+        removed,
+        dmxwb::PersistenceRuntime::time_point{});
+    expect_true(removal.ok(), "Fixture deletion commits without reducing its ID counter");
+    if (!removal.ok()) {
+        return;
+    }
+
+    const auto committed_text = read_plain_text(config_path);
+    auto reused = runtime.config();
+    reused.fixture_count = 2;
+    reused.fixtures.push_back(dmxwb::FixtureConfigRecord{20, "Replacement"});
+    const auto rejected = runtime.apply_config_transaction(
+        runtime.config().revision,
+        reused,
+        dmxwb::PersistenceRuntime::time_point{});
+    expect_true(!rejected.ok() && rejected.error.code == dmxwb::PersistenceFileErrorCode::validation,
+                "runtime transaction rejects reuse of deleted Fixture stable ID");
+    expect_true(runtime.fixtures().fixture_count() == 1 && read_plain_text(config_path) == committed_text,
+                "rejected stable ID reuse leaves model and config file unchanged");
+}
+
+void test_config_commit_point_recovers_prepared_state_after_crash() {
+    TempDirectory temp;
+    if (!temp.valid()) {
+        expect_true(false, "commit-point recovery temporary directory created");
+        return;
+    }
+
+    const auto config_path = temp.file("config.json");
+    const auto state_path = temp.file("state.json");
+    const auto old_config = make_two_fixture_config();
+    const auto old_state = make_two_fixture_state(old_config);
+    expect_true(write_initial_files(config_path, state_path, old_config, old_state),
+        "commit-point recovery initial pair written");
+
+    auto committed_config = old_config;
+    committed_config.revision = 8;
+    committed_config.fixture_count = 3;
+    committed_config.start_address = 5;
+    committed_config.fixtures = {
+        dmxwb::FixtureConfigRecord{20, "Back"},
+        dmxwb::FixtureConfigRecord{10, "Front"},
+        dmxwb::FixtureConfigRecord{21, "New"}};
+    committed_config.id_counters.next_fixture_id = 22;
+    auto prepared_state = dmxwb::reconcile_state_for_config(old_state, committed_config);
+    expect_true(prepared_state.ok(),
+        "commit-point recovery builds the exact state for the new configuration");
+    if (!prepared_state.ok()) {
+        return;
+    }
+    for (auto& fixture : prepared_state.value->fixtures) {
+        if (fixture.id == 10) {
+            fixture.rgbw = dmxwb::RgbwValues{211, 212, 213, 214};
+            fixture.brightness = 42;
+        }
+    }
+    expect_true(
+        !dmxwb::prepare_config_state_file(
+            state_path,
+            *prepared_state.value,
+            committed_config),
+        "matching state is durable before the config commit point");
+    expect_true(
+        !dmxwb::write_persistence_text_file_atomic(
+            config_path,
+            dmxwb::serialize_config_json(committed_config)),
+        "simulated crash commits new config while prepared state is pending");
+
+    dmxwb::PersistenceRuntime recovered{config_path, state_path};
+    expect_true(recovered.startup_status().ok(),
+        "valid previous state is reconciled without startup fallback error");
+    expect_true(recovered.config() == committed_config &&
+                    recovered.fixtures().fixture_count() == 3,
+        "restart selects the durably committed configuration");
+    expect_true(!recovered.state_dirty(),
+        "startup atomically promotes the prepared matching state");
+
+    const auto* reordered_back = recovered.fixture_at(0);
+    const auto* reordered_front = recovered.fixture_at(1);
+    const auto* fresh = recovered.fixture_at(2);
+    expect_true(reordered_back != nullptr && reordered_back->id() == 20 &&
+                    reordered_back->saved_rgbw() == dmxwb::RgbwValues{101, 102, 103, 104},
+        "recovery preserves reordered Fixture state by stable ID");
+    expect_true(reordered_front != nullptr && reordered_front->id() == 10 &&
+                    reordered_front->saved_rgbw() == dmxwb::RgbwValues{211, 212, 213, 214} &&
+                    reordered_front->brightness() == 42,
+        "recovery preserves the exact prepared state, including unsaved recent changes");
+    expect_true(fresh != nullptr && fresh->id() == 21 &&
+                    !fresh->requested_power() &&
+                    fresh->saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 255},
+        "recovery gives a newly configured Fixture safe defaults");
+
+    const auto materialized = recovered.flush_state();
+    expect_true(materialized.action == dmxwb::StateSaveAction::not_dirty,
+        "promoted transaction needs no deferred state materialization");
+    dmxwb::PersistenceRuntime restarted{config_path, state_path};
+    expect_true(restarted.startup_status().ok() && !restarted.state_dirty() &&
+                    restarted.config() == committed_config,
+        "second restart loads the exact coherent config/state pair");
+}
+
+void test_config_transaction_io_boundaries() {
+    {
+        TempDirectory temp;
+        if (!temp.valid()) {
+            expect_true(false, "pre-commit failure temporary directory created");
+            return;
+        }
+
+        const auto config_path = temp.file("config.json");
+        const auto state_path = temp.file("state.json");
+        const auto config = make_two_fixture_config();
+        const auto state = make_two_fixture_state(config);
+        expect_true(write_initial_files(config_path, state_path, config, state),
+            "pre-commit failure initial pair written");
+        const auto original_config_text = read_plain_text(config_path);
+        const auto original_state_text = read_plain_text(state_path);
+
+        dmxwb::PersistenceRuntime runtime{config_path, state_path};
+        auto proposed = runtime.config();
+        proposed.fixture_count = 3;
+        proposed.fixtures.push_back(dmxwb::FixtureConfigRecord{21, "New"});
+        proposed.id_counters.next_fixture_id = 22;
+
+        std::error_code ec;
+        const std::filesystem::path config_temp_blocker{config_path + ".tmp"};
+        expect_true(std::filesystem::create_directory(config_temp_blocker, ec),
+            "config commit temporary path blocked");
+        const auto rejected = runtime.apply_config_transaction(
+            runtime.config().revision,
+            proposed,
+            dmxwb::PersistenceRuntime::time_point{});
+        expect_true(!rejected.ok(),
+            "failure before atomic config commit is returned as transaction error");
+        expect_true(runtime.config() == config && runtime.fixtures().fixture_count() == 2,
+            "pre-commit failure leaves active in-memory model unchanged");
+        expect_true(read_plain_text(config_path) == original_config_text &&
+                        read_plain_text(state_path) == original_state_text,
+            "pre-commit failure leaves the old durable pair unchanged");
+    }
+
+    {
+        TempDirectory temp;
+        if (!temp.valid()) {
+            expect_true(false, "post-commit state failure temporary directory created");
+            return;
+        }
+
+        const auto config_path = temp.file("config.json");
+        const auto state_path = temp.file("state.json");
+        const auto config = make_two_fixture_config();
+        const auto state = make_two_fixture_state(config);
+        expect_true(write_initial_files(config_path, state_path, config, state),
+            "post-commit state failure initial pair written");
+
+        dmxwb::PersistenceRuntime runtime{config_path, state_path};
+        auto proposed = runtime.config();
+        proposed.fixture_count = 3;
+        proposed.fixtures.push_back(dmxwb::FixtureConfigRecord{21, "New"});
+        proposed.id_counters.next_fixture_id = 22;
+
+        std::error_code ec;
+        expect_true(std::filesystem::remove(state_path, ec),
+            "old state target removed for finalize-failure simulation");
+        const std::filesystem::path state_target_blocker{state_path};
+        expect_true(std::filesystem::create_directory(state_target_blocker, ec),
+            "state finalize target blocked after prepared-state write remains possible");
+        const auto committed = runtime.apply_config_transaction(
+            runtime.config().revision,
+            proposed,
+            dmxwb::PersistenceRuntime::time_point{});
+        expect_true(committed.ok() && runtime.fixtures().fixture_count() == 3,
+            "durable config commit remains successful when state mirror is temporarily blocked");
+        expect_true(runtime.state_dirty(),
+            "failed post-commit state materialization remains pending");
+
+        dmxwb::PersistenceRuntime recovered{config_path, state_path};
+        expect_true(recovered.startup_status().ok() &&
+                        recovered.fixtures().fixture_count() == 3 &&
+                        recovered.state_dirty(),
+            "restart reconstructs the committed model from the previous valid state");
+        const auto* preserved = recovered.fixture_at(0);
+        expect_true(preserved != nullptr &&
+                        preserved->saved_rgbw() == dmxwb::RgbwValues{11, 22, 33, 44},
+            "post-commit recovery does not reset preserved Fixture state");
+
+        std::filesystem::remove(state_target_blocker, ec);
+        const auto saved = recovered.flush_state();
+        expect_true(saved.action == dmxwb::StateSaveAction::saved,
+            "pending coherent state saves after storage recovery");
+        dmxwb::PersistenceRuntime final_restart{config_path, state_path};
+        expect_true(final_restart.startup_status().ok() &&
+                        !final_restart.state_dirty() &&
+                        final_restart.fixtures().fixture_count() == 3,
+            "final restart loads the fully materialized committed pair");
+    }
 }
 
 void test_corrupt_files_use_safe_runtime_fallbacks() {
@@ -290,6 +556,90 @@ void test_corrupt_files_use_safe_runtime_fallbacks() {
     expect_true(defaults.config() == dmxwb::make_default_config(), "runtime corrupt config uses safe defaults");
     expect_true(defaults.fixtures().fixture_count() == 0, "runtime corrupt config starts with zero fixtures");
     expect_true(read_plain_text(corrupt_config_path) == corrupt_config, "runtime does not overwrite corrupt config automatically");
+    const auto corrected_config = defaults.apply_config_transaction(
+        defaults.config().revision,
+        defaults.config(),
+        dmxwb::PersistenceRuntime::time_point{});
+    expect_true(corrected_config.ok() && defaults.operational_status().ok() &&
+                    !defaults.operational_status().fallback_active,
+                "explicit valid config commit clears startup config fallback without restart");
+
+    TempDirectory preserved_state_temp;
+    if (!preserved_state_temp.valid()) {
+        expect_true(false, "preserved state fallback temporary directory created");
+        return;
+    }
+    const auto preserved_config_path = preserved_state_temp.file("config.json");
+    const auto preserved_state_path = preserved_state_temp.file("state.json");
+    const auto original_config = make_two_fixture_config();
+    const auto original_state = make_two_fixture_state(original_config);
+    expect_true(write_initial_files(
+                    preserved_config_path,
+                    preserved_state_path,
+                    original_config,
+                    original_state),
+                "valid state preservation fixture written");
+    const auto original_state_bytes = read_plain_text(preserved_state_path);
+    expect_true(!dmxwb::write_persistence_text_file_atomic(
+                    preserved_config_path, "{corrupt-config"),
+                "state preservation config corrupted");
+
+    dmxwb::PersistenceRuntime protected_fallback{
+        preserved_config_path, preserved_state_path};
+    const auto t0 = dmxwb::PersistenceRuntime::time_point{};
+    protected_fallback.set_source(dmxwb::PersistedSource::artnet, t0);
+    protected_fallback.mark_fixture_state_changed(t0);
+    const auto due = protected_fallback.save_state_if_due(t0 + std::chrono::seconds{20});
+    const auto flush = protected_fallback.flush_state();
+    expect_true(due.action == dmxwb::StateSaveAction::not_dirty &&
+                    flush.action == dmxwb::StateSaveAction::not_dirty &&
+                    !protected_fallback.state_dirty() &&
+                    !protected_fallback.next_state_save_deadline().has_value(),
+                "config fallback suppresses scheduled and forced state writes");
+    expect_true(read_plain_text(preserved_state_path) == original_state_bytes,
+                "config fallback leaves valid state byte-for-byte unchanged");
+
+    expect_true(!dmxwb::write_persistence_text_file_atomic(
+                    preserved_config_path,
+                    dmxwb::serialize_config_json(original_config)),
+                "valid config restored externally");
+    dmxwb::PersistenceRuntime restored{
+        preserved_config_path, preserved_state_path};
+    const auto* restored_fixture = restored.fixture_at(0);
+    expect_true(restored.startup_status().ok() && restored_fixture != nullptr &&
+                    restored_fixture->requested_power() &&
+                    restored_fixture->saved_rgbw() == dmxwb::RgbwValues{11, 22, 33, 44},
+                "restored config recovers the previously preserved Fixture values");
+
+    expect_true(!dmxwb::write_persistence_text_file_atomic(
+                    preserved_config_path, "{corrupt-again"),
+                "config corrupted again for explicit repair");
+    dmxwb::PersistenceRuntime repairable_fallback{
+        preserved_config_path, preserved_state_path};
+    auto repair_config = original_config;
+    repair_config.revision = repairable_fallback.config().revision;
+    const auto repaired = repairable_fallback.apply_config_transaction(
+        repairable_fallback.config().revision,
+        repair_config,
+        t0 + std::chrono::seconds{1});
+    const auto* repaired_fixture = repairable_fallback.fixture_at(0);
+    expect_true(repaired.ok() && repairable_fallback.operational_status().ok() &&
+                    repaired_fixture != nullptr && repaired_fixture->requested_power() &&
+                    repaired_fixture->saved_rgbw() == dmxwb::RgbwValues{11, 22, 33, 44},
+                "explicit config repair reconciles from preserved state instead of fallback state");
+
+    const auto shared_path = preserved_state_temp.file("shared.json");
+    const std::string shared_contents{"shared-persistence-file"};
+    expect_true(!dmxwb::write_persistence_text_file_atomic(shared_path, shared_contents),
+                "runtime shared path fixture written");
+    bool shared_path_rejected = false;
+    try {
+        dmxwb::PersistenceRuntime invalid_paths{shared_path, shared_path};
+    } catch (const std::invalid_argument&) {
+        shared_path_rejected = true;
+    }
+    expect_true(shared_path_rejected && read_plain_text(shared_path) == shared_contents,
+                "runtime rejects identical paths before modifying their file");
 
     TempDirectory corrupt_state_temp;
     if (!corrupt_state_temp.valid()) {
@@ -316,6 +666,11 @@ void test_corrupt_files_use_safe_runtime_fallbacks() {
         expect_true(!fixture->requested_power(), "corrupt state fallback fixture is safely OFF");
         expect_true(fixture->saved_rgbw() == dmxwb::RgbwValues{255, 255, 255, 255}, "corrupt state fallback preserves default saved RGBW");
     }
+    const auto corrected_state = safe_state.flush_state();
+    expect_true(corrected_state.action == dmxwb::StateSaveAction::saved &&
+                    safe_state.operational_status().ok() &&
+                    !safe_state.operational_status().fallback_active,
+                "successful corrective state write clears startup state fallback without restart");
 }
 
 }  // namespace
@@ -323,7 +678,11 @@ void test_corrupt_files_use_safe_runtime_fallbacks() {
 int main() {
     test_restart_restores_model_and_debounced_state();
     test_forced_flush_persists_shutdown_state();
+    test_runtime_persistence_health_recovers_without_restart();
     test_config_transaction_is_atomic_and_preserves_matching_state();
+    test_config_transaction_rejects_stable_id_reuse();
+    test_config_commit_point_recovers_prepared_state_after_crash();
+    test_config_transaction_io_boundaries();
     test_corrupt_files_use_safe_runtime_fallbacks();
 
     if (failures != 0) {

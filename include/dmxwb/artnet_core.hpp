@@ -134,7 +134,10 @@ public:
     [[nodiscard]] ArtNetSourceState source_state() const noexcept;
     [[nodiscard]] ArtNetSyncMode sync_mode() const noexcept;
     [[nodiscard]] std::optional<ArtNetSource> active_source() const noexcept;
+    [[nodiscard]] std::optional<ArtNetSource> conflicting_source() const noexcept;
     [[nodiscard]] std::optional<std::uint8_t> last_sequence() const noexcept;
+    [[nodiscard]] std::optional<time_point> last_artdmx_time() const noexcept;
+    [[nodiscard]] std::optional<time_point> last_sync_time() const noexcept;
     [[nodiscard]] bool has_committed_dmx() const noexcept;
     [[nodiscard]] std::uint64_t committed_revision() const noexcept;
     [[nodiscard]] std::uint8_t channel(std::size_t one_based_channel) const noexcept;
@@ -175,6 +178,7 @@ private:
     ArtNetSourceState source_state_{ArtNetSourceState::waiting};
     ArtNetSyncMode sync_mode_{ArtNetSyncMode::asynchronous};
     std::optional<ArtNetSource> active_source_;
+    std::optional<ArtNetSource> conflicting_source_;
     std::optional<std::uint8_t> last_sequence_;
     std::optional<time_point> last_source_dmx_;
     std::optional<time_point> last_sync_;

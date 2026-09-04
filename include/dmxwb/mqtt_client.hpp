@@ -1,14 +1,18 @@
 #pragma once
 
+#include "dmxwb/instrumentation.hpp"
 #include "dmxwb/mqtt_contract.hpp"
 #include "dmxwb/mqtt_runtime.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <unordered_set>
 
 struct mosquitto;
 struct mosquitto_message;
@@ -28,12 +32,20 @@ struct MqttClientDiagnostics final {
     std::string last_error;
 };
 
+struct MqttClientOperationalState final {
+    bool running{false};
+    bool connected{false};
+    std::string last_error;
+};
+
 // Thin libmosquitto transport. Network callbacks only parse/enqueue Commands
 // and set reconnect/resync flags. Fixture model, persistence and DmxOutput are
 // deliberately owned by the Controller/main context, never by this callback.
 class MqttClient final : public MqttRuntimeTransport {
 public:
-    explicit MqttClient(MqttCommandQueue& command_queue);
+    explicit MqttClient(
+        MqttCommandQueue& command_queue,
+        InstrumentationMode instrumentation_mode = InstrumentationMode::engineering);
     ~MqttClient();
 
     MqttClient(const MqttClient&) = delete;
@@ -51,6 +63,10 @@ public:
 
     [[nodiscard]] bool publish(const MqttPublication& publication);
     [[nodiscard]] bool publish_all(std::span<const MqttPublication> publications) override;
+    [[nodiscard]] bool publish_retained_cleanup(
+        std::span<const MqttPublication> publications) override;
+    [[nodiscard]] MqttRetainedCleanupDelivery
+        take_retained_cleanup_delivery() noexcept override;
 
     // on_connect sets this flag after subscriptions are recreated. The
     // Controller/main context consumes it and publishes the complete current
@@ -58,10 +74,13 @@ public:
     [[nodiscard]] bool take_full_republish_request() noexcept override;
 
     [[nodiscard]] MqttClientDiagnostics diagnostics() const;
+    [[nodiscard]] MqttClientOperationalState operational_state() const;
+    [[nodiscard]] InstrumentationMode instrumentation_mode() const noexcept;
 
 private:
     static void on_connect(struct mosquitto* mosq, void* userdata, int rc) noexcept;
     static void on_disconnect(struct mosquitto* mosq, void* userdata, int rc) noexcept;
+    static void on_publish(struct mosquitto* mosq, void* userdata, int message_id) noexcept;
     static void on_message(
         struct mosquitto* mosq,
         void* userdata,
@@ -69,11 +88,18 @@ private:
 
     void handle_connect(struct mosquitto* mosq, int rc);
     void handle_disconnect(int rc);
+    void handle_publish(int message_id) noexcept;
     void handle_message(const struct mosquitto_message* message);
+    void network_loop() noexcept;
+    [[nodiscard]] bool wait_for_retry(unsigned int delay_seconds);
+    void mark_cleanup_delivery_failed() noexcept;
     void set_error(std::string message);
     void cleanup_after_start_failure() noexcept;
+    void increment_engineering_counter(
+        std::atomic<std::uint64_t>& counter) noexcept;
 
     MqttCommandQueue& command_queue_;
+    InstrumentationMode instrumentation_mode_{InstrumentationMode::engineering};
     struct mosquitto* mosq_{nullptr};
     std::string host_;
     std::uint16_t port_{kMqttBrokerPort};
@@ -81,6 +107,7 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
+    std::atomic<bool> stop_requested_{false};
     std::atomic<bool> full_republish_requested_{false};
     std::atomic<std::uint64_t> successful_connections_{0};
     std::atomic<std::uint64_t> disconnects_{0};
@@ -92,6 +119,15 @@ private:
 
     mutable std::mutex error_mutex_;
     std::string last_error_;
+
+    std::thread network_thread_;
+    std::mutex retry_mutex_;
+    std::condition_variable retry_condition_;
+
+    mutable std::mutex cleanup_mutex_;
+    bool cleanup_active_{false};
+    std::unordered_set<int> cleanup_message_ids_;
+    MqttRetainedCleanupDelivery cleanup_delivery_{MqttRetainedCleanupDelivery::none};
 };
 
 }  // namespace dmxwb

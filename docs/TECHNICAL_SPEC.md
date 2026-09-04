@@ -1,7 +1,7 @@
 # Техническое задание DMXWB
 
 **Статус документа:** согласованная рабочая спецификация для последующей разработки  
-**Дата актуализации:** 2026-08-20  
+**Дата актуализации:** 2026-09-01  
 **Целевая платформа:** контроллеры серии Wiren Board 8 (WB8), штатная Linux/Debian/WB software environment  
 **Язык основного приложения:** C++20  
 **Назначение документа:** единый источник требований к конечному приложению DMXWB.
@@ -300,7 +300,12 @@ T0 + 2/44 s
 ...
 ```
 
-Отправка текущего кадра не добавляется к следующему period. При scheduler/OS delay прошедшие deadlines считаются в diagnostics и абсолютная grid сохраняется.
+Отправка текущего кадра не добавляется к следующему period. При scheduler/OS delay
+абсолютная grid сохраняется. Engineering/test instrumentation может считать
+прошедшие deadlines для проверки cadence, но production runtime не обязан
+накапливать lifetime-счётчик missed deadlines; production status отражает только
+текущее состояние DMX Output, последнюю ошибку и recovery state согласно разделу
+20.
 
 Решение основано на worst-case physical limit 300 slots. Два последовательных минутных production run `300/44` на acceptance WB8 прошли без missed deadlines и flicker. Проверка `512/40` дала один missed deadline за минуту и поэтому не используется как product profile.
 
@@ -802,6 +807,13 @@ State и metadata:
 - публикуются retained;
 - при reconnect выполняется полная републикация актуального состояния.
 
+Удаление Fixture, Group или Scene создаёт persistent cleanup intent с их stable ID
+до фиксации конфигурации без этих сущностей. Empty retained tombstone публикуются
+отдельной QoS 1-партией и удаляются из intent только после PUBACK всех сообщений
+партии. Disconnect, частичная отправка или restart процесса сохраняют intent и
+повторяют всю идемпотентную партию. Полная републикация содержит только актуальные
+ID; cleanup не может создавать tombstone для существующей сущности.
+
 ### 9.2. Имена технических controls
 
 Технические topic IDs используют lowercase/snake_case.
@@ -909,17 +921,20 @@ reset
 
 `reset` — stateless pushbutton.
 
-### 11.3. Скрытие из стандартного WB web
+### 11.3. Отображение в стандартном WB web
 
-Fixture MQTT controls предназначены для MQTT-интеграции и собственного web DMXWB, но не должны засорять штатную страницу Wiren Board.
+Fixture создаётся и удаляется в собственном web DMXWB. После сохранения
+конфигурации его MQTT device и live controls должны отображаться в штатном web
+Wiren Board.
 
 Metadata Fixture controls публикуются с:
 
 ```json
-"hidden": true
+"hidden": false
 ```
 
-Acceptance test должен подтвердить, что стандартный WB UI показывает только системное устройство `dmxwb`, а Fixture/Group/Scene остаются доступны через MQTT.
+Acceptance test должен подтвердить, что стандартный WB UI показывает системное
+устройство `dmxwb` и все созданные Fixture/Group/Scene.
 
 ---
 
@@ -956,7 +971,7 @@ reset
 
 Остальные управляющие state группы отражают последнюю команду, отправленную через Group.
 
-Все controls скрыты из штатного WB web через metadata `hidden=true`.
+Все controls отображаются в штатном WB web через metadata `hidden=false`.
 
 ---
 
@@ -990,7 +1005,8 @@ payload = 1
 retain = false
 ```
 
-Controls скрыты из штатного WB web.
+Controls отображаются в штатном WB web. Создание, переименование структуры и
+удаление Scene выполняются в собственном web DMXWB.
 
 ---
 
@@ -1106,17 +1122,38 @@ configuration
 last_error
 ```
 
+Production `/dmxwb/status` является factual state-oriented snapshot. Он описывает
+текущее состояние приложения и подсистем по правилам раздела 20 и не является
+источником lifetime statistics или engineering acceptance counters.
+
+Единственный владелец retained `/dmxwb/status` и штатного WB Status state —
+integrated operational runtime. Controller публикует подтверждения Source,
+config/state и Fixture/Group/Scene, но не синтезирует subsystem status и не
+перезаписывает фактическую ошибку во время command или reconnect paths.
+
 ### 14.6. Scene lifecycle
 
 Команды:
 
 ```text
 /dmxwb/scenes/create
+/dmxwb/scenes/<scene_id>/rename
+/dmxwb/scenes/<scene_id>/apply
 /dmxwb/scenes/<scene_id>/overwrite
 /dmxwb/scenes/<scene_id>/delete
 ```
 
-Все команды `retain=false` и содержат `request_id`.
+Все команды `retain=false` и содержат `request_id`. Каждая команда завершается
+correlated non-retained ответом через `/dmxwb/config/result`, включая `not_found`
+для Apply сцены, которая уже удалена другим клиентом.
+
+Scene Create идемпотентен в пределах bounded durable history из 64 последних
+request ID. Record `request_id + Name + Scene ID + committed revision` записывается
+в согласованный `state.json` до атомарной фиксации соответствующей конфигурации.
+Повтор того же request и Name возвращает тот же успешный result с исходными
+`entity_id` и revision без новой Scene и без продвижения ID counter. Тот же request
+ID с другим Name отклоняется как `idempotency_conflict`. Старейшие записи
+вытесняются только при превышении bounded capacity.
 
 ### 14.7. Live controls
 
@@ -1201,7 +1238,36 @@ Web ограничивает частоту публикации одного co
 
 Web не считает команду выполненной только потому, что MQTT publish прошёл.
 
+Соединение браузера с Mosquitto также не доказывает доступность процесса DMXWB.
+Web подписывается на retained/LWT `/devices/dmxwb/controls/status` и разрешает
+публикацию команд только при одновременно активном MQTT WebSocket и фактическом
+статусе живого daemon. `running` и `error` означают, что daemon доступен: состояние
+`error` не блокирует команды, необходимые для recovery. `off`, неизвестный статус
+и ожидание retained status блокируют команды. При переходе в недоступное состояние
+pending-команды очищаются как неподтверждённые.
+
 После `/on` интерфейс получает подтверждённое состояние через base topic и `/dmxwb/state`.
+
+Config Set и Scene lifecycle считаются завершёнными только после ответа с тем же
+`request_id` либо соответствующего фактического state. Ожидание также снимается при
+потере MQTT и по bounded timeout 5 s, чтобы доступный broker при неработающем daemon
+не блокировал интерфейс навсегда. Поздний или чужой result не снимает ожидание другой
+команды. Потерянные QoS 0 команды после reconnect автоматически не повторяются.
+
+Timeout, daemon `off` или disconnect после Config Set переводят request, исходный
+proposal и его base revision в uncertain state. Web явно запрашивает retained config
+после доступного соединения и разрешает исход по фактическим данным:
+
+- config совпадает с proposal без учёта назначенной сервером revision — операция
+  выполнена, dirty draft очищается;
+- factual revision не изменилась — операция не выполнена, исходный draft доступен
+  для явного retry с той же актуальной base revision;
+- factual revision изменилась и содержимое отличается — draft становится stale,
+  Apply блокируется до отмены и повторного внесения изменений.
+
+Config Set никогда не воспроизводится автоматически. Correlated поздний result
+может завершить тот же сохранённый uncertain request; `revision_conflict` требует
+получения фактического retained config.
 
 ### 15.6. Структурные настройки
 
@@ -1213,13 +1279,32 @@ Live controls применяются сразу.
 
 ```text
 DMX Port
-Fixture Count
+Fixture create/delete and ordered list
 Start Address
 Group membership
 Art-Net Universe
 ```
 
 До Apply web работает с локальным draft.
+
+Каждое числовое поле (`Start Address`, `Art-Net Universe`)
+проверяется при вводе и повторно непосредственно перед публикацией Config Set.
+Пустой, нечисловой или выходящий за допустимый диапазон текст остаётся видимым,
+поле получает явное invalid-состояние, `Применить` блокируется и MQTT command не
+публикуется. Для Fixture дополнительно проверяется физическая граница
+`start_address + count * 4 - 1 <= 300` при `count > 0`.
+
+Допустимое исправленное значение сначала записывается в локальный draft. Перед
+публикацией Web обязан убедиться, что числовые значения proposal совпадают с
+фактически показанными допустимыми значениями. Нельзя молча отправлять прежнее
+значение draft вместо неверного текста, который видит пользователь.
+
+Fixture Count не вводится числом. Web показывает отдельный упорядоченный список и
+действия `Добавить светильник`/`Удалить`. Новый Fixture получает следующий stable
+ID. Удаляется выбранный Fixture, его ID не переиспользуется, а membership этого ID
+удаляется из всех Group. Исторические Scene snapshots не переназначаются другому
+Fixture. При пустой конфигурации список Fixture пуст; Group может выбирать только
+уже существующие Fixture.
 
 ### 15.7. Reconnect браузера
 
@@ -1230,6 +1315,7 @@ Art-Net Universe
 - автоматически переподключаться;
 - после reconnect повторно подписаться;
 - получить retained config/state/status;
+- включить команды только после retained/LWT статуса живого daemon;
 - не переотправлять старые команды.
 
 Reload страницы не должен требоваться.
@@ -1374,9 +1460,16 @@ Diagnostic/source-lock timeout DMXWB:
 3 seconds
 ```
 
+Этот timeout отсчитывается только от последнего принятого ArtDmx, прошедшего
+проверки source identity, Port-Address и Sequence. Duplicate, stale/out-of-order и
+иные отклонённые пакеты не обновляют activity timestamp, не очищают CONFLICT и не
+могут отложить LOST.
+
 Specification рекомендует active-but-unchanged ArtDmx source повторять last packet примерно каждые 800–1000 ms, поэтому 3 s даёт запас для network jitter и одновременно позволяет освобождать stale source lock.
 
-После LOST sequence/sync tracking для освобождённого source сбрасывается; следующий valid source может стать ACTIVE.
+После LOST sequence/sync tracking для освобождённого source сбрасывается; следующий
+valid source, включая перезапущенный контроллер с меньшим Sequence, устанавливает
+новую baseline и может стать ACTIVE.
 
 ### 16.11. Network recovery
 
@@ -1505,8 +1598,21 @@ Art-Net: universe
 Fixtures: ordered records, id, name, count, start_address
 Groups: id, name, member fixture IDs
 Scenes: id, name, fixture snapshots
-ID counters: next_fixture_id, next_group_id, next_scene_id
+Monotonic ID generators: next_fixture_id, next_group_id, next_scene_id
 ```
+
+`next_fixture_id`, `next_group_id` и `next_scene_id` являются persistent
+алгоритмическим состоянием, обеспечивающим запрет повторного использования ID. Они
+не являются production telemetry counters. Config transaction не может уменьшить
+эти счётчики или назначить новому Fixture/Group/Scene ранее выделенный stable ID.
+Историческая Scene snapshot может хранить ID удалённого Fixture, но такой ID не
+переиспользуется и при Scene Apply не воздействует на какой-либо новый Fixture.
+
+Имена Fixture, Group и Scene являются valid UTF-8 строками длиной не более 256
+bytes. Это ограничение одинаково действует для полного config, rename и Scene
+Create. Перед durable commit размер канонически сериализованного `config.json`
+должен быть не больше `kPersistenceMaxFileBytes`; превышение отклоняется без
+изменения активной модели и прежнего файла.
 
 ### 18.3. state.json
 
@@ -1521,9 +1627,21 @@ Fixtures:
     R/G/B/W
     brightness
     temperature
+MQTT retained cleanup:
+    fixture_ids
+    group_ids
+    scene_ids
+Scene Create idempotency history:
+    request_id
+    name
+    scene_id
+    revision
 ```
 
 Art-Net transient buffer не используется для восстановления логической MQTT-модели.
+Пустой `MQTT retained cleanup` является нормальным состоянием. Старый `state.json`
+без этого совместимо добавленного поля читается как пустой cleanup intent.
+Отсутствующая в старом state Scene Create history также читается как пустая.
 
 ### 18.4. Асинхронная запись state
 
@@ -1541,6 +1659,16 @@ dirty = true
 не реже одного раза в 10 s при непрерывных изменениях
 ```
 
+После неуспешной записи state остаётся dirty, но следующая попытка выполняется не
+на каждом runtime tick, а не ранее чем через фиксированную retry-задержку 2 s.
+Новые изменения state не отменяют уже установленную задержку. Forced flush при
+clean shutdown выполняется немедленно и возвращает фактический результат записи.
+
+Persistence health является текущим operational состоянием, а не неизменяемым
+startup result. Ошибка загрузки или записи отражается в `/dmxwb/status`; успешная
+исправляющая запись очищает соответствующую ошибку и возвращает status в `ok` без
+перезапуска процесса.
+
 ### 18.5. Atomic file replace
 
 ```text
@@ -1552,7 +1680,31 @@ dirty = true
 
 Старый корректный файл не уничтожается до успешного завершения нового.
 
-### 18.6. Shutdown
+### 18.6. Config/state transaction
+
+Изменение конфигурации, меняющее Fixture set/order, не разделяется на немедленный
+config commit и обычный debounced state save.
+
+Порядок транзакции:
+
+```text
+1. построить новую config revision и согласованный state по stable Fixture ID
+2. атомарно записать revision-qualified pending state
+3. атомарным rename config.json выполнить единственную commit point
+4. атомарно заменить state.json заранее подготовленным pending state
+```
+
+До шага 3 активна прежняя согласованная пара. Начиная с шага 3 активна новая
+revision, для которой точный state уже durable. Если процесс остановлен между
+шагами 3 и 4, startup выбирает pending state только с revision текущего config и
+завершает его materialization. Pending state другой revision не применяется.
+
+Для совместимости с ранее записанными файлами valid state с несовпадающим Fixture
+set может быть согласован с текущим config по stable Fixture ID: совпадающие records
+сохраняются, удалённые игнорируются, новые получают safe defaults, после чего state
+помечается dirty для записи. Malformed/corrupt state таким способом не нормализуется.
+
+### 18.7. Shutdown
 
 При SIGTERM:
 
@@ -1563,13 +1715,19 @@ dirty = true
 - корректно disconnect MQTT;
 - завершить процесс.
 
-### 18.7. Ошибка state.json
+### 18.8. Ошибка state.json
 
 При corrupt `state.json` config остаётся рабочим, создаются безопасные default Fixture states, ошибка диагностируется, приложение продолжает работу.
 
-### 18.8. Ошибка config.json
+### 18.9. Ошибка config.json
 
 Повреждённый config автоматически не перезаписывается.
+
+Пока используется config fallback, существующий `state.json` не читается для
+reconcile с пустой fallback-моделью, не помечается dirty и не изменяется ни по
+debounce, ни при shutdown flush. После восстановления корректного config прежний
+state снова загружается. Явное сохранение исправленной конфигурации обязано
+согласовать её с существующим valid state, а не с пустым fallback state.
 
 В памяти запускаются defaults:
 
@@ -1581,6 +1739,10 @@ Start Address = 1
 ```
 
 Публикуется Configuration Error; пользователь может сохранить новую корректную конфигурацию.
+
+Production пути config/state должны обозначать разные storage objects. Одинаковый
+literal/normalized path, symlink alias или hard-link alias отклоняется до создания
+runtime и до любой записи persistence.
 
 ---
 
@@ -1619,6 +1781,9 @@ systemd restart применяется только при реальном за
 6. опубликовать `/dmxwb/state`;
 7. опубликовать `/dmxwb/status`.
 
+Шаг 7 выполняется integrated operational runtime после model/metadata republish;
+Controller reconnect batch не содержит собственного status snapshot.
+
 Retained MQTT commands не выполняются.
 
 ---
@@ -1651,6 +1816,65 @@ Configuration
 
 Если Source = WB MQTT и Art-Net LOST, но MQTT и DMX работают: общий Status = running, Art-Net = warning.
 
+### 20.1.1. Production operational diagnostics
+
+Production `dmxwb` публикует только фактический operational snapshot, необходимый
+для локальной эксплуатации и восстановления:
+
+```text
+текущее application state
+текущий выбранный Source
+текущая применённая конфигурация и config revision
+текущее состояние DMX / MQTT / Art-Net
+текущие source identity, protocol sequence и sync state, где применимо
+последняя существенная ошибка
+текущее recovery state
+```
+
+Допускаются значения, вычисляемые из текущего состояния, например возраст
+последнего ArtDmx/ArtSync. Они не образуют историю событий и не требуют хранения
+временного ряда.
+
+Production status не содержит, а production runtime не накапливает cumulative
+lifetime totals, предназначенные только для engineering/test diagnostics, включая:
+
+```text
+frames sent / deadlines missed
+packets or datagrams received
+commands processed / rejected
+publications or republishes
+snapshots published / routed / superseded
+source switches
+connection / disconnection totals
+open / send / publish failure totals
+recovery event totals
+```
+
+Последняя ошибка, текущее состояние ошибки и текущая стадия recovery остаются
+обязательными operational данными; запрет относится к cumulative истории и
+счётчикам событий.
+
+### 20.1.2. Engineering/test instrumentation
+
+Unit, integration, diagnostic и acceptance paths могут собирать детальные
+счётчики, необходимые для доказательства timing, whole-snapshot publication,
+recovery и отсутствия потерь. Эти данные могут выводиться engineering executable,
+test harness или acceptance report, но не входят в production `/dmxwb/status` и не
+создают требования накапливать их в production `dmxwb`.
+
+Алгоритмическое runtime/persistent состояние не классифицируется как telemetry и
+должно сохраняться независимо от production instrumentation policy:
+
+```text
+DmxSnapshot generation/revision
+ArtDmx protocol Sequence и source/sync state
+configuration revision
+next_fixture_id / next_group_id / next_scene_id
+```
+
+Эти значения участвуют в атомарности, ordering, revision conflict protection и
+стабильности ID; они не являются lifetime operational statistics.
+
 ### 20.2. DMX diagnostics
 
 Минимально:
@@ -1661,7 +1885,6 @@ port
 slot_count
 refresh_hz = 44
 physical_slot_limit = 300
-frames_sent
 last_error
 recovery_state
 ```
@@ -1680,10 +1903,15 @@ last_sync_age
 conflicting_source_ip
 conflicting_source_physical
 output_mode = Hold Last / Live
-packets_received
-snapshots_superseded
+last_error
 recovery_state
 ```
+
+`output_mode = Live` допустим только одновременно при выбранном Source ART-NET,
+ACTIVE Art-Net source, успешной маршрутизации актуального snapshot и фактически
+работающем/open физическом DMX output. Пока serial не открыт, находится в ошибке
+или восстанавливается, output mode остаётся `Hold Last`; после реального physical
+recovery он автоматически возвращается в `Live`.
 
 ### 20.4. MQTT diagnostics
 
@@ -1707,6 +1935,10 @@ journalctl -u dmxwb
 Не логируются каждый DMX frame и каждое промежуточное движение slider.
 
 Логируются startup/shutdown, config load/save/reject, serial open/lost/recovered, MQTT connect/lost/recovered, Art-Net source events, Scene apply и fatal errors.
+
+Lifecycle/error/recovery logs создаются по фактическим переходам состояния, а не по
+изменению cumulative counter. Journald остаётся bounded operational журналом и не
+используется как поток frame/packet/command telemetry.
 
 ---
 
@@ -2033,19 +2265,6 @@ ART-NET -> WB MQTT
 
 После `systemctl restart dmxwb` и полного reboot должны сохраняться согласованные config/state данные: порт, Art-Net universe, Source, Fixtures, names, Groups, Scenes, RGBW, Brightness, Temperature и requested_power.
 
-### 24.8. Длительный тест
-
-Не менее 24 часов непрерывной работы с изменением Fixture/Group/Scene, source switching, Art-Net, network loss/recovery и MQTT broker restart.
-
-PASS:
-
-- нет зависания;
-- нет необходимости ручного restart;
-- нет заметного flicker от DMXWB;
-- нет повреждения конфигурации;
-- Art-Net восстанавливается;
-- serial recoverable failure восстанавливается автоматически.
-
 ---
 
 ## 25. Критические инварианты проекта
@@ -2069,7 +2288,7 @@ PASS:
 17. **Удалённые Fixture/Group/Scene ID не переиспользуются.**
 18. **MQTT retained не является базой конфигурации.**
 19. **Все MQTT commands non-retained.**
-20. **В штатном WB web видны только DMXWB Status и Source.**
+20. **В штатном WB web видны DMXWB Status/Source и созданные Fixture/Group/Scene.**
 21. **Собственный web взаимодействует с backend только через MQTT.**
 22. **Некорректная новая конфигурация не ломает текущую рабочую.**
 23. **Recoverable failure подсистемы не требует restart процесса.**
@@ -2094,7 +2313,7 @@ MQTT `red/green/blue/color` для Fixture model равен нулю при OFF.
 
 ### 26.3. Stable IDs и Scene
 
-Fixture ID не переиспользуются после уменьшения/увеличения Count, чтобы старая Scene не применялась к новому устройству случайно.
+Fixture ID не переиспользуются после удаления и последующего создания, чтобы старая Scene не применялась к новому устройству случайно.
 
 ### 26.4. 44 Hz и сокращённый кадр
 
@@ -2102,7 +2321,7 @@ DMXWB physical profile ограничен 300 slots и фиксирован на
 
 ### 26.5. WB web и Fixture MQTT
 
-Fixture/Group/Scene сохраняют MQTT state/command model, но скрыты от стандартного WB HomeUI metadata `hidden=true`.
+Fixture/Group/Scene сохраняют MQTT state/command model и отображаются в стандартном WB HomeUI metadata `hidden=false`. Создание и удаление структуры остаётся в `/dmxwb/`.
 
 ### 26.6. Art-Net reconnect
 

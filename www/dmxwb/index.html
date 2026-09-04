@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>DMXWB</title>
-  <link rel="stylesheet" href="./styles.css?v=011ru1">
+  <link rel="stylesheet" href="./styles.css?v=014a">
 </head>
 <body>
   <div class="app-shell">
@@ -159,25 +159,16 @@
                 </select>
               </label>
               <label>
-                <span>Количество светильников</span>
-                <input
-                  id="setting-fixture-count"
-                  type="number"
-                  min="0"
-                  max="75"
-                  step="1"
-                  value=""
-                  disabled
-                >
-              </label>
-              <label>
                 <span>Начальный адрес</span>
                 <input
                   id="setting-start-address"
-                  type="number"
+                  type="text"
+                  inputmode="numeric"
                   min="1"
                   max="300"
                   step="1"
+                  aria-describedby="settings-result"
+                  aria-invalid="false"
                   value=""
                   disabled
                 >
@@ -186,18 +177,39 @@
                 <span>Вселенная Art-Net</span>
                 <input
                   id="setting-artnet-universe"
-                  type="number"
+                  type="text"
+                  inputmode="numeric"
                   min="0"
                   max="32767"
                   step="1"
+                  aria-describedby="settings-result"
+                  aria-invalid="false"
                   value=""
                   disabled
                 >
               </label>
             </div>
 
-            <div class="settings-group-editor">
-              <div class="settings-group-editor__heading">
+            <div class="settings-entity-editor settings-fixture-editor">
+              <div class="settings-entity-editor__heading">
+                <div>
+                  <h3>Светильники</h3>
+                  <span class="field-note">Сначала создайте светильники, затем добавляйте их в группы.</span>
+                </div>
+                <button
+                  id="settings-add-fixture-button"
+                  class="secondary-button"
+                  type="button"
+                  disabled
+                >Добавить светильник</button>
+              </div>
+              <div id="settings-fixture-list" class="settings-fixture-list">
+                <div class="empty-state"><strong>Нет светильников</strong></div>
+              </div>
+            </div>
+
+            <div class="settings-entity-editor settings-group-editor">
+              <div class="settings-entity-editor__heading">
                 <h3>Группы</h3>
                 <button
                   id="settings-add-group-button"
@@ -236,6 +248,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=011ru1"></script>
+  <script type="module" src="./app.js?v=014a"></script>
 </body>
 </html>

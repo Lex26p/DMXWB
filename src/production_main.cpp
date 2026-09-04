@@ -36,11 +36,10 @@ struct RuntimeLogState final {
     bool dmx_serial_open{false};
     bool dmx_ever_ready{false};
     bool dmx_error_active{false};
-    bool artnet_error_active{false};
+    bool artnet_transport_open{false};
+    bool artnet_ever_ready{false};
     dmxwb::ArtNetSourceState artnet_source_state{dmxwb::ArtNetSourceState::waiting};
-    std::uint64_t dmx_failures{0};
-    std::uint64_t artnet_errors{0};
-    std::uint64_t artnet_transport_recoveries{0};
+    dmxwb::PersistedSource selected_source{dmxwb::PersistedSource::mqtt};
     std::string applied_dmx_port;
     std::uint16_t applied_artnet_universe{0};
 };
@@ -112,19 +111,19 @@ void print_help() {
 void initialize_runtime_log_state(
     dmxwb::IntegratedRuntime& runtime,
     RuntimeLogState& state) {
-    const auto diag = runtime.diagnostics();
+    const auto current = runtime.operational_state();
     state.initialized = true;
-    state.mqtt_connected = diag.mqtt.connected;
-    state.mqtt_ever_connected = diag.mqtt.connected;
-    state.dmx_serial_open = diag.dmx.serial_open;
-    state.dmx_ever_ready = diag.dmx.serial_open;
-    state.artnet_source_state = diag.artnet_source_state;
-    state.dmx_failures = diag.dmx.open_failures + diag.dmx.send_failures;
-    state.artnet_errors =
-        diag.artnet.bind_failures + diag.artnet.receive_errors + diag.artnet.send_errors;
-    state.artnet_transport_recoveries = diag.artnet.transport_recoveries;
-    state.applied_dmx_port = std::string{runtime.applied_dmx_port()};
-    state.applied_artnet_universe = runtime.applied_artnet_port_address();
+    state.mqtt_connected = current.mqtt.connected;
+    state.mqtt_ever_connected = current.mqtt.connected;
+    state.dmx_serial_open = current.dmx.serial_open;
+    state.dmx_ever_ready = current.dmx.serial_open;
+    state.dmx_error_active = !current.dmx.serial_open && !current.dmx.last_error.empty();
+    state.artnet_transport_open = current.artnet.transport_open;
+    state.artnet_ever_ready = current.artnet.transport_open;
+    state.artnet_source_state = current.artnet.source_state;
+    state.selected_source = current.selected_source;
+    state.applied_dmx_port = current.applied_dmx_port;
+    state.applied_artnet_universe = current.applied_artnet_port_address;
 
     if (state.mqtt_connected) {
         std::cout << "dmxwb event=mqtt_connected\n";
@@ -132,10 +131,24 @@ void initialize_runtime_log_state(
     if (state.dmx_serial_open) {
         std::cout << "dmxwb event=dmx_ready port="
                   << std::quoted(state.applied_dmx_port) << '\n';
+    } else if (state.dmx_error_active) {
+        std::cerr << "dmxwb event=dmx_error port="
+                  << std::quoted(state.applied_dmx_port)
+                  << " error=" << std::quoted(current.dmx.last_error) << '\n';
+    }
+    if (state.artnet_transport_open) {
+        std::cout << "dmxwb event=artnet_ready\n";
+    } else {
+        std::cerr << "dmxwb event=artnet_error state=reconnecting\n";
     }
     if (state.artnet_source_state != dmxwb::ArtNetSourceState::waiting) {
-        std::cout << "dmxwb event=artnet_source state="
-                  << artnet_source_state_name(state.artnet_source_state) << '\n';
+        auto& output =
+            state.artnet_source_state == dmxwb::ArtNetSourceState::lost ||
+            state.artnet_source_state == dmxwb::ArtNetSourceState::conflict
+                ? std::cerr
+                : std::cout;
+        output << "dmxwb event=artnet_source state="
+               << artnet_source_state_name(state.artnet_source_state) << '\n';
     }
 }
 
@@ -147,94 +160,86 @@ void log_runtime_events(
         return;
     }
 
-    const auto diag = runtime.diagnostics();
+    const auto current = runtime.operational_state();
 
-    if (diag.mqtt.connected != state.mqtt_connected) {
-        if (diag.mqtt.connected) {
+    if (current.mqtt.connected != state.mqtt_connected) {
+        if (current.mqtt.connected) {
             std::cout << "dmxwb event="
                       << (state.mqtt_ever_connected ? "mqtt_recovered" : "mqtt_connected")
-                      << " connections=" << diag.mqtt.successful_connections << '\n';
+                      << '\n';
             state.mqtt_ever_connected = true;
         } else if (state.mqtt_connected) {
-            std::cerr << "dmxwb event=mqtt_lost disconnects="
-                      << diag.mqtt.disconnects;
-            if (!diag.mqtt.last_error.empty()) {
-                std::cerr << " error=" << std::quoted(diag.mqtt.last_error);
+            std::cerr << "dmxwb event=mqtt_lost";
+            if (!current.mqtt.last_error.empty()) {
+                std::cerr << " error=" << std::quoted(current.mqtt.last_error);
             }
             std::cerr << '\n';
         }
-        state.mqtt_connected = diag.mqtt.connected;
+        state.mqtt_connected = current.mqtt.connected;
     }
 
-    const auto dmx_failures = diag.dmx.open_failures + diag.dmx.send_failures;
-    if (dmx_failures > state.dmx_failures && !state.dmx_error_active) {
-        std::cerr << "dmxwb event=dmx_error open_failures=" << diag.dmx.open_failures
-                  << " send_failures=" << diag.dmx.send_failures;
-        if (!diag.dmx.last_error.empty()) {
-            std::cerr << " error=" << std::quoted(diag.dmx.last_error);
-        }
-        std::cerr << '\n';
-        state.dmx_error_active = true;
-    }
-    state.dmx_failures = dmx_failures;
-
-    if (diag.dmx.serial_open != state.dmx_serial_open) {
-        if (diag.dmx.serial_open) {
+    if (current.dmx.serial_open != state.dmx_serial_open) {
+        if (current.dmx.serial_open) {
             std::cout << "dmxwb event="
                       << (state.dmx_ever_ready ? "dmx_recovered" : "dmx_ready")
-                      << " port=" << std::quoted(std::string{runtime.applied_dmx_port()})
-                      << " recoveries=" << diag.dmx.recoveries << '\n';
+                      << " port=" << std::quoted(current.applied_dmx_port) << '\n';
             state.dmx_ever_ready = true;
             state.dmx_error_active = false;
         } else if (state.dmx_serial_open) {
             std::cerr << "dmxwb event=dmx_lost port="
-                      << std::quoted(std::string{runtime.applied_dmx_port()});
-            if (!diag.dmx.last_error.empty()) {
-                std::cerr << " error=" << std::quoted(diag.dmx.last_error);
+                      << std::quoted(current.applied_dmx_port);
+            if (!current.dmx.last_error.empty()) {
+                std::cerr << " error=" << std::quoted(current.dmx.last_error);
             }
             std::cerr << '\n';
             state.dmx_error_active = true;
         }
-        state.dmx_serial_open = diag.dmx.serial_open;
+        state.dmx_serial_open = current.dmx.serial_open;
+    }
+    if (!current.dmx.serial_open && !current.dmx.last_error.empty() &&
+        !state.dmx_error_active) {
+        std::cerr << "dmxwb event=dmx_error port="
+                  << std::quoted(current.applied_dmx_port)
+                  << " error=" << std::quoted(current.dmx.last_error) << '\n';
+        state.dmx_error_active = true;
     }
 
-    if (diag.artnet_source_state != state.artnet_source_state) {
-        const auto name = artnet_source_state_name(diag.artnet_source_state);
-        if (diag.artnet_source_state == dmxwb::ArtNetSourceState::lost ||
-            diag.artnet_source_state == dmxwb::ArtNetSourceState::conflict) {
+    if (current.artnet.source_state != state.artnet_source_state) {
+        const auto name = artnet_source_state_name(current.artnet.source_state);
+        if (current.artnet.source_state == dmxwb::ArtNetSourceState::lost ||
+            current.artnet.source_state == dmxwb::ArtNetSourceState::conflict) {
             std::cerr << "dmxwb event=artnet_source state=" << name << '\n';
         } else {
             std::cout << "dmxwb event=artnet_source state=" << name << '\n';
         }
-        state.artnet_source_state = diag.artnet_source_state;
+        state.artnet_source_state = current.artnet.source_state;
     }
 
-    const auto artnet_errors =
-        diag.artnet.bind_failures + diag.artnet.receive_errors + diag.artnet.send_errors;
-    if (artnet_errors > state.artnet_errors && !state.artnet_error_active) {
-        std::cerr << "dmxwb event=artnet_error bind_failures=" << diag.artnet.bind_failures
-                  << " receive_errors=" << diag.artnet.receive_errors
-                  << " send_errors=" << diag.artnet.send_errors << '\n';
-        state.artnet_error_active = true;
+    if (current.artnet.transport_open != state.artnet_transport_open) {
+        if (current.artnet.transport_open) {
+            std::cout << "dmxwb event="
+                      << (state.artnet_ever_ready ? "artnet_recovered" : "artnet_ready")
+                      << '\n';
+            state.artnet_ever_ready = true;
+        } else {
+            std::cerr << "dmxwb event=artnet_error state=reconnecting\n";
+        }
+        state.artnet_transport_open = current.artnet.transport_open;
     }
-    state.artnet_errors = artnet_errors;
 
-    if (diag.artnet.transport_recoveries > state.artnet_transport_recoveries) {
-        std::cout << "dmxwb event=artnet_recovered recoveries="
-                  << diag.artnet.transport_recoveries << '\n';
-        state.artnet_error_active = false;
+    if (current.selected_source != state.selected_source) {
+        std::cout << "dmxwb event=source_selected source="
+                  << dmxwb::persisted_source_name(current.selected_source) << '\n';
+        state.selected_source = current.selected_source;
     }
-    state.artnet_transport_recoveries = diag.artnet.transport_recoveries;
 
-    const std::string current_dmx_port{runtime.applied_dmx_port()};
-    const auto current_artnet_universe = runtime.applied_artnet_port_address();
-    if (current_dmx_port != state.applied_dmx_port ||
-        current_artnet_universe != state.applied_artnet_universe) {
+    if (current.applied_dmx_port != state.applied_dmx_port ||
+        current.applied_artnet_port_address != state.applied_artnet_universe) {
         std::cout << "dmxwb event=config_applied dmx_port="
-                  << std::quoted(current_dmx_port)
-                  << " artnet_universe=" << current_artnet_universe << '\n';
-        state.applied_dmx_port = current_dmx_port;
-        state.applied_artnet_universe = current_artnet_universe;
+                  << std::quoted(current.applied_dmx_port)
+                  << " artnet_universe=" << current.applied_artnet_port_address << '\n';
+        state.applied_dmx_port = current.applied_dmx_port;
+        state.applied_artnet_universe = current.applied_artnet_port_address;
     }
 }
 
@@ -247,6 +252,14 @@ int main(int argc, char* argv[]) {
     const auto options = parse_options(argc, argv);
     if (!options.has_value()) {
         print_help();
+        return 2;
+    }
+
+    const auto path_error = dmxwb::validate_persistence_paths(
+        options->config_path,
+        options->state_path);
+    if (path_error) {
+        std::cerr << "Invalid persistence paths: " << path_error.message << '\n';
         return 2;
     }
 
@@ -263,6 +276,8 @@ int main(int argc, char* argv[]) {
         runtime_config.artnet_oem_code.reset();
         runtime_config.artnet_port_name = "DMXWB";
         runtime_config.artnet_long_name = "DMXWB Art-Net input";
+        runtime_config.instrumentation_mode =
+            dmxwb::InstrumentationMode::production;
 
         dmxwb::IntegratedRuntime runtime{std::move(runtime_config)};
         if (!runtime.start()) {

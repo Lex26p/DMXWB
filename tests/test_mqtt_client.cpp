@@ -39,10 +39,35 @@ int main() {
     expect_true(!client.connected(), "MQTT client initially disconnected");
     expect_true(!client.take_full_republish_request(), "no reconnect republish before connection");
 
+    dmxwb::MqttCommandQueue unavailable_broker_queue;
+    dmxwb::MqttClient unavailable_broker_client{unavailable_broker_queue};
+    expect_true(
+        unavailable_broker_client.start("127.0.0.1", 1),
+        "MQTT transport starts while broker endpoint is unavailable");
+    expect_true(
+        unavailable_broker_client.running(),
+        "MQTT transport remains running for in-process connection retry");
+    unavailable_broker_client.stop();
+    expect_true(
+        !unavailable_broker_client.running() && !unavailable_broker_client.connected(),
+        "unavailable-broker retry worker stops cleanly");
+
     const dmxwb::MqttPublication publication{"/test", "value", true};
     expect_true(!client.publish(publication), "publish is rejected while disconnected");
     const auto diagnostics = client.diagnostics();
     expect_true(diagnostics.publish_failures == 1, "disconnected publish is counted");
+
+    dmxwb::MqttCommandQueue production_queue;
+    dmxwb::MqttClient production_client{
+        production_queue,
+        dmxwb::InstrumentationMode::production};
+    expect_true(!production_client.publish(publication),
+        "production MQTT client preserves disconnected publish rejection");
+    const auto production_diagnostics = production_client.diagnostics();
+    expect_true(production_diagnostics.publish_failures == 0 &&
+                    !production_diagnostics.running &&
+                    !production_diagnostics.connected,
+        "production MQTT client retains factual state without engineering counters");
 
     if (failures != 0) {
         std::cerr << failures << " MQTT client smoke test(s) failed\n";

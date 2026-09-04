@@ -1,0 +1,34 @@
+=== DMXWB DEV-012B5 FOCUSED CORRECTIVE REGRESSION ACCEPTANCE ===
+generated_utc: 2026-09-03T09:29:15Z
+artifact_sha256: 6dbff5ea94399075392a427f9bbf089a76ed1474900b3d5f44ece3925f27391d
+target: root@10.200.200.1
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+artnet_port_address: 0
+fixed_refresh_hz: 44
+local_static_contract: covered_by_prior_host_regression
+target_identity: RELEASE_NAME=wb-2606SUITE=stableTARGET=wb8/bullseyeREPO_PREFIX=
+no_running_dmxwb_process: PASS
+original_retained_topics_captured: PASS
+production_binary_installed_sha256: PASS (6dbff5ea94399075392a427f9bbf089a76ed1474900b3d5f44ece3925f27391d)
+current_static_web_installed_sha256: PASS
+systemctl_start_while_mqtt_offline: PASS (pid=73662)
+retained_cleanup_disconnect_restart_delivery: PASS (73662 -> 74235)
+mqtt_recovery_physical_red_user: PASS
+scene_create_idempotency_process_restart: PASS (74235 -> 75648, scene=902, revision=2)
+artnet_sequence_128_blue_user: PASS
+artnet_restarted_sequence_new_baseline_user: PASS
+artnet_rejected_traffic_lost_recovery: PASS
+corrupt_config_preserves_state_bytes_and_recovers: PASS (31b963fed9344d75ef6c994075284ba01d7e08fc394a99374dac558ea1cb0727)
+web_running_commands_available_user: PASS
+web_clean_stop_commands_blocked_user: PASS
+web_start_commands_restored_user: PASS
+web_crash_recovery_commands_restored_user: PASS
+web_daemon_lwt_stop_crash_restart: PASS (78676 -> 79351)
+final_power_off_user: PASS
+final_clean_service_stop: PASS
+final_state_flush: PASS
+final_serial_port_release: PASS
+original_environment_restored: PASS
+dev012b5_result: PASS
+=== DMXWB DEV-012B5 FOCUSED CORRECTIVE REGRESSION PASS ===

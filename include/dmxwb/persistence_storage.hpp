@@ -49,7 +49,17 @@ struct LoadedPersistenceFiles final {
     AppState state;
     PersistenceFileError config_error;
     PersistenceFileError state_error;
+    bool state_reconciled{false};
+    bool state_writes_allowed{true};
+    std::optional<std::uint64_t> pending_state_revision;
 };
+
+// Config and state must never name the same storage object. The check covers
+// lexical aliases, symlinks and hard links before any persistence file is read
+// for recovery or opened for writing.
+[[nodiscard]] PersistenceFileError validate_persistence_paths(
+    std::string_view config_path,
+    std::string_view state_path);
 
 [[nodiscard]] PersistenceFileResult<std::string> read_persistence_text_file(
     std::string_view path,
@@ -79,6 +89,20 @@ struct LoadedPersistenceFiles final {
     const AppState& state,
     const AppConfig& config);
 
+// A configuration transaction stages its exact matching state before the config
+// rename commit point. The revision-qualified pending file is ignored while the
+// old config is active and becomes authoritative if the new config is committed.
+[[nodiscard]] PersistenceFileError prepare_config_state_file(
+    std::string_view state_path,
+    const AppState& state,
+    const AppConfig& committed_config);
+[[nodiscard]] PersistenceFileError finalize_config_state_file(
+    std::string_view state_path,
+    std::uint64_t committed_revision);
+[[nodiscard]] PersistenceFileError discard_config_state_file(
+    std::string_view state_path,
+    std::uint64_t revision);
+
 enum class StateSaveAction {
     not_dirty,
     not_due,
@@ -102,6 +126,7 @@ public:
 
     static constexpr auto kDebounceDelay = std::chrono::seconds{2};
     static constexpr auto kMaxDirtyInterval = std::chrono::seconds{10};
+    static constexpr auto kRetryDelay = std::chrono::seconds{2};
 
     explicit StatePersistenceManager(std::string state_path);
 
@@ -111,6 +136,7 @@ public:
     [[nodiscard]] bool save_due(time_point now) const noexcept;
     [[nodiscard]] std::optional<time_point> next_deadline() const noexcept;
     [[nodiscard]] std::string_view state_path() const noexcept;
+    void defer_after_failure(time_point now) noexcept;
 
     [[nodiscard]] StateSaveResult save_if_due(
         const AppState& state,
@@ -128,6 +154,7 @@ private:
     bool dirty_{false};
     time_point first_dirty_at_{};
     time_point last_change_at_{};
+    std::optional<time_point> retry_not_before_;
 };
 
 }  // namespace dmxwb

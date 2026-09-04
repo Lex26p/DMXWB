@@ -1,0 +1,23 @@
+=== DMXWB DEV-013C INTEGRATED ART-NET/SOURCE/WEB/RECOVERY ACCEPTANCE ===
+generated_utc: 2026-09-03T14:18:50Z
+target: root@10.200.200.1
+bundle_sha256: f94fe7a4504310c524197854528d9aca2c43814d78657390f702f40a26a688bd
+source_id: dev013a-final
+artifact_sha256: 6dbff5ea94399075392a427f9bbf089a76ed1474900b3d5f44ece3925f27391d
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 21
+artnet_port_address: 0
+DMXWB fresh installation completed.
+config_path=/etc/dmxwb/config.json
+state_path=/var/lib/dmxwb/state.json
+service=enabled_and_started
+final_bundle_runtime_ready: PASS (pid=169659)
+artnet_nondefault_mapping_short_hold_long_update: PASS
+explicit_source_background_latest_snapshot_no_mixing: PASS
+artnet_hold_last_restarted_sequence_same_process: PASS (pid=169659)
+mqtt_web_reconnect_same_process_physical_continuity: PASS (pid=169659)
+web_factual_stop_start_command_restore: PASS (pid=174365)
+final_power_off_clean_stop_port_release: PASS
+original_environment_restored: PASS
+dev013c_result: PASS
+=== DMXWB DEV-013C INTEGRATED ART-NET/SOURCE/WEB/RECOVERY ACCEPTANCE PASS ===

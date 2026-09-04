@@ -5,6 +5,7 @@
 #include "dmxwb/artnet_source_coordinator.hpp"
 #include "dmxwb/dmx_output.hpp"
 #include "dmxwb/dmx_source_router.hpp"
+#include "dmxwb/instrumentation.hpp"
 #include "dmxwb/mqtt_client.hpp"
 #include "dmxwb/mqtt_runtime.hpp"
 #include "dmxwb/persistence_runtime.hpp"
@@ -30,6 +31,7 @@ struct IntegratedRuntimeConfig final {
     std::string artnet_port_name{"DMXWB"};
     std::string artnet_long_name{"DMXWB Art-Net output"};
     std::uint16_t firmware_version{0x0100};
+    InstrumentationMode instrumentation_mode{InstrumentationMode::production};
 };
 
 struct IntegratedRuntimeStatus final {
@@ -68,6 +70,38 @@ struct IntegratedRuntimeDiagnostics final {
     bool artnet_transport_open_after_shutdown{false};
 };
 
+struct IntegratedRuntimeOperationalState final {
+    bool started{false};
+    PersistedSource selected_source{PersistedSource::mqtt};
+    bool has_mqtt_snapshot{false};
+    bool has_artnet_snapshot{false};
+    bool artnet_output_active{false};
+    bool dmx_output_ever_started{false};
+
+    DmxOutputOperationalState dmx;
+    MqttClientOperationalState mqtt;
+    ArtNetRuntimeOperationalState artnet;
+
+    bool configuration_ok{false};
+    bool configuration_fallback{false};
+    std::uint64_t configuration_revision{0};
+    std::string applied_dmx_port;
+    std::uint16_t applied_artnet_port_address{0};
+    std::string config_path;
+    std::string state_path;
+    std::string persistence_last_error;
+    std::string runtime_last_error;
+};
+
+struct OperationalStatusPayload final {
+    MqttApplicationStatus application{MqttApplicationStatus::running};
+    std::string json;
+};
+
+[[nodiscard]] OperationalStatusPayload build_operational_status_payload(
+    const IntegratedRuntimeOperationalState& state,
+    bool stopping);
+
 class IntegratedRuntime final {
 public:
     explicit IntegratedRuntime(IntegratedRuntimeConfig config);
@@ -94,8 +128,10 @@ public:
     [[nodiscard]] std::size_t fixture_count() const noexcept;
     [[nodiscard]] PersistedSource initial_source() const noexcept;
     [[nodiscard]] bool startup_artnet_output_deferred() const noexcept;
+    [[nodiscard]] InstrumentationMode instrumentation_mode() const noexcept;
 
     [[nodiscard]] IntegratedRuntimeStatus status() const;
+    [[nodiscard]] IntegratedRuntimeOperationalState operational_state() const;
     [[nodiscard]] IntegratedRuntimeDiagnostics diagnostics() const;
 
 private:

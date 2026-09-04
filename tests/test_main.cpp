@@ -570,6 +570,45 @@ void test_missed_deadline_is_counted_and_grid_recovers() {
     loop.shutdown();
 }
 
+void test_production_dmx_output_keeps_factual_state_without_counters() {
+    FakeMonotonicClock clock;
+    FakeDmxTransport transport{clock};
+    dmxwb::DmxOutputMailbox mailbox;
+    const auto snapshot = make_filled_snapshot(4, 91, 700);
+    expect_true(snapshot != nullptr, "production-mode DMX snapshot created");
+    if (!snapshot) {
+        return;
+    }
+    expect_true(mailbox.publish(*snapshot), "production-mode DMX snapshot published");
+
+    dmxwb::DmxOutputLoop loop{
+        transport,
+        mailbox,
+        clock,
+        std::chrono::milliseconds{250},
+        dmxwb::InstrumentationMode::production};
+    const auto step = loop.step();
+    expect_true(step.kind == dmxwb::DmxOutputStepKind::frame_sent,
+        "production mode still sends the physical DMX frame");
+    expect_true(transport.open_calls() == 1 && transport.generations().size() == 1,
+        "production mode still opens transport and sends exactly one frame");
+
+    const auto diagnostics = loop.diagnostics();
+    expect_true(diagnostics.frames_sent == 0 &&
+                    diagnostics.open_attempts == 0 &&
+                    diagnostics.reopen_attempts == 0 &&
+                    diagnostics.open_failures == 0 &&
+                    diagnostics.send_failures == 0 &&
+                    diagnostics.recoveries == 0 &&
+                    diagnostics.missed_deadlines == 0 &&
+                    diagnostics.max_send_duration.count() == 0 &&
+                    diagnostics.max_transport_overhead.count() == 0,
+        "production DMX hot path does not accumulate engineering counters");
+    expect_true(diagnostics.active_generation == 700 && diagnostics.serial_open,
+        "production DMX diagnostics retain current factual state");
+    loop.shutdown();
+}
+
 
 void test_fixture_initial_state_and_identity() {
     dmxwb::FixtureCollection fixtures;
@@ -805,7 +844,7 @@ void test_fixture_whole_snapshot_rebuild() {
 
 int main() {
     expect_equal(dmxwb::application_name(), "dmxwb", "application name");
-    expect_equal(dmxwb::application_version(), "0.1.0", "application version");
+    expect_equal(dmxwb::application_version(), "0.1.1", "application version");
 
     test_channel_boundaries();
     test_slot_count_helpers();
@@ -820,6 +859,7 @@ int main() {
     test_snapshot_switch_only_between_frames();
     test_serial_failure_reopen_recovery();
     test_missed_deadline_is_counted_and_grid_recovers();
+    test_production_dmx_output_keeps_factual_state_without_counters();
 
     test_fixture_initial_state_and_identity();
     test_fixture_rgb_color_temperature_semantics();

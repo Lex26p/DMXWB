@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmxwb/artnet_core.hpp"
+#include "dmxwb/instrumentation.hpp"
 
 #include <array>
 #include <atomic>
@@ -83,6 +84,20 @@ struct ArtNetRuntimeDiagnostics final {
     std::uint64_t delay_values_clamped{0};
 };
 
+struct ArtNetRuntimeOperationalState final {
+    bool transport_open{false};
+    bool artnet_output_active{false};
+    bool has_committed_dmx{false};
+    ArtNetSourceState source_state{ArtNetSourceState::waiting};
+    ArtNetSyncMode sync_mode{ArtNetSyncMode::asynchronous};
+    std::optional<ArtNetSource> active_source;
+    std::optional<ArtNetSource> conflicting_source;
+    std::optional<std::uint8_t> last_sequence;
+    std::optional<std::chrono::milliseconds> last_packet_age;
+    std::optional<std::chrono::milliseconds> last_sync_age;
+    std::uint64_t committed_revision{0};
+};
+
 class ArtNetRuntime final {
 public:
     using time_point = ArtNetCore::time_point;
@@ -90,7 +105,8 @@ public:
     [[nodiscard]] static std::unique_ptr<ArtNetRuntime> create(
         ArtNetRuntimeConfig config,
         IArtNetDatagramTransport& transport,
-        IArtNetPollReplyDelaySource& delay_source) noexcept;
+        IArtNetPollReplyDelaySource& delay_source,
+        InstrumentationMode instrumentation_mode = InstrumentationMode::engineering) noexcept;
 
     ~ArtNetRuntime();
 
@@ -106,7 +122,9 @@ public:
     [[nodiscard]] std::shared_ptr<const DmxSnapshot> latest_physical_snapshot() const noexcept;
     [[nodiscard]] const ArtNetCore& core() const noexcept;
     [[nodiscard]] const ArtNetRuntimeDiagnostics& diagnostics() const noexcept;
+    [[nodiscard]] ArtNetRuntimeOperationalState operational_state(time_point now) const noexcept;
     [[nodiscard]] std::size_t pending_poll_replies() const noexcept;
+    [[nodiscard]] InstrumentationMode instrumentation_mode() const noexcept;
 
 private:
     struct PendingPollReply final {
@@ -119,7 +137,8 @@ private:
         ArtNetRuntimeConfig config,
         ArtNetCore core,
         IArtNetDatagramTransport& transport,
-        IArtNetPollReplyDelaySource& delay_source) noexcept;
+        IArtNetPollReplyDelaySource& delay_source,
+        InstrumentationMode instrumentation_mode) noexcept;
 
     void try_bind(time_point now) noexcept;
     void process_received_datagrams(time_point now) noexcept;
@@ -137,6 +156,9 @@ private:
     void send_due_poll_replies(time_point now) noexcept;
     void handle_transport_failure(time_point now, bool receive_failure) noexcept;
     void clear_pending_poll_replies() noexcept;
+    void increment_engineering_counter(
+        std::uint64_t& counter,
+        std::uint64_t increment = 1) noexcept;
 
     [[nodiscard]] std::chrono::milliseconds next_poll_reply_delay() noexcept;
 
@@ -144,6 +166,7 @@ private:
     ArtNetCore core_;
     IArtNetDatagramTransport& transport_;
     IArtNetPollReplyDelaySource& delay_source_;
+    InstrumentationMode instrumentation_mode_{InstrumentationMode::engineering};
     ArtNetRuntimeDiagnostics diagnostics_{};
     std::array<std::uint8_t, kArtNetRuntimeReceiveBufferSize> receive_buffer_{};
     std::deque<PendingPollReply> pending_poll_replies_;

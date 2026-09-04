@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 
-project(DMXWB VERSION 0.1.0 LANGUAGES CXX)
+project(DMXWB VERSION 0.1.1 LANGUAGES CXX)
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR
@@ -47,6 +47,7 @@ add_library(dmxwb_core STATIC
     src/artnet_source_coordinator.cpp
     src/artnet_transport_linux.cpp
     src/dmx_output.cpp
+    src/dmx_output_physical_sink.cpp
     src/dmx_source_router.cpp
     src/fixture.cpp
     src/group_scene.cpp
@@ -200,6 +201,15 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_dmx_source_router_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_dmx_source_router_tests)
 
+    add_executable(dmxwb_dmx_output_physical_sink_tests
+        tests/test_dmx_output_physical_sink.cpp
+    )
+
+    target_link_libraries(dmxwb_dmx_output_physical_sink_tests PRIVATE dmxwb_core)
+    target_compile_features(dmxwb_dmx_output_physical_sink_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_dmx_output_physical_sink_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_dmx_output_physical_sink_tests)
+
     add_executable(dmxwb_artnet_core_tests
         tests/test_artnet_core.cpp
     )
@@ -290,12 +300,22 @@ if(BUILD_TESTING)
     dmxwb_enable_warnings(dmxwb_mqtt_runtime_tests)
     dmxwb_enable_portable_gnu_runtime(dmxwb_mqtt_runtime_tests)
 
+    add_executable(dmxwb_operational_status_tests
+        tests/test_operational_status.cpp
+    )
+
+    target_link_libraries(dmxwb_operational_status_tests PRIVATE dmxwb_mqtt_transport)
+    target_compile_features(dmxwb_operational_status_tests PRIVATE cxx_std_20)
+    dmxwb_enable_warnings(dmxwb_operational_status_tests)
+    dmxwb_enable_portable_gnu_runtime(dmxwb_operational_status_tests)
+
     add_test(NAME dmxwb.unit COMMAND dmxwb_tests)
     add_test(NAME dmxwb.persistence COMMAND dmxwb_persistence_tests)
     add_test(NAME dmxwb.persistence_storage COMMAND dmxwb_persistence_storage_tests)
     add_test(NAME dmxwb.persistence_runtime COMMAND dmxwb_persistence_runtime_tests)
     add_test(NAME dmxwb.group_scene COMMAND dmxwb_group_scene_tests)
     add_test(NAME dmxwb.dmx_source_router COMMAND dmxwb_dmx_source_router_tests)
+    add_test(NAME dmxwb.dmx_output_physical_sink COMMAND dmxwb_dmx_output_physical_sink_tests)
     add_test(NAME dmxwb.artnet_core COMMAND dmxwb_artnet_core_tests)
     add_test(NAME dmxwb.artnet_runtime COMMAND dmxwb_artnet_runtime_tests)
     add_test(NAME dmxwb.artnet_source_coordinator COMMAND dmxwb_artnet_source_coordinator_tests)
@@ -306,4 +326,5 @@ if(BUILD_TESTING)
     add_test(NAME dmxwb.mqtt_group_scene COMMAND dmxwb_mqtt_group_scene_tests)
     add_test(NAME dmxwb.mqtt_client COMMAND dmxwb_mqtt_client_tests)
     add_test(NAME dmxwb.mqtt_runtime COMMAND dmxwb_mqtt_runtime_tests)
+    add_test(NAME dmxwb.operational_status COMMAND dmxwb_operational_status_tests)
 endif()

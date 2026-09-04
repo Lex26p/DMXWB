@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -85,6 +86,16 @@ namespace {
     std::string temp{path};
     temp += ".tmp";
     return temp;
+}
+
+[[nodiscard]] std::string make_config_state_path(
+    std::string_view state_path,
+    std::uint64_t revision) {
+    std::string path{state_path};
+    path += ".config-";
+    path += std::to_string(revision);
+    path += ".pending";
+    return path;
 }
 
 void remove_temp_file(std::string_view path) noexcept {
@@ -263,10 +274,65 @@ PersistenceFileResult<AppState> load_state_file(
     return {std::move(parsed.value), {}};
 }
 
+PersistenceFileError validate_persistence_paths(
+    std::string_view config_path,
+    std::string_view state_path) {
+    if (config_path.empty() || state_path.empty()) {
+        return make_file_error(
+            PersistenceFileErrorCode::validation,
+            "config and state paths must not be empty");
+    }
+
+    std::error_code config_error;
+    std::error_code state_error;
+    const auto normalized_config = std::filesystem::absolute(
+        std::filesystem::path{std::string{config_path}}, config_error).lexically_normal();
+    const auto normalized_state = std::filesystem::absolute(
+        std::filesystem::path{std::string{state_path}}, state_error).lexically_normal();
+    if (!config_error && !state_error && normalized_config == normalized_state) {
+        return make_file_error(
+            PersistenceFileErrorCode::validation,
+            "config and state paths must refer to different files");
+    }
+
+    config_error.clear();
+    state_error.clear();
+    const auto canonical_config = std::filesystem::weakly_canonical(
+        std::filesystem::path{std::string{config_path}}, config_error);
+    const auto canonical_state = std::filesystem::weakly_canonical(
+        std::filesystem::path{std::string{state_path}}, state_error);
+    if (!config_error && !state_error && canonical_config == canonical_state) {
+        return make_file_error(
+            PersistenceFileErrorCode::validation,
+            "config and state paths must not alias the same file");
+    }
+
+    struct stat config_stat {};
+    struct stat state_stat {};
+    if (::stat(std::string{config_path}.c_str(), &config_stat) == 0 &&
+        ::stat(std::string{state_path}.c_str(), &state_stat) == 0 &&
+        config_stat.st_dev == state_stat.st_dev &&
+        config_stat.st_ino == state_stat.st_ino) {
+        return make_file_error(
+            PersistenceFileErrorCode::validation,
+            "config and state paths must not be hard-link aliases");
+    }
+    return {};
+}
+
 LoadedPersistenceFiles load_persistence_files(
     std::string_view config_path,
     std::string_view state_path) {
     LoadedPersistenceFiles loaded;
+
+    const auto path_error = validate_persistence_paths(config_path, state_path);
+    if (path_error) {
+        loaded.config = make_default_config();
+        loaded.state = make_default_state(loaded.config);
+        loaded.config_error = path_error;
+        loaded.state_writes_allowed = false;
+        return loaded;
+    }
 
     auto config_result = load_config_file(config_path);
     if (config_result.ok()) {
@@ -274,16 +340,63 @@ LoadedPersistenceFiles load_persistence_files(
     } else {
         loaded.config = make_default_config();
         loaded.config_error = std::move(config_result.error);
-    }
-
-    auto state_result = load_state_file(state_path, loaded.config);
-    if (state_result.ok()) {
-        loaded.state = std::move(*state_result.value);
-    } else {
         loaded.state = make_default_state(loaded.config);
-        loaded.state_error = std::move(state_result.error);
+        loaded.state_writes_allowed = false;
+        return loaded;
     }
 
+    const auto pending_path = make_config_state_path(state_path, loaded.config.revision);
+    auto pending_state = load_state_file(pending_path, loaded.config);
+    if (pending_state.ok()) {
+        loaded.state = std::move(*pending_state.value);
+        const auto finalize_error = finalize_config_state_file(
+            state_path,
+            loaded.config.revision);
+        if (finalize_error) {
+            loaded.state_reconciled = true;
+            loaded.pending_state_revision = loaded.config.revision;
+        }
+        return loaded;
+    }
+    if (pending_state.error.code != PersistenceFileErrorCode::not_found) {
+        loaded.state_error = std::move(pending_state.error);
+    }
+
+    auto state_file = read_persistence_text_file(state_path);
+    if (!state_file.ok()) {
+        loaded.state = make_default_state(loaded.config);
+        if (!loaded.state_error) {
+            loaded.state_error = std::move(state_file.error);
+        }
+        return loaded;
+    }
+
+    auto parsed_state = parse_state_json(*state_file.value);
+    if (!parsed_state.ok()) {
+        loaded.state = make_default_state(loaded.config);
+        if (!loaded.state_error) {
+            loaded.state_error = map_model_error(parsed_state.error);
+        }
+        return loaded;
+    }
+
+    const auto exact_state_error = validate_state(*parsed_state.value, loaded.config);
+    if (!exact_state_error) {
+        loaded.state = std::move(*parsed_state.value);
+        return loaded;
+    }
+
+    auto reconciled = reconcile_state_for_config(*parsed_state.value, loaded.config);
+    if (reconciled.ok()) {
+        loaded.state = std::move(*reconciled.value);
+        loaded.state_reconciled = true;
+        return loaded;
+    }
+
+    loaded.state = make_default_state(loaded.config);
+    if (!loaded.state_error) {
+        loaded.state_error = map_model_error(reconciled.error);
+    }
     return loaded;
 }
 
@@ -315,7 +428,14 @@ PersistenceFileResult<AppConfig> commit_config_file_atomic(
         return {{}, map_model_error(committed_error)};
     }
 
-    const auto write_error = write_persistence_text_file_atomic(path, serialize_config_json(committed));
+    const auto serialized = serialize_config_json(committed);
+    if (serialized.size() > kPersistenceMaxFileBytes) {
+        return {{}, make_file_error(
+            PersistenceFileErrorCode::too_large,
+            "canonical configuration exceeds persistence file size limit")};
+    }
+
+    const auto write_error = write_persistence_text_file_atomic(path, serialized);
     if (write_error) {
         return {{}, write_error};
     }
@@ -332,6 +452,48 @@ PersistenceFileError save_state_file_atomic(
         return map_model_error(validation);
     }
     return write_persistence_text_file_atomic(path, serialize_state_json(state));
+}
+
+PersistenceFileError prepare_config_state_file(
+    std::string_view state_path,
+    const AppState& state,
+    const AppConfig& committed_config) {
+    const auto validation = validate_state(state, committed_config);
+    if (validation) {
+        return map_model_error(validation);
+    }
+    return write_persistence_text_file_atomic(
+        make_config_state_path(state_path, committed_config.revision),
+        serialize_state_json(state));
+}
+
+PersistenceFileError finalize_config_state_file(
+    std::string_view state_path,
+    std::uint64_t committed_revision) {
+    const auto pending_path = make_config_state_path(state_path, committed_revision);
+    const std::string target_path{state_path};
+    if (::rename(pending_path.c_str(), target_path.c_str()) != 0) {
+        const int error_number = errno;
+        return make_file_error(
+            error_number == ENOENT
+                ? PersistenceFileErrorCode::not_found
+                : PersistenceFileErrorCode::io,
+            errno_message("finalize prepared state", pending_path, error_number));
+    }
+    return {};
+}
+
+PersistenceFileError discard_config_state_file(
+    std::string_view state_path,
+    std::uint64_t revision) {
+    const auto pending_path = make_config_state_path(state_path, revision);
+    if (::unlink(pending_path.c_str()) != 0 && errno != ENOENT) {
+        const int error_number = errno;
+        return make_file_error(
+            PersistenceFileErrorCode::io,
+            errno_message("discard prepared state", pending_path, error_number));
+    }
+    return {};
 }
 
 StatePersistenceManager::StatePersistenceManager(std::string state_path)
@@ -358,11 +520,21 @@ std::optional<StatePersistenceManager::time_point> StatePersistenceManager::next
     if (!dirty_) {
         return std::nullopt;
     }
-    return std::min(last_change_at_ + kDebounceDelay, first_dirty_at_ + kMaxDirtyInterval);
+    auto deadline = std::min(last_change_at_ + kDebounceDelay, first_dirty_at_ + kMaxDirtyInterval);
+    if (retry_not_before_.has_value()) {
+        deadline = std::max(deadline, *retry_not_before_);
+    }
+    return deadline;
 }
 
 std::string_view StatePersistenceManager::state_path() const noexcept {
     return state_path_;
+}
+
+void StatePersistenceManager::defer_after_failure(time_point now) noexcept {
+    if (dirty_) {
+        retry_not_before_ = now + kRetryDelay;
+    }
 }
 
 StateSaveResult StatePersistenceManager::save_if_due(
@@ -378,6 +550,7 @@ StateSaveResult StatePersistenceManager::save_if_due(
 
     auto error = save_state_file_atomic(state_path_, state, config);
     if (error) {
+        defer_after_failure(now);
         return {StateSaveAction::failed, std::move(error)};
     }
     mark_saved();
@@ -403,6 +576,7 @@ void StatePersistenceManager::mark_saved() noexcept {
     dirty_ = false;
     first_dirty_at_ = {};
     last_change_at_ = {};
+    retry_not_before_.reset();
 }
 
 }  // namespace dmxwb

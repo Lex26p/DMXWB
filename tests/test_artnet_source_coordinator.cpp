@@ -175,6 +175,21 @@ public:
     std::vector<dmxwb::DmxSnapshot> snapshots_;
 };
 
+class FailOncePhysical final {
+public:
+    [[nodiscard]] bool publish(const dmxwb::DmxSnapshot& snapshot) {
+        ++attempts_;
+        if (attempts_ == 1) {
+            return false;
+        }
+        snapshots_.push_back(snapshot);
+        return true;
+    }
+
+    std::uint64_t attempts_{0};
+    std::vector<dmxwb::DmxSnapshot> snapshots_;
+};
+
 [[nodiscard]] dmxwb::ArtNetRuntimeConfig make_config() {
     dmxwb::ArtNetRuntimeConfig config;
     config.core.port_address = 0;
@@ -359,12 +374,107 @@ void test_sync_and_lost_hold_last() {
         "LOST does not automatically switch Source away from ART-NET");
 }
 
+void test_failed_generation_retries_at_bounded_interval() {
+    FakeTransport transport;
+    ZeroDelay delay;
+    auto runtime = dmxwb::ArtNetRuntime::create(make_config(), transport, delay);
+    if (!runtime) {
+        expect_true(false, "runtime created for bounded route retry test");
+        return;
+    }
+
+    FailOncePhysical physical;
+    dmxwb::DmxSourceRouter router{
+        dmxwb::PersistedSource::artnet,
+        [&physical](const dmxwb::DmxSnapshot& snapshot) {
+            return physical.publish(snapshot);
+        }};
+    dmxwb::ArtNetSourceCoordinator coordinator{*runtime, router};
+
+    const auto start = dmxwb::ArtNetRuntime::time_point{};
+    const std::array<std::uint8_t, 2> values{{71, 72}};
+    transport.queue(make_dmx(0, 1, values));
+    coordinator.step(start);
+
+    expect_true(physical.attempts_ == 1 && physical.snapshots_.empty(),
+        "first physical publication failure leaves Art-Net generation pending");
+    expect_true(coordinator.diagnostics().snapshots_observed == 1 &&
+                    coordinator.diagnostics().snapshots_routed == 0 &&
+                    coordinator.diagnostics().route_failures == 1,
+        "failed generation is observed once and not reported as routed");
+
+    coordinator.step(
+        start + dmxwb::ArtNetSourceCoordinator::kRouteRetryInterval -
+            std::chrono::milliseconds{1});
+    expect_true(physical.attempts_ == 1,
+        "pending generation is not retried before the bounded interval");
+
+    coordinator.step(start + dmxwb::ArtNetSourceCoordinator::kRouteRetryInterval);
+    expect_true(physical.attempts_ == 2 && physical.snapshots_.size() == 1 &&
+                    physical.snapshots_.front().channel(1) ==
+                        std::optional<std::uint8_t>{71},
+        "same Art-Net generation retries successfully without a new ArtDmx");
+    expect_true(coordinator.diagnostics().snapshots_observed == 1 &&
+                    coordinator.diagnostics().snapshots_routed == 1 &&
+                    coordinator.diagnostics().route_failures == 1,
+        "successful retry completes the one pending generation");
+
+    coordinator.step(
+        start + dmxwb::ArtNetSourceCoordinator::kRouteRetryInterval * 2);
+    expect_true(physical.attempts_ == 2,
+        "successfully routed generation is not published again");
+}
+
+void test_production_coordinator_routes_without_counters() {
+    FakeTransport transport;
+    ZeroDelay delay;
+    auto runtime = dmxwb::ArtNetRuntime::create(
+        make_config(),
+        transport,
+        delay,
+        dmxwb::InstrumentationMode::production);
+    if (!runtime) {
+        expect_true(false, "runtime created for production coordinator test");
+        return;
+    }
+
+    RecordingPhysical physical;
+    dmxwb::DmxSourceRouter router{
+        dmxwb::PersistedSource::artnet,
+        [&physical](const dmxwb::DmxSnapshot& snapshot) {
+            return physical.publish(snapshot);
+        },
+        dmxwb::InstrumentationMode::production};
+    dmxwb::ArtNetSourceCoordinator coordinator{
+        *runtime,
+        router,
+        dmxwb::InstrumentationMode::production};
+
+    const std::array<std::uint8_t, 2> values{{61, 62}};
+    transport.queue(make_dmx(0, 1, values));
+    coordinator.step(dmxwb::ArtNetRuntime::time_point{});
+
+    expect_true(physical.snapshots_.size() == 1 &&
+                    physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{61},
+        "production coordinator still routes the latest whole Art-Net snapshot");
+    const auto& diagnostics = coordinator.diagnostics();
+    expect_true(diagnostics.steps == 0 &&
+                    diagnostics.snapshots_observed == 0 &&
+                    diagnostics.snapshots_routed == 0 &&
+                    diagnostics.route_failures == 0,
+        "production coordinator does not accumulate engineering counters");
+    expect_true(diagnostics.last_artnet_generation != 0 && diagnostics.artnet_output_active,
+        "production coordinator retains factual output and generation state");
+}
+
 }  // namespace
 
 int main() {
     test_background_routing_source_switch_and_good_output();
     test_no_first_artdmx_preserves_physical_and_no_fifo();
     test_sync_and_lost_hold_last();
+    test_failed_generation_retries_at_bounded_interval();
+    test_production_coordinator_routes_without_counters();
 
     if (failures != 0) {
         std::cerr << failures << " DEV-010B2 Art-Net source coordinator test(s) failed\n";

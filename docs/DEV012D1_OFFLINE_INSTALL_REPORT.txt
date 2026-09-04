@@ -1,0 +1,25 @@
+=== DMXWB DEV-012D1 CLEAN OFFLINE INSTALL ACCEPTANCE ===
+generated_utc: 2026-09-03T10:21:28Z
+target: root@10.200.200.1
+bundle: /mnt/c/Projects/DMXWB/artifacts/offline/dmxwb-0.1.0-wb8-bullseye-arm64.tar.gz
+bundle_sha256: fff9a77687bc90250694c585570b78841051c97f66ed4f5b1772298aabe40162
+source_id: dev012c4-local
+artifact_sha256: 6dbff5ea94399075392a427f9bbf089a76ed1474900b3d5f44ece3925f27391d
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+target_identity: model=Wiren Board rev. 8.5.1 (T507);wb_release=RELEASE_NAME=wb-2606SUITE=stableTARGET=wb8/bullseyeREPO_PREFIX=;kernel=6.8.0-wb160
+clean_install_preflight: PASS
+original_environment_captured: PASS
+transferred_bundle_sha256: PASS (fff9a77687bc90250694c585570b78841051c97f66ed4f5b1772298aabe40162)
+DMXWB fresh installation completed.
+config_path=/etc/dmxwb/config.json
+state_path=/var/lib/dmxwb/state.json
+service=enabled_and_started
+offline_bundle_install: PASS
+installed_layout_service_local_mqtt_web: PASS (pid=121520)
+local_lan_web_user: PASS
+mqtt_fixture_physical_red_user: PASS (pid=124182)
+final_power_off_clean_stop_port_release: PASS
+original_environment_restored: PASS
+dev012d1_result: PASS
+=== DMXWB DEV-012D1 CLEAN OFFLINE INSTALL ACCEPTANCE PASS ===

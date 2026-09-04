@@ -1,0 +1,34 @@
+=== DMXWB DEV-012D2 UPDATE/REMOVE/REINSTALL/PURGE ACCEPTANCE ===
+generated_utc: 2026-09-03T10:27:43Z
+target: root@10.200.200.1
+bundle_sha256: fff9a77687bc90250694c585570b78841051c97f66ed4f5b1772298aabe40162
+source_id: dev012c4-local
+artifact_sha256: 6dbff5ea94399075392a427f9bbf089a76ed1474900b3d5f44ece3925f27391d
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+lifecycle_preflight: PASS
+original_environment_captured: PASS
+DMXWB fresh installation completed.
+config_path=/etc/dmxwb/config.json
+state_path=/var/lib/dmxwb/state.json
+service=enabled_and_started
+stable_acceptance_config_state_and_unrelated_files: PASS
+DMXWB update installation completed.
+config_path=/etc/dmxwb/config.json
+state_path=/var/lib/dmxwb/state.json
+service=enabled_and_started
+active_update_replaced_managed_file_preserved_user_data: PASS (140702 -> 141053)
+DMXWB application removal completed; config and state were preserved.
+config_path=/etc/dmxwb/config.json
+state_path=/var/lib/dmxwb/state.json
+normal_removal_idempotent_preserved_user_data: PASS
+DMXWB fresh installation completed.
+config_path=/etc/dmxwb/config.json
+state_path=/var/lib/dmxwb/state.json
+service=enabled_and_started
+reinstall_restored_preserved_state_user: PASS (pid=142209)
+DMXWB application and user data purge completed.
+explicit_purge_idempotent_removed_only_known_data: PASS
+original_environment_restored: PASS
+dev012d2_result: PASS
+=== DMXWB DEV-012D2 LIFECYCLE ACCEPTANCE PASS ===

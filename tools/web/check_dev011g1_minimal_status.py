@@ -6,7 +6,8 @@ import subprocess
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = REPO_ROOT / "src" / "mqtt_controller.cpp"
+INTEGRATED_SOURCE = REPO_ROOT / "src" / "integrated_runtime.cpp"
+CONTROLLER_SOURCE = REPO_ROOT / "src" / "mqtt_controller.cpp"
 
 
 def fail(message: str) -> None:
@@ -18,13 +19,17 @@ result = subprocess.run([sys.executable, str(prerequisite)], cwd=REPO_ROOT)
 if result.returncode != 0:
     raise SystemExit(result.returncode)
 
-source = SOURCE.read_text(encoding="utf-8")
-marker = "std::string MqttController::build_status_json"
-start = source.find(marker)
+integrated = INTEGRATED_SOURCE.read_text(encoding="utf-8")
+controller = CONTROLLER_SOURCE.read_text(encoding="utf-8")
+marker = "OperationalStatusPayload build_operational_status_payload"
+start = integrated.find(marker)
 if start < 0:
-    fail("MqttController::build_status_json is missing")
+    fail("integrated operational status builder is missing")
+end = integrated.find("class IntegratedRuntime::Impl", start)
+if end < 0:
+    fail("integrated operational status builder boundary is missing")
 
-block = source[start:]
+block = integrated[start:end]
 
 for token in [
     '\\"application\\"',
@@ -37,13 +42,9 @@ for token in [
     if token not in block:
         fail(f"minimal /dmxwb/status field is missing: {token}")
 
-for token in [
-    '\\"dmx\\":\\"controller\\"',
-    '\\"mqtt\\":\\"controller\\"',
-    '\\"artnet\\":\\"controller\\"',
-]:
-    if token not in block:
-        fail(f"minimal subsystem status is missing: {token}")
+for forbidden in ["kMqttStatusTopic", '"/devices/dmxwb/controls/status"', '"controller"']:
+    if forbidden in controller:
+        fail(f"Controller still publishes or synthesizes operational status: {forbidden}")
 
 for forbidden in [
     "frames_sent",
@@ -58,25 +59,8 @@ for forbidden in [
     if forbidden in block:
         fail(f"extended monitoring leaked into minimal status contract: {forbidden}")
 
-# MqttController intentionally must not be coupled to transport/runtime diagnostic
-# objects just to satisfy the Web status contract.
-for forbidden in [
-    "DmxOutput",
-    "DmxOutputDiagnostics",
-    "ArtNetRuntime",
-    "ArtNetRuntimeDiagnostics",
-    "MqttClientDiagnostics",
-]:
-    if forbidden in block:
-        fail(f"status builder gained forbidden runtime coupling: {forbidden}")
-
-model = (REPO_ROOT / "www" / "dmxwb" / "model.js").read_text(encoding="utf-8")
-if 'controller: "Работает"' not in model:
-    fail("Russian Web no longer maps minimal controller status")
-
 print("dev011g1_required_six_status_fields: PASS")
-print("dev011g1_minimal_subsystem_status_only: PASS")
+print("dev011g1_integrated_factual_status_owner: PASS")
 print("dev011g1_no_extended_monitoring: PASS")
-print("dev011g1_no_runtime_diagnostics_coupling: PASS")
-print("dev011g1_russian_web_status_mapping_preserved: PASS")
+print("dev011g1_controller_status_publication_absent: PASS")
 print("=== DMXWB DEV-011 MINIMAL STATUS CONTRACT PASS ===")

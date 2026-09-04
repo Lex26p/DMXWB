@@ -1,0 +1,538 @@
+=== DMXWB DEV-013A FINAL HOST + ARM64 ACCEPTANCE ===
+source_id: dev013a-final
+
+=== Clean native Linux warnings-as-errors build ===
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Found PkgConfig: /usr/bin/pkg-config (found version "2.5.1")
+-- Checking for module 'libmosquitto'
+--   Found libmosquitto, version 2.0.22
+-- Configuring done (10.1s)
+-- Generating done (8.3s)
+-- Build files have been written to: /mnt/c/Projects/DMXWB/build-linux-dev013a
+[  2%] Building CXX object CMakeFiles/dmxwb_core.dir/src/app_info.cpp.o
+[  2%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_core.cpp.o
+[  4%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_runtime.cpp.o
+[  5%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_source_coordinator.cpp.o
+[  7%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_transport_linux.cpp.o
+[  8%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_output.cpp.o
+[  9%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_output_physical_sink.cpp.o
+[ 11%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_source_router.cpp.o
+[ 12%] Building CXX object CMakeFiles/dmxwb_core.dir/src/fixture.cpp.o
+[ 14%] Building CXX object CMakeFiles/dmxwb_core.dir/src/group_scene.cpp.o
+[ 15%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_snapshot.cpp.o
+[ 16%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_test_pattern.cpp.o
+[ 18%] Building CXX object CMakeFiles/dmxwb_core.dir/src/monotonic_clock.cpp.o
+[ 19%] Building CXX object CMakeFiles/dmxwb_core.dir/src/mqtt_contract.cpp.o
+[ 21%] Building CXX object CMakeFiles/dmxwb_core.dir/src/mqtt_config.cpp.o
+[ 22%] Building CXX object CMakeFiles/dmxwb_core.dir/src/mqtt_controller.cpp.o
+[ 23%] Building CXX object CMakeFiles/dmxwb_core.dir/src/persistence.cpp.o
+[ 25%] Building CXX object CMakeFiles/dmxwb_core.dir/src/persistence_storage.cpp.o
+[ 26%] Building CXX object CMakeFiles/dmxwb_core.dir/src/persistence_runtime.cpp.o
+[ 28%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_transport_linux.cpp.o
+[ 29%] Linking CXX static library libdmxwb_core.a
+[ 29%] Built target dmxwb_core
+[ 30%] Building CXX object CMakeFiles/dmxwb_hardware_diagnostics.dir/src/main.cpp.o
+[ 32%] Building CXX object CMakeFiles/dmxwb_mqtt_transport.dir/src/integrated_runtime.cpp.o
+[ 33%] Linking CXX executable dmxwb-hardware-diagnostics
+[ 35%] Building CXX object CMakeFiles/dmxwb_mqtt_transport.dir/src/mqtt_client.cpp.o
+[ 35%] Built target dmxwb_hardware_diagnostics
+[ 36%] Building CXX object CMakeFiles/dmxwb_artnet_acceptance.dir/src/artnet_acceptance_main.cpp.o
+[ 38%] Building CXX object CMakeFiles/dmxwb_mqtt_transport.dir/src/mqtt_runtime.cpp.o
+[ 39%] Linking CXX executable dmxwb-artnet-acceptance
+[ 40%] Linking CXX static library libdmxwb_mqtt_transport.a
+[ 40%] Built target dmxwb_artnet_acceptance
+[ 42%] Building CXX object CMakeFiles/dmxwb_tests.dir/tests/test_main.cpp.o
+[ 42%] Built target dmxwb_mqtt_transport
+[ 43%] Building CXX object CMakeFiles/dmxwb_persistence_tests.dir/tests/test_persistence.cpp.o
+[ 45%] Linking CXX executable dmxwb_tests
+[ 46%] Linking CXX executable dmxwb_persistence_tests
+[ 46%] Built target dmxwb_tests
+[ 47%] Building CXX object CMakeFiles/dmxwb_persistence_storage_tests.dir/tests/test_persistence_storage.cpp.o
+[ 47%] Built target dmxwb_persistence_tests
+[ 49%] Building CXX object CMakeFiles/dmxwb_persistence_runtime_tests.dir/tests/test_persistence_runtime.cpp.o
+[ 50%] Linking CXX executable dmxwb_persistence_storage_tests
+[ 52%] Linking CXX executable dmxwb_persistence_runtime_tests
+[ 52%] Built target dmxwb_persistence_storage_tests
+[ 53%] Building CXX object CMakeFiles/dmxwb_group_scene_tests.dir/tests/test_group_scene.cpp.o
+[ 54%] Linking CXX executable dmxwb_group_scene_tests
+[ 54%] Built target dmxwb_persistence_runtime_tests
+[ 56%] Building CXX object CMakeFiles/dmxwb_dmx_source_router_tests.dir/tests/test_dmx_source_router.cpp.o
+[ 57%] Linking CXX executable dmxwb_dmx_source_router_tests
+[ 57%] Built target dmxwb_dmx_source_router_tests
+[ 59%] Building CXX object CMakeFiles/dmxwb_dmx_output_physical_sink_tests.dir/tests/test_dmx_output_physical_sink.cpp.o
+[ 60%] Linking CXX executable dmxwb_dmx_output_physical_sink_tests
+[ 60%] Built target dmxwb_group_scene_tests
+[ 61%] Building CXX object CMakeFiles/dmxwb_artnet_core_tests.dir/tests/test_artnet_core.cpp.o
+[ 61%] Built target dmxwb_dmx_output_physical_sink_tests
+[ 63%] Building CXX object CMakeFiles/dmxwb_artnet_runtime_tests.dir/tests/test_artnet_runtime.cpp.o
+[ 64%] Linking CXX executable dmxwb_artnet_core_tests
+[ 64%] Built target dmxwb_artnet_core_tests
+[ 66%] Building CXX object CMakeFiles/dmxwb_artnet_source_coordinator_tests.dir/tests/test_artnet_source_coordinator.cpp.o
+[ 67%] Linking CXX executable dmxwb_artnet_runtime_tests
+[ 69%] Linking CXX executable dmxwb_artnet_source_coordinator_tests
+[ 69%] Built target dmxwb_artnet_runtime_tests
+[ 70%] Building CXX object CMakeFiles/dmxwb_artnet_transport_linux_tests.dir/tests/test_artnet_transport_linux.cpp.o
+[ 70%] Built target dmxwb_artnet_source_coordinator_tests
+[ 71%] Linking CXX executable dmxwb_artnet_transport_linux_tests
+[ 73%] Building CXX object CMakeFiles/dmxwb_mqtt_contract_tests.dir/tests/test_mqtt_contract.cpp.o
+[ 73%] Built target dmxwb_artnet_transport_linux_tests
+[ 74%] Linking CXX executable dmxwb_mqtt_contract_tests
+[ 76%] Building CXX object CMakeFiles/dmxwb_mqtt_config_tests.dir/tests/test_mqtt_config.cpp.o
+[ 77%] Linking CXX executable dmxwb_mqtt_config_tests
+[ 77%] Built target dmxwb_mqtt_contract_tests
+[ 78%] Building CXX object CMakeFiles/dmxwb_mqtt_controller_tests.dir/tests/test_mqtt_controller.cpp.o
+[ 78%] Built target dmxwb_mqtt_config_tests
+[ 80%] Building CXX object CMakeFiles/dmxwb_mqtt_group_scene_tests.dir/tests/test_mqtt_group_scene.cpp.o
+[ 81%] Linking CXX executable dmxwb_mqtt_controller_tests
+[ 83%] Linking CXX executable dmxwb_mqtt_group_scene_tests
+[ 83%] Built target dmxwb_mqtt_controller_tests
+[ 84%] Building CXX object CMakeFiles/dmxwb_mqtt_client_tests.dir/tests/test_mqtt_client.cpp.o
+[ 85%] Linking CXX executable dmxwb_mqtt_client_tests
+[ 85%] Built target dmxwb_mqtt_group_scene_tests
+[ 87%] Building CXX object CMakeFiles/dmxwb_mqtt_runtime_tests.dir/tests/test_mqtt_runtime.cpp.o
+[ 88%] Linking CXX executable dmxwb_mqtt_runtime_tests
+[ 88%] Built target dmxwb_mqtt_client_tests
+[ 90%] Building CXX object CMakeFiles/dmxwb_operational_status_tests.dir/tests/test_operational_status.cpp.o
+[ 91%] Linking CXX executable dmxwb_operational_status_tests
+[ 91%] Built target dmxwb_mqtt_runtime_tests
+[ 92%] Building CXX object CMakeFiles/dmxwb.dir/src/production_main.cpp.o
+[ 94%] Linking CXX executable dmxwb
+[ 94%] Built target dmxwb_operational_status_tests
+[ 95%] Building CXX object CMakeFiles/dmxwb_mqtt_acceptance.dir/src/mqtt_acceptance_main.cpp.o
+[ 97%] Linking CXX executable dmxwb-mqtt-acceptance
+[ 97%] Built target dmxwb
+[ 98%] Building CXX object CMakeFiles/dmxwb_dev010_source_acceptance.dir/src/dev010_source_acceptance_main.cpp.o
+[100%] Linking CXX executable dmxwb-dev010-source-acceptance
+[100%] Built target dmxwb_mqtt_acceptance
+[100%] Built target dmxwb_dev010_source_acceptance
+
+=== Complete registered CTest suite ===
+Test project /mnt/c/Projects/DMXWB/build-linux-dev013a
+      Start  1: dmxwb.unit
+ 1/18 Test  #1: dmxwb.unit ........................   Passed    0.01 sec
+      Start  2: dmxwb.persistence
+ 2/18 Test  #2: dmxwb.persistence .................   Passed    0.01 sec
+      Start  3: dmxwb.persistence_storage
+ 3/18 Test  #3: dmxwb.persistence_storage .........   Passed    0.24 sec
+      Start  4: dmxwb.persistence_runtime
+ 4/18 Test  #4: dmxwb.persistence_runtime .........   Passed    0.02 sec
+      Start  5: dmxwb.group_scene
+ 5/18 Test  #5: dmxwb.group_scene .................   Passed    0.01 sec
+      Start  6: dmxwb.dmx_source_router
+ 6/18 Test  #6: dmxwb.dmx_source_router ...........   Passed    0.01 sec
+      Start  7: dmxwb.dmx_output_physical_sink
+ 7/18 Test  #7: dmxwb.dmx_output_physical_sink ....   Passed    0.01 sec
+      Start  8: dmxwb.artnet_core
+ 8/18 Test  #8: dmxwb.artnet_core .................   Passed    0.01 sec
+      Start  9: dmxwb.artnet_runtime
+ 9/18 Test  #9: dmxwb.artnet_runtime ..............   Passed    0.01 sec
+      Start 10: dmxwb.artnet_source_coordinator
+10/18 Test #10: dmxwb.artnet_source_coordinator ...   Passed    0.01 sec
+      Start 11: dmxwb.artnet_transport_linux
+11/18 Test #11: dmxwb.artnet_transport_linux ......   Passed    0.01 sec
+      Start 12: dmxwb.mqtt_contract
+12/18 Test #12: dmxwb.mqtt_contract ...............   Passed    0.01 sec
+      Start 13: dmxwb.mqtt_config
+13/18 Test #13: dmxwb.mqtt_config .................   Passed    0.01 sec
+      Start 14: dmxwb.mqtt_controller
+14/18 Test #14: dmxwb.mqtt_controller .............   Passed    0.01 sec
+      Start 15: dmxwb.mqtt_group_scene
+15/18 Test #15: dmxwb.mqtt_group_scene ............   Passed    0.08 sec
+      Start 16: dmxwb.mqtt_client
+16/18 Test #16: dmxwb.mqtt_client .................   Passed    0.01 sec
+      Start 17: dmxwb.mqtt_runtime
+17/18 Test #17: dmxwb.mqtt_runtime ................   Passed    0.01 sec
+      Start 18: dmxwb.operational_status
+18/18 Test #18: dmxwb.operational_status ..........   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 18
+
+Total Test time (real) =   0.81 sec
+dmxwb 0.1.0
+dev013a_production_cli_contract: PASS
+
+=== Current Web functional contracts ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011b_mqtt_wire_codec_contract: PASS
+dev011b_retained_snapshot_subscriptions: PASS
+dev011b_automatic_reconnect_contract: PASS
+dev011b_no_command_replay_storage: PASS
+=== DMXWB DEV-011B MQTT WEBSOCKET FOUNDATION STATIC PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011b_mqtt_wire_codec_contract: PASS
+dev011b_retained_snapshot_subscriptions: PASS
+dev011b_automatic_reconnect_contract: PASS
+dev011b_no_command_replay_storage: PASS
+=== DMXWB DEV-011B MQTT WEBSOCKET FOUNDATION STATIC PASS ===
+dev011c1_source_command_contract: PASS
+dev011c1_fixture_command_contract: PASS
+dev011c1_fixture_state_mapping: PASS
+dev011c1_slider_throttle_25hz_and_final_publish: PASS
+dev011c1_no_command_replay_storage: PASS
+dev011c1_mqtt_only_controls: PASS
+=== DMXWB DEV-011C1 SOURCE FIXTURE WEB CONTROLS STATIC PASS ===
+dev011d1_group_command_contract: PASS
+dev011d1_group_factual_state_subscription: PASS
+dev011d1_incremental_subscription_no_retained_loop: PASS
+dev011d1_group_power_not_synthesized_in_browser: PASS
+dev011d1_group_member_mapping: PASS
+dev011d1_group_slider_throttle_25hz_and_final_publish: PASS
+dev011d1_event_listeners_registered_once: PASS
+dev011d1_render_burst_coalescing: PASS
+dev011d1_pending_factual_confirmation_guard: PASS
+dev011d1_group_no_command_replay_storage: PASS
+dev011d1_group_mqtt_only_controls: PASS
+=== DMXWB DEV-011D1 GROUP WEB CONTROLS STATIC PASS ===
+dev011e1_scene_create_contract: PASS
+dev011e1_scene_apply_contract: PASS
+dev011e1_scene_overwrite_contract: PASS
+dev011e1_scene_rename_contract: PASS
+dev011e1_scene_delete_contract: PASS
+dev011e1_scene_request_id_result_matching: PASS
+dev012b4_scene_rename_apply_result_matching: PASS
+dev012b4_scene_pending_timeout_contract: PASS
+dev011e1_scene_apply_factual_state_confirmation: PASS
+dev011e1_scene_no_false_disconnect_error_without_pending: PASS
+dev011e1_scene_no_command_replay_storage: PASS
+dev011e1_scene_mqtt_only_controls: PASS
+=== DMXWB DEV-011E1 SCENE WEB CONTROLS STATIC PASS ===
+dev011f1_structural_local_draft_contract: PASS
+dev011f1_config_set_full_proposal_contract: PASS
+dev011f1_expected_revision_base_contract: PASS
+dev011f1_incoming_config_preserves_dirty_draft: PASS
+dev011f1_fixture_stable_id_resize_contract: PASS
+dev011f1_group_membership_cleanup_on_fixture_remove: PASS
+dev011f1_config_result_request_matching: PASS
+dev012b4_config_pending_timeout_contract: PASS
+dev011f1_explicit_apply_only: PASS
+dev011f1_no_command_replay_storage: PASS
+dev011f1_mqtt_only_settings: PASS
+=== DMXWB DEV-011F1 STRUCTURAL SETTINGS STATIC PASS ===
+dev011f2_group_membership_local_draft: PASS
+dev011f2_group_add_stable_id_contract: PASS
+dev011f2_group_remove_no_id_reuse_contract: PASS
+dev011f2_group_members_unique_existing_fixtures: PASS
+dev011f2_group_membership_uses_config_set_only: PASS
+dev011f2_group_editor_listeners_registered_once: PASS
+dev011f2_group_editor_mqtt_only_settings: PASS
+=== DMXWB DEV-011F2 GROUP MEMBERSHIP EDITOR STATIC PASS ===
+dev011_revision_required_features_preserved: PASS
+dev011_revision_status_is_minimal: PASS
+dev011_revision_extended_monitoring_removed: PASS
+dev011_revision_development_ui_copy_removed: PASS
+dev011_revision_scene_browser_only_limit_removed: PASS
+dev011_revision_revision_conflict_recovery_preserved: PASS
+dev011_revision_mqtt_only_boundary_preserved: PASS
+=== DMXWB DEV-011 SCOPE REVISION MINIMAL WEB PASS ===
+dev011ru1_navigation_and_settings_labels_russian: PASS
+dev011ru1_fixture_group_scene_ui_russian: PASS
+dev011ru1_status_values_russian: PASS
+dev011ru1_config_and_scene_errors_russian: PASS
+dev011ru1_protocol_names_preserved: PASS
+dev011ru1_no_known_visible_english_residue: PASS
+=== DMXWB DEV-011 RUSSIAN WEB UI PASS ===
+dev011g1_required_six_status_fields: PASS
+dev011g1_integrated_factual_status_owner: PASS
+dev011g1_no_extended_monitoring: PASS
+dev011g1_controller_status_publication_absent: PASS
+=== DMXWB DEV-011 MINIMAL STATUS CONTRACT PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011b_mqtt_wire_codec_contract: PASS
+dev011b_retained_snapshot_subscriptions: PASS
+dev011b_automatic_reconnect_contract: PASS
+dev011b_no_command_replay_storage: PASS
+=== DMXWB DEV-011B MQTT WEBSOCKET FOUNDATION STATIC PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011a_mandatory_files: PASS
+dev011a_no_external_dependencies: PASS
+dev011a_no_direct_serial_file_systemd_api: PASS
+dev011a_required_sections: PASS
+dev011a_asset_cache_busting: PASS
+dev011a_no_development_ui_copy: PASS
+dev011a_local_module_contract: PASS
+dev011a_static_http_load: PASS
+dev011a_runtime_dependencies: PASS (python checker only; web runtime is static browser files)
+=== DMXWB DEV-011A STATIC WEB FOUNDATION PASS ===
+dev011b_mqtt_wire_codec_contract: PASS
+dev011b_retained_snapshot_subscriptions: PASS
+dev011b_automatic_reconnect_contract: PASS
+dev011b_no_command_replay_storage: PASS
+=== DMXWB DEV-011B MQTT WEBSOCKET FOUNDATION STATIC PASS ===
+dev011c1_source_command_contract: PASS
+dev011c1_fixture_command_contract: PASS
+dev011c1_fixture_state_mapping: PASS
+dev011c1_slider_throttle_25hz_and_final_publish: PASS
+dev011c1_no_command_replay_storage: PASS
+dev011c1_mqtt_only_controls: PASS
+=== DMXWB DEV-011C1 SOURCE FIXTURE WEB CONTROLS STATIC PASS ===
+dev011d1_group_command_contract: PASS
+dev011d1_group_factual_state_subscription: PASS
+dev011d1_incremental_subscription_no_retained_loop: PASS
+dev011d1_group_power_not_synthesized_in_browser: PASS
+dev011d1_group_member_mapping: PASS
+dev011d1_group_slider_throttle_25hz_and_final_publish: PASS
+dev011d1_event_listeners_registered_once: PASS
+dev011d1_render_burst_coalescing: PASS
+dev011d1_pending_factual_confirmation_guard: PASS
+dev011d1_group_no_command_replay_storage: PASS
+dev011d1_group_mqtt_only_controls: PASS
+=== DMXWB DEV-011D1 GROUP WEB CONTROLS STATIC PASS ===
+dev011e1_scene_create_contract: PASS
+dev011e1_scene_apply_contract: PASS
+dev011e1_scene_overwrite_contract: PASS
+dev011e1_scene_rename_contract: PASS
+dev011e1_scene_delete_contract: PASS
+dev011e1_scene_request_id_result_matching: PASS
+dev012b4_scene_rename_apply_result_matching: PASS
+dev012b4_scene_pending_timeout_contract: PASS
+dev011e1_scene_apply_factual_state_confirmation: PASS
+dev011e1_scene_no_false_disconnect_error_without_pending: PASS
+dev011e1_scene_no_command_replay_storage: PASS
+dev011e1_scene_mqtt_only_controls: PASS
+=== DMXWB DEV-011E1 SCENE WEB CONTROLS STATIC PASS ===
+dev011f1_structural_local_draft_contract: PASS
+dev011f1_config_set_full_proposal_contract: PASS
+dev011f1_expected_revision_base_contract: PASS
+dev011f1_incoming_config_preserves_dirty_draft: PASS
+dev011f1_fixture_stable_id_resize_contract: PASS
+dev011f1_group_membership_cleanup_on_fixture_remove: PASS
+dev011f1_config_result_request_matching: PASS
+dev012b4_config_pending_timeout_contract: PASS
+dev011f1_explicit_apply_only: PASS
+dev011f1_no_command_replay_storage: PASS
+dev011f1_mqtt_only_settings: PASS
+=== DMXWB DEV-011F1 STRUCTURAL SETTINGS STATIC PASS ===
+dev011f2_group_membership_local_draft: PASS
+dev011f2_group_add_stable_id_contract: PASS
+dev011f2_group_remove_no_id_reuse_contract: PASS
+dev011f2_group_members_unique_existing_fixtures: PASS
+dev011f2_group_membership_uses_config_set_only: PASS
+dev011f2_group_editor_listeners_registered_once: PASS
+dev011f2_group_editor_mqtt_only_settings: PASS
+=== DMXWB DEV-011F2 GROUP MEMBERSHIP EDITOR STATIC PASS ===
+dev011_revision_required_features_preserved: PASS
+dev011_revision_status_is_minimal: PASS
+dev011_revision_extended_monitoring_removed: PASS
+dev011_revision_development_ui_copy_removed: PASS
+dev011_revision_scene_browser_only_limit_removed: PASS
+dev011_revision_revision_conflict_recovery_preserved: PASS
+dev011_revision_mqtt_only_boundary_preserved: PASS
+=== DMXWB DEV-011 SCOPE REVISION MINIMAL WEB PASS ===
+dev011f4_dmx_port_runtime_apply_contract: PASS
+dev011f4_dmx_port_preserves_latest_whole_snapshot: PASS
+dev011f4_artnet_universe_runtime_recreate_contract: PASS
+dev011f4_old_artnet_universe_cache_invalidated: PASS
+dev011f4_no_blackout_on_artnet_universe_change: PASS
+dev011f4_runtime_reconfigure_failures_are_fatal: PASS
+dev011f4_web_remains_mqtt_only: PASS
+=== DMXWB DEV-011F4 TRANSPORT STRUCTURAL APPLY STATIC PASS ===
+dev012b_systemd_unit_contract: PASS
+dev012b_no_mosquitto_systemd_dependency: PASS
+dev012b_bounded_journald_event_contract: PASS
+dev012b_structured_retained_status_contract: PASS
+dev012b_no_cumulative_status_telemetry_contract: PASS
+dev012b_status_build_assertion_registered: PASS
+dev012b_corrected_wb8_acceptance_contract: PASS
+dev012b3_counter_isolation_regression_contract: PASS
+dev012b_artnet_diagnostics_thread_guard: PASS
+dev012b_standard_wb_homeui_hidden_controls_contract: PASS
+dev012b_no_monitoring_subsystem: PASS
+=== DMXWB DEV-012B STATIC OPERATIONAL CONTRACT PASS ===
+dev012b5_factual_daemon_availability_gate: PASS
+dev012b5_config_uncertain_outcome_reconciliation: PASS
+dev012b5_scene_create_idempotency: PASS
+dev012b5_numeric_validation: PASS
+
+=== Bullseye ARM64 production build and final offline bundle ===
+=== DMXWB DEV-012C4 FINAL OFFLINE BUNDLE REGRESSION ===
+=== Focused production ARM64 build ===
+cross libmosquitto: 2.0.11
+
+=== Bullseye GCC 10 ARM64 cross build ===
+-- The CXX compiler identification is GNU 10.2.1
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/aarch64-linux-gnu-g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Looking for C++ include pthread.h
+-- Looking for C++ include pthread.h - found
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+-- Looking for pthread_create in pthreads - not found
+-- Looking for pthread_create in pthread
+-- Looking for pthread_create in pthread - found
+-- Found Threads: TRUE  
+-- Found PkgConfig: /usr/bin/pkg-config (found version "0.29.2") 
+-- Checking for module 'libmosquitto'
+--   Found libmosquitto, version 2.0.11
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /work/dmxwb/build-wb8
+Scanning dependencies of target dmxwb_core
+[  3%] Building CXX object CMakeFiles/dmxwb_core.dir/src/app_info.cpp.o
+[  7%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_core.cpp.o
+[ 11%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_runtime.cpp.o
+[ 14%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_source_coordinator.cpp.o
+[ 18%] Building CXX object CMakeFiles/dmxwb_core.dir/src/artnet_transport_linux.cpp.o
+[ 22%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_output.cpp.o
+[ 25%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_output_physical_sink.cpp.o
+[ 29%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_source_router.cpp.o
+[ 33%] Building CXX object CMakeFiles/dmxwb_core.dir/src/fixture.cpp.o
+[ 37%] Building CXX object CMakeFiles/dmxwb_core.dir/src/group_scene.cpp.o
+[ 40%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_snapshot.cpp.o
+[ 44%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_test_pattern.cpp.o
+[ 48%] Building CXX object CMakeFiles/dmxwb_core.dir/src/monotonic_clock.cpp.o
+[ 51%] Building CXX object CMakeFiles/dmxwb_core.dir/src/mqtt_contract.cpp.o
+[ 55%] Building CXX object CMakeFiles/dmxwb_core.dir/src/mqtt_config.cpp.o
+[ 59%] Building CXX object CMakeFiles/dmxwb_core.dir/src/mqtt_controller.cpp.o
+[ 62%] Building CXX object CMakeFiles/dmxwb_core.dir/src/persistence.cpp.o
+[ 66%] Building CXX object CMakeFiles/dmxwb_core.dir/src/persistence_storage.cpp.o
+[ 70%] Building CXX object CMakeFiles/dmxwb_core.dir/src/persistence_runtime.cpp.o
+[ 74%] Building CXX object CMakeFiles/dmxwb_core.dir/src/dmx_transport_linux.cpp.o
+[ 77%] Linking CXX static library libdmxwb_core.a
+[ 77%] Built target dmxwb_core
+Scanning dependencies of target dmxwb_mqtt_transport
+[ 85%] Building CXX object CMakeFiles/dmxwb_mqtt_transport.dir/src/mqtt_client.cpp.o
+[ 85%] Building CXX object CMakeFiles/dmxwb_mqtt_transport.dir/src/integrated_runtime.cpp.o
+[ 88%] Building CXX object CMakeFiles/dmxwb_mqtt_transport.dir/src/mqtt_runtime.cpp.o
+[ 92%] Linking CXX static library libdmxwb_mqtt_transport.a
+[ 92%] Built target dmxwb_mqtt_transport
+Scanning dependencies of target dmxwb
+[ 96%] Building CXX object CMakeFiles/dmxwb.dir/src/production_main.cpp.o
+[100%] Linking CXX executable dmxwb
+[100%] Built target dmxwb
+
+Target artifact: /mnt/c/Projects/DMXWB/artifacts/wb8-bullseye-arm64/dmxwb
+/mnt/c/Projects/DMXWB/artifacts/wb8-bullseye-arm64/dmxwb: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (GNU/Linux), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=69bd3961517b38e4cea2ab6e2b99be1b3342e346, for GNU/Linux 3.7.0, not stripped
+Maximum required glibc symbol version: GLIBC_2.30
+Dynamic dependencies:
+ 0x0000000000000001 (NEEDED)             Shared library: [libpthread.so.0]
+ 0x0000000000000001 (NEEDED)             Shared library: [libmosquitto.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+6dbff5ea94399075392a427f9bbf089a76ed1474900b3d5f44ece3925f27391d  /mnt/c/Projects/DMXWB/artifacts/wb8-bullseye-arm64/dmxwb
+WB8 laptop cross build completed.
+Run tools/wb8/verify_on_target.sh for target CLI verification when required by the current gate.
+=== Final bundle reproducibility and contract ===
+DEV-012C1 offline payload created.
+Archive: /mnt/c/Projects/DMXWB/artifacts/offline/dmxwb-0.1.0-wb8-bullseye-arm64-dev012c1-payload.tar.gz
+Archive SHA256: 380dbb8353c7f85160abda912811d08cecd7c140e15eb133fa241785907ddecb
+DMXWB final offline bundle created.
+Archive: /mnt/c/Projects/DMXWB/artifacts/offline/dmxwb-0.1.0-wb8-bullseye-arm64.tar.gz
+Archive SHA256: f94fe7a4504310c524197854528d9aca2c43814d78657390f702f40a26a688bd
+DEV-012C1 offline payload created.
+Archive: /mnt/c/Projects/DMXWB/artifacts/offline/dmxwb-0.1.0-wb8-bullseye-arm64-dev012c1-payload.tar.gz
+Archive SHA256: 380dbb8353c7f85160abda912811d08cecd7c140e15eb133fa241785907ddecb
+DMXWB final offline bundle created.
+Archive: /mnt/c/Projects/DMXWB/artifacts/offline/dmxwb-0.1.0-wb8-bullseye-arm64.tar.gz
+Archive SHA256: f94fe7a4504310c524197854528d9aca2c43814d78657390f702f40a26a688bd
+dev012c4_reproducible_final_archive: PASS
+dev012c4_exact_final_archive_layout: PASS
+dev012c4_current_payload_and_control_scripts: PASS
+dev012c4_manifest_artifact_identity: PASS
+dev012c4_aarch64_bullseye_contract: PASS
+dev012c4_complete_sha256_coverage: PASS
+dev012c4_reproducible_timestamp_contract: PASS
+dev012c4_no_target_build_or_online_operations: PASS
+=== Accepted install/update behavior on final bundle ===
+dev012c2_fresh_install_layout: PASS
+dev012c2_update_replaces_managed_payload: PASS
+dev012c2_config_state_byte_preservation: PASS
+dev012c2_checksum_preflight_no_mutation: PASS
+dev012c2_incompatible_manifest_no_mutation: PASS
+dev012c2_failed_update_rollback: PASS
+dev012c2_idempotent_repeat_update: PASS
+dev012c2_no_online_or_target_build_operations: PASS
+=== Accepted remove/purge behavior on final bundle ===
+dev012c3_failed_removal_rollback: PASS
+dev012c3_normal_removal_exact_managed_files: PASS
+dev012c3_normal_removal_preserves_config_state: PASS
+dev012c3_normal_removal_idempotent: PASS
+dev012c3_explicit_purge_only_known_user_data: PASS
+dev012c3_explicit_purge_idempotent: PASS
+dev012c3_symlink_target_refusal: PASS
+dev012c3_symlink_parent_refusal: PASS
+dev012c3_root_destdir_refusal: PASS
+=== DMXWB DEV-012C4 FINAL OFFLINE BUNDLE REGRESSION PASS ===
+Archive: /mnt/c/Projects/DMXWB/artifacts/offline/dmxwb-0.1.0-wb8-bullseye-arm64.tar.gz
+f94fe7a4504310c524197854528d9aca2c43814d78657390f702f40a26a688bd  /mnt/c/Projects/DMXWB/artifacts/offline/dmxwb-0.1.0-wb8-bullseye-arm64.tar.gz
+
+dev013a_result: PASS
+=== DMXWB DEV-013A FINAL HOST + ARM64 ACCEPTANCE PASS ===
+Report: /mnt/c/Projects/DMXWB/docs/DEV013A_FINAL_HOST_REPORT.txt

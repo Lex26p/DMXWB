@@ -24,7 +24,8 @@ styles = (WEB_ROOT / "styles.css").read_text(encoding="utf-8")
 
 for token in [
     'id="setting-dmx-port"',
-    'id="setting-fixture-count"',
+    'id="settings-add-fixture-button"',
+    'id="settings-fixture-list"',
     'id="setting-start-address"',
     'id="setting-artnet-universe"',
     'id="settings-result"',
@@ -46,9 +47,10 @@ for token in [
     "configDraftBaseRevision",
     "configDraftDirty",
     "A newer retained config must never destroy an in-progress local draft",
-    "resizeFixtureDraft",
+    "addFixtureDraft",
+    "removeFixtureDraft",
     "next_fixture_id",
-    "Scene snapshots are historical records",
+    "Historical Scene snapshots keep the",
     "configDraftInfo",
     "stale:",
 ]:
@@ -65,10 +67,17 @@ for token in [
     "MQTT_CONFIG_SET_TOPIC",
     "revision_conflict",
     "resetConfigDraft",
-    "resizeFixtureDraft",
+    "addFixtureDraft",
+    "removeFixtureDraft",
     "settings.applyButton",
     "settings.resetButton",
     "clearPendingConfigSet",
+    "COMMAND_RESULT_TIMEOUT_MS",
+    "pendingConfigSet?.requestId !== requestId",
+    "window.clearTimeout(pendingConfigSet.timer)",
+    "baseRevision: info.baseRevision",
+    "maybeConfirmConfigSet(snapshot)",
+    "JSON.stringify(factualConfig) !== JSON.stringify(proposedConfig)",
 ]:
     if token not in app:
         fail(f"app.js missing config transaction token {token}")
@@ -117,9 +126,10 @@ print("dev011f1_structural_local_draft_contract: PASS")
 print("dev011f1_config_set_full_proposal_contract: PASS")
 print("dev011f1_expected_revision_base_contract: PASS")
 print("dev011f1_incoming_config_preserves_dirty_draft: PASS")
-print("dev011f1_fixture_stable_id_resize_contract: PASS")
+print("dev014a_fixture_stable_id_crud_contract: PASS")
 print("dev011f1_group_membership_cleanup_on_fixture_remove: PASS")
 print("dev011f1_config_result_request_matching: PASS")
+print("dev012b4_config_pending_timeout_contract: PASS")
 print("dev011f1_explicit_apply_only: PASS")
 print("dev011f1_no_command_replay_storage: PASS")
 print("dev011f1_mqtt_only_settings: PASS")

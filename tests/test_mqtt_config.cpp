@@ -118,6 +118,15 @@ void test_scene_lifecycle_payloads() {
     expect_true(created.ok() && created.request->name == "Вечер",
         "Scene create UTF-8 Name preserved");
 
+    const std::string boundary_name(dmxwb::kEntityNameMaxBytes, 'x');
+    created = dmxwb::parse_mqtt_scene_create_request(
+        std::string{"{\"request_id\":\"boundary\",\"name\":\""} + boundary_name + "\"}");
+    expect_true(created.ok(), "Scene create accepts 256-byte Name");
+    created = dmxwb::parse_mqtt_scene_create_request(
+        std::string{"{\"request_id\":\"oversized\",\"name\":\""} + boundary_name + "x\"}");
+    expect_true(!created.ok() && created.error_code == "invalid_request",
+        "Scene create rejects 257-byte Name");
+
     auto action = dmxwb::parse_mqtt_scene_action_request(
         R"({"request_id":"overwrite-1"})");
     expect_true(action.ok() && action.request->request_id == "overwrite-1",

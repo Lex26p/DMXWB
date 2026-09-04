@@ -374,50 +374,6 @@ void append_utf8(std::string& output, std::uint32_t codepoint) {
     return true;
 }
 
-[[nodiscard]] bool is_valid_utf8(std::string_view text) noexcept {
-    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
-    std::size_t index = 0;
-    while (index < text.size()) {
-        const auto first = bytes[index];
-        if (first <= 0x7FU) {
-            ++index;
-            continue;
-        }
-        std::size_t count = 0;
-        std::uint32_t codepoint = 0;
-        if (first >= 0xC2U && first <= 0xDFU) {
-            count = 1;
-            codepoint = static_cast<std::uint32_t>(first & 0x1FU);
-        } else if (first >= 0xE0U && first <= 0xEFU) {
-            count = 2;
-            codepoint = static_cast<std::uint32_t>(first & 0x0FU);
-        } else if (first >= 0xF0U && first <= 0xF4U) {
-            count = 3;
-            codepoint = static_cast<std::uint32_t>(first & 0x07U);
-        } else {
-            return false;
-        }
-        if (count > text.size() - index - 1U) {
-            return false;
-        }
-        for (std::size_t offset = 1; offset <= count; ++offset) {
-            const auto next = bytes[index + offset];
-            if ((next & 0xC0U) != 0x80U) {
-                return false;
-            }
-            codepoint = (codepoint << 6U) | static_cast<std::uint32_t>(next & 0x3FU);
-        }
-        if ((count == 2U && codepoint < 0x800U) ||
-            (count == 3U && codepoint < 0x10000U) ||
-            (codepoint >= 0xD800U && codepoint <= 0xDFFFU) ||
-            codepoint > 0x10FFFFU) {
-            return false;
-        }
-        index += count + 1U;
-    }
-    return true;
-}
-
 [[nodiscard]] bool parse_key_at(
     std::string_view input,
     std::size_t& position,
@@ -771,9 +727,9 @@ MqttSceneCreateParseResult parse_mqtt_scene_create_request(std::string_view payl
             payload.substr(name_slice.begin, name_slice.end - name_slice.begin),
             name,
             error) ||
-        !is_valid_utf8(name)) {
+        name.size() > kEntityNameMaxBytes || !is_valid_utf8(name)) {
         result.error_code = "invalid_request";
-        result.message = error.empty() ? "scene name must be valid UTF-8 text" : std::move(error);
+        result.message = error.empty() ? "scene name must be valid UTF-8 text up to 256 bytes" : std::move(error);
         return result;
     }
 
@@ -831,7 +787,8 @@ MqttPublication build_mqtt_config_result_publication(
     bool ok,
     std::uint64_t revision,
     std::string_view error_code,
-    std::string_view message) {
+    std::string_view message,
+    std::optional<std::uint64_t> entity_id) {
     std::string payload{"{\"request_id\":"};
     append_json_string(payload, request_id);
     payload += ",\"ok\":";
@@ -841,6 +798,9 @@ MqttPublication build_mqtt_config_result_publication(
     append_json_string(payload, error_code.empty() ? std::string_view{"none"} : error_code);
     payload += ",\"message\":";
     append_json_string(payload, message);
+    if (entity_id.has_value()) {
+        payload += ",\"entity_id\":" + std::to_string(*entity_id);
+    }
     payload += '}';
     return MqttPublication{std::string{kMqttConfigResultTopic}, std::move(payload), false};
 }

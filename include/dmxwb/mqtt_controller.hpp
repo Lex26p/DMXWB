@@ -33,8 +33,9 @@ public:
         const MqttCommand& command,
         time_point now);
 
-    [[nodiscard]] std::vector<MqttPublication> build_full_republish(
-        MqttApplicationStatus status = MqttApplicationStatus::running);
+    [[nodiscard]] std::vector<MqttPublication> build_full_republish();
+    [[nodiscard]] std::vector<MqttPublication> build_retained_cleanup(
+        const MqttRetainedCleanup& cleanup) const;
 
     [[nodiscard]] std::shared_ptr<const DmxSnapshot> build_current_snapshot();
     [[nodiscard]] DmxSnapshot::Generation next_generation() const noexcept;
@@ -64,6 +65,14 @@ private:
     [[nodiscard]] MqttControllerUpdate apply_scene_apply(
         SceneId scene_id,
         time_point now);
+    [[nodiscard]] MqttControllerUpdate apply_scene_rename_request(
+        SceneId scene_id,
+        std::string_view payload,
+        time_point now);
+    [[nodiscard]] MqttControllerUpdate apply_scene_apply_request(
+        SceneId scene_id,
+        std::string_view payload,
+        time_point now);
     [[nodiscard]] MqttControllerUpdate apply_scene_create(
         std::string_view payload,
         time_point now);
@@ -89,8 +98,6 @@ private:
         Fixture::Id fixture_id);
     void append_all_fixture_states(std::vector<MqttPublication>& output) const;
     void append_all_scene_states(std::vector<MqttPublication>& output) const;
-    [[nodiscard]] std::string build_status_json(MqttApplicationStatus status) const;
-
     PersistenceRuntime& runtime_;
     GroupSceneManager group_scene_;
     DmxSnapshot::Generation generation_{1};

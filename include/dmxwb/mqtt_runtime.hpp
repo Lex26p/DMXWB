@@ -1,12 +1,20 @@
 #pragma once
 
 #include "dmxwb/dmx_source_router.hpp"
+#include "dmxwb/instrumentation.hpp"
 #include "dmxwb/mqtt_controller.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace dmxwb {
+
+enum class MqttRetainedCleanupDelivery {
+    none,
+    delivered,
+    failed,
+};
 
 class MqttRuntimeTransport {
 public:
@@ -14,6 +22,10 @@ public:
 
     [[nodiscard]] virtual bool connected() const noexcept = 0;
     [[nodiscard]] virtual bool publish_all(std::span<const MqttPublication> publications) = 0;
+    [[nodiscard]] virtual bool publish_retained_cleanup(
+        std::span<const MqttPublication> publications) = 0;
+    [[nodiscard]] virtual MqttRetainedCleanupDelivery
+        take_retained_cleanup_delivery() noexcept = 0;
     [[nodiscard]] virtual bool take_full_republish_request() noexcept = 0;
 };
 
@@ -42,7 +54,8 @@ public:
         MqttCommandQueue& command_queue,
         MqttController& controller,
         MqttRuntimeTransport& transport,
-        DmxSourceRouter& dmx_router);
+        DmxSourceRouter& dmx_router,
+        InstrumentationMode instrumentation_mode = InstrumentationMode::engineering);
 
     // До запуска physical worker строит текущий whole MQTT snapshot и передаёт
     // его router. При persisted Source=artnet snapshot только кэшируется и не
@@ -54,17 +67,23 @@ public:
 
     [[nodiscard]] StateSaveResult flush_state();
     [[nodiscard]] const MqttRuntimeDiagnostics& diagnostics() const noexcept;
+    [[nodiscard]] InstrumentationMode instrumentation_mode() const noexcept;
 
 private:
     void publish_controller_update(const MqttCommand& command, MqttControllerUpdate update);
     void record_route_result(const DmxSourceRouteResult& result) noexcept;
     void publish_batch(std::span<const MqttPublication> publications, bool full_republish);
+    void process_retained_cleanup_delivery(time_point now);
+    void start_retained_cleanup_if_needed();
+    void increment_engineering_counter(std::uint64_t& counter) noexcept;
 
     PersistenceRuntime& persistence_;
     MqttCommandQueue& command_queue_;
     MqttController& controller_;
     MqttRuntimeTransport& transport_;
     DmxSourceRouter& dmx_router_;
+    InstrumentationMode instrumentation_mode_{InstrumentationMode::engineering};
+    std::optional<MqttRetainedCleanup> retained_cleanup_in_flight_;
     MqttRuntimeDiagnostics diagnostics_{};
 };
 

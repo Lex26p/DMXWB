@@ -83,6 +83,7 @@ struct MqttSceneActionParseResult final {
     bool ok,
     std::uint64_t revision,
     std::string_view error_code,
-    std::string_view message);
+    std::string_view message,
+    std::optional<std::uint64_t> entity_id = std::nullopt);
 
 }  // namespace dmxwb

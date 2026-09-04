@@ -7,23 +7,29 @@ namespace dmxwb {
 
 DmxSourceRouter::DmxSourceRouter(
     PersistedSource initial_source,
-    PhysicalPublish physical_publish)
+    PhysicalPublish physical_publish,
+    InstrumentationMode instrumentation_mode)
     : physical_publish_(std::move(physical_publish)),
-      selected_source_(initial_source) {
+      selected_source_(initial_source),
+      instrumentation_mode_(instrumentation_mode) {
     diagnostics_.selected_source = initial_source;
 }
 
 DmxSourceRouteResult DmxSourceRouter::publish_mqtt_snapshot(
     const DmxSnapshot& snapshot) {
     std::scoped_lock lock{mutex_};
-    ++diagnostics_.mqtt_snapshots_received;
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        ++diagnostics_.mqtt_snapshots_received;
+    }
     return cache_snapshot_locked(PersistedSource::mqtt, snapshot);
 }
 
 DmxSourceRouteResult DmxSourceRouter::publish_artnet_snapshot(
     const DmxSnapshot& snapshot) {
     std::scoped_lock lock{mutex_};
-    ++diagnostics_.artnet_snapshots_received;
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        ++diagnostics_.artnet_snapshots_received;
+    }
     return cache_snapshot_locked(PersistedSource::artnet, snapshot);
 }
 
@@ -36,12 +42,16 @@ DmxSourceRouteResult DmxSourceRouter::select_source(PersistedSource source) {
 
     selected_source_ = source;
     diagnostics_.selected_source = source;
-    ++diagnostics_.source_switches;
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        ++diagnostics_.source_switches;
+    }
     update_artnet_output_active_locked();
 
     const auto& cached = cached_snapshot_locked(source);
     if (!cached) {
-        ++diagnostics_.source_switches_without_snapshot;
+        if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+            ++diagnostics_.source_switches_without_snapshot;
+        }
         return DmxSourceRouteResult{
             true,
             true,
@@ -87,11 +97,17 @@ DmxSourceRouterDiagnostics DmxSourceRouter::diagnostics() const noexcept {
     return diagnostics_;
 }
 
+InstrumentationMode DmxSourceRouter::instrumentation_mode() const noexcept {
+    return instrumentation_mode_;
+}
+
 DmxSourceRouteResult DmxSourceRouter::cache_snapshot_locked(
     PersistedSource source,
     const DmxSnapshot& snapshot) {
     if (!is_valid_physical_dmx_slot_count(snapshot.slot_count())) {
-        ++diagnostics_.rejected_snapshots;
+        if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+            ++diagnostics_.rejected_snapshots;
+        }
         return DmxSourceRouteResult{
             false,
             false,
@@ -122,7 +138,9 @@ DmxSourceRouteResult DmxSourceRouter::publish_cached_locked(
 
     auto physical = build_physical_snapshot_locked(*cached);
     if (!physical) {
-        ++diagnostics_.physical_publish_failures;
+        if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+            ++diagnostics_.physical_publish_failures;
+        }
         update_artnet_output_active_locked();
         return DmxSourceRouteResult{
             true,
@@ -131,13 +149,17 @@ DmxSourceRouteResult DmxSourceRouter::publish_cached_locked(
             false};
     }
 
-    ++diagnostics_.physical_publish_attempts;
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        ++diagnostics_.physical_publish_attempts;
+    }
     const bool published =
         static_cast<bool>(physical_publish_) &&
         physical_publish_(*physical);
 
     if (!published) {
-        ++diagnostics_.physical_publish_failures;
+        if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+            ++diagnostics_.physical_publish_failures;
+        }
         update_artnet_output_active_locked();
         return DmxSourceRouteResult{
             true,
@@ -146,7 +168,9 @@ DmxSourceRouteResult DmxSourceRouter::publish_cached_locked(
             false};
     }
 
-    ++diagnostics_.physical_snapshots_published;
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        ++diagnostics_.physical_snapshots_published;
+    }
     diagnostics_.last_physical_generation = physical->generation();
     last_physical_source_ = source;
     update_artnet_output_active_locked();

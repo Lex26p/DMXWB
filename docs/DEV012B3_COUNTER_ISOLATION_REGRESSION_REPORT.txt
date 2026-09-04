@@ -1,0 +1,55 @@
+=== DMXWB DEV-012B3 COUNTER ISOLATION REGRESSION ACCEPTANCE ===
+generated_utc: 2026-09-01T14:14:37Z
+source_head: a3e8ab06b84f3c63f41422a5e0524fac32f15a6a
+source_worktree: modified
+artifact_sha256: b8fd6bf64695a9e99ac0cddd7cc4c2f8505144c05296cc7b694bed8dc98c6ff8
+target: root@10.200.200.1
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+artnet_port_address: 0
+fixed_refresh_hz: 44
+dev012b_systemd_unit_contract: PASS
+dev012b_no_mosquitto_systemd_dependency: PASS
+dev012b_bounded_journald_event_contract: PASS
+dev012b_structured_retained_status_contract: PASS
+dev012b_no_cumulative_status_telemetry_contract: PASS
+dev012b_status_build_assertion_registered: PASS
+dev012b_corrected_wb8_acceptance_contract: PASS
+dev012b3_counter_isolation_regression_contract: PASS
+dev012b_artnet_diagnostics_thread_guard: PASS
+dev012b_standard_wb_homeui_hidden_controls_contract: PASS
+dev012b_no_monitoring_subsystem: PASS
+=== DMXWB DEV-012B STATIC OPERATIONAL CONTRACT PASS ===
+local_static_operational_contract: PASS
+target_identity: RELEASE_NAME=wb-2606SUITE=stableTARGET=wb8/bullseyeREPO_PREFIX=
+no_running_dmxwb_process: PASS
+original_retained_topics_captured: PASS
+production_binary_installed_sha256: PASS (b8fd6bf64695a9e99ac0cddd7cc4c2f8505144c05296cc7b694bed8dc98c6ff8)
+systemctl_start: PASS (pid=220885)
+retained_operational_status: PASS
+systemd_start_physical_red_user: PASS
+artnet_blue_physical_user: PASS
+artnet_factual_status_live: PASS
+artnet_to_mqtt_red_physical_user: PASS
+explicit_source_switch_same_process: PASS (pid=220885)
+systemctl_clean_stop_no_restart: PASS
+systemctl_clean_stop_state_flush: PASS
+systemd_second_start_state_restore_user: PASS
+systemctl_restart: PASS (222872 -> 223252)
+systemd_crash_recovery: PASS (223252 -> 223892)
+systemd_crash_recovery_physical_user: PASS
+mosquitto_restart_without_dmxwb_restart: PASS (pid=223892)
+mqtt_reconnect_operational_state: PASS (state=connected, recovery_state=ok)
+mqtt_restart_physical_continuity_user: PASS
+standard_wb_homeui_status_source_only_user: PASS
+journald_lifecycle_events: PASS
+journald_mqtt_recovery_events: PASS
+journald_startup_count: 4
+journald_bounded_event_count: PASS (29)
+final_power_off_user: PASS
+final_clean_service_stop: PASS
+final_state_flush: PASS
+final_serial_port_release: PASS
+original_environment_restored: PASS
+dev012b3_result: PASS
+=== DMXWB DEV-012B3 COUNTER ISOLATION REGRESSION PASS ===

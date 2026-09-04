@@ -85,7 +85,7 @@ for forbidden in [
         fail(f"Group draft editor contains forbidden path/reference {forbidden}")
 
 for token in [
-    ".settings-group-editor",
+    ".settings-entity-editor",
     ".settings-group-list",
     ".settings-group-card",
     ".settings-group-members",

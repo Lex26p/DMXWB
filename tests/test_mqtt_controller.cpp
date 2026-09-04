@@ -250,6 +250,9 @@ void test_source_and_full_republish() {
         update.publications,
         "/devices/dmxwb/controls/source",
         "artnet"), "Source state confirmed through retained system topic");
+    expect_true(find_publication(update.publications, dmxwb::kMqttStatusTopic) == nullptr &&
+                    find_publication(update.publications, "/devices/dmxwb/controls/status") == nullptr,
+        "Source command does not replace integrated operational status");
 
     const auto republish = controller.build_full_republish();
     expect_true(find_publication(republish, "/devices/dmxwb/meta") != nullptr,
@@ -262,8 +265,9 @@ void test_source_and_full_republish() {
         "full reconnect republish includes canonical config");
     expect_true(find_publication(republish, dmxwb::kMqttStateTopic) != nullptr,
         "full reconnect republish includes canonical state");
-    expect_true(find_publication(republish, dmxwb::kMqttStatusTopic) != nullptr,
-        "full reconnect republish includes status snapshot");
+    expect_true(find_publication(republish, dmxwb::kMqttStatusTopic) == nullptr &&
+                    find_publication(republish, "/devices/dmxwb/controls/status") == nullptr,
+        "Controller reconnect republish leaves operational status to integrated runtime");
     bool all_retained = true;
     for (const auto& publication : republish) {
         all_retained = all_retained && publication.retained;
@@ -322,6 +326,9 @@ void test_config_set_atomic_success_and_restart() {
         result_pub->payload.find("\"ok\":true") != std::string::npos &&
         result_pub->payload.find("\"revision\":4") != std::string::npos,
         "successful config result correlates request and committed revision");
+    expect_true(find_publication(update.publications, dmxwb::kMqttStatusTopic) == nullptr &&
+                    find_publication(update.publications, "/devices/dmxwb/controls/status") == nullptr,
+        "Config command does not replace integrated operational status");
 
     const auto flush = runtime.flush_state();
     expect_true(flush.ok(), "config/set reconciled state flush succeeds");
@@ -413,12 +420,14 @@ void test_config_set_fixture_removal_cleans_retained_topics() {
         false);
     const auto update = controller.process_command(*command.command, dmxwb::PersistenceRuntime::time_point{});
     expect_true(update.applied, "Fixture removal config/set applies");
-    const auto* removed_meta = find_publication(update.publications, "/devices/dmxwb_fixture_11/meta");
-    const auto* removed_power = find_publication(update.publications, "/devices/dmxwb_fixture_11/controls/power");
+    const auto cleanup = controller.build_retained_cleanup(
+        runtime.pending_mqtt_retained_cleanup());
+    const auto* removed_meta = find_publication(cleanup, "/devices/dmxwb_fixture_11/meta");
+    const auto* removed_power = find_publication(cleanup, "/devices/dmxwb_fixture_11/controls/power");
     expect_true(removed_meta != nullptr && removed_meta->retained && removed_meta->payload.empty(),
-        "removed Fixture device metadata retained topic is cleared");
+        "removed Fixture device metadata has a durable retained tombstone");
     expect_true(removed_power != nullptr && removed_power->retained && removed_power->payload.empty(),
-        "removed Fixture retained state topic is cleared");
+        "removed Fixture state has a durable retained tombstone");
     expect_true(runtime.config().groups.size() == 1 &&
                 runtime.config().groups[0].members == std::vector<dmxwb::Fixture::Id>{10},
         "Fixture removal config/set automatically cleans Group membership");

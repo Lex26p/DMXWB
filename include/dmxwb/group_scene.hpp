@@ -70,7 +70,10 @@ public:
         const GroupControlCommand& command,
         time_point now);
 
-    [[nodiscard]] SceneOperationResult create_scene(std::string name, time_point now);
+    [[nodiscard]] SceneOperationResult create_scene(
+        std::string name,
+        time_point now,
+        std::optional<std::string> idempotency_request_id = std::nullopt);
     [[nodiscard]] SceneOperationResult overwrite_scene(SceneId scene_id, time_point now);
     [[nodiscard]] SceneOperationResult rename_scene(SceneId scene_id, std::string name, time_point now);
     [[nodiscard]] SceneOperationResult delete_scene(SceneId scene_id, time_point now);
@@ -100,7 +103,11 @@ private:
         const GroupConfigRecord& group,
         const StoredGroupState& stored) const noexcept;
     [[nodiscard]] std::vector<SceneFixtureRecord> capture_scene_snapshot() const;
-    [[nodiscard]] SceneOperationResult commit_scene_config(AppConfig proposed, SceneId scene_id, time_point now);
+    [[nodiscard]] SceneOperationResult commit_scene_config(
+        AppConfig proposed,
+        SceneId scene_id,
+        time_point now,
+        std::optional<SceneCreateIdempotencyRecord> idempotency_record = std::nullopt);
 
     PersistenceRuntime& runtime_;
     std::vector<StoredGroupState> group_states_;

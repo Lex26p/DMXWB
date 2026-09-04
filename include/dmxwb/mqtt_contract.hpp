@@ -57,6 +57,8 @@ enum class MqttCommandType {
     group_reset,
     scene_name,
     scene_apply,
+    scene_rename_request,
+    scene_apply_request,
     scene_create,
     scene_overwrite,
     scene_delete,
@@ -127,9 +129,7 @@ enum class MqttApplicationStatus {
 [[nodiscard]] std::string_view mqtt_application_status_name(MqttApplicationStatus status) noexcept;
 
 [[nodiscard]] std::vector<MqttPublication> build_system_metadata_publications();
-[[nodiscard]] std::vector<MqttPublication> build_system_state_publications(
-    MqttApplicationStatus status,
-    PersistedSource source);
+[[nodiscard]] std::vector<MqttPublication> build_system_source_publications(PersistedSource source);
 
 [[nodiscard]] std::vector<MqttPublication> build_fixture_metadata_publications(const Fixture& fixture);
 [[nodiscard]] std::vector<MqttPublication> build_fixture_state_publications(const Fixture& fixture);
@@ -147,9 +147,8 @@ enum class MqttApplicationStatus {
 
 // Internal/web snapshots уже сериализованы владельцами данных. Эта функция
 // только сопоставляет канонические payload с retained MQTT topics.
-[[nodiscard]] std::vector<MqttPublication> build_internal_snapshot_publications(
+[[nodiscard]] std::vector<MqttPublication> build_internal_model_publications(
     std::string config_json,
-    std::string state_json,
-    std::string status_json);
+    std::string state_json);
 
 }  // namespace dmxwb

@@ -298,6 +298,43 @@ void test_rejects_nonphysical_snapshot_and_reports_sink_failure() {
         "failed sink publish is not counted as physical success");
 }
 
+void test_production_router_preserves_routing_without_counters() {
+    RecordingPhysical physical;
+    dmxwb::DmxSourceRouter router{
+        dmxwb::PersistedSource::mqtt,
+        [&physical](const dmxwb::DmxSnapshot& snapshot) {
+            return physical.publish(snapshot);
+        },
+        dmxwb::InstrumentationMode::production};
+
+    const auto mqtt = router.publish_mqtt_snapshot(make_snapshot(4, 10, 21, 22));
+    const auto artnet = router.publish_artnet_snapshot(make_snapshot(4, 20, 31, 32));
+    const auto switched = router.select_source(dmxwb::PersistedSource::artnet);
+    const auto rejected = router.publish_artnet_snapshot(make_snapshot(301, 30, 41, 42));
+
+    expect_true(mqtt.physical_published && !artnet.physical_publish_attempted &&
+                    switched.physical_published && !rejected.accepted,
+        "production router preserves selected-source, background-cache and rejection behavior");
+    expect_true(physical.snapshots_.size() == 2 &&
+                    physical.snapshots_.back().channel(1) == std::optional<std::uint8_t>{31},
+        "production router switches one whole cached Art-Net snapshot");
+
+    const auto diagnostics = router.diagnostics();
+    expect_true(diagnostics.mqtt_snapshots_received == 0 &&
+                    diagnostics.artnet_snapshots_received == 0 &&
+                    diagnostics.source_switches == 0 &&
+                    diagnostics.source_switches_without_snapshot == 0 &&
+                    diagnostics.physical_publish_attempts == 0 &&
+                    diagnostics.physical_snapshots_published == 0 &&
+                    diagnostics.physical_publish_failures == 0 &&
+                    diagnostics.rejected_snapshots == 0,
+        "production router does not accumulate engineering counters");
+    expect_true(diagnostics.selected_source == dmxwb::PersistedSource::artnet &&
+                    diagnostics.last_physical_generation == 2 &&
+                    diagnostics.artnet_output_active,
+        "production router retains factual source and algorithmic generation state");
+}
+
 }  // namespace
 
 int main() {
@@ -306,6 +343,7 @@ int main() {
     test_initial_artnet_keeps_mqtt_background_only();
     test_clear_artnet_snapshot_invalidates_old_universe_without_blackout();
     test_rejects_nonphysical_snapshot_and_reports_sink_failure();
+    test_production_router_preserves_routing_without_counters();
 
     if (failures != 0) {
         std::cerr << failures << " DMX source router test(s) failed\n";

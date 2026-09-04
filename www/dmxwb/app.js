@@ -1,4 +1,5 @@
 import {
+  addFixtureDraft,
   addGroupDraft,
   configDraftInfo,
   createInitialModel,
@@ -8,11 +9,12 @@ import {
   sceneSnapshotMatchesState,
   sceneViewModels,
   selectedSource,
+  removeFixtureDraft,
   removeGroupDraft,
   resetConfigDraft,
-  resizeFixtureDraft,
   setConfigSnapshot,
   setConnection,
+  setDaemonStatus,
   setGroupControlState,
   setStateSnapshot,
   setStatusSnapshot,
@@ -21,7 +23,7 @@ import {
   structuralGroupDrafts,
   structuralSettings,
   updateConfigDraft,
-} from "./model.js?v=011ru1";
+} from "./model.js?v=014a";
 import {
   MQTT_CONFIG_RESULT_TOPIC,
   MQTT_CONFIG_SET_TOPIC,
@@ -29,6 +31,7 @@ import {
   MQTT_SCENE_CREATE_TOPIC,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
+  MQTT_SYSTEM_STATUS_TOPIC,
   MQTT_SYSTEM_SOURCE_COMMAND_TOPIC,
   MqttWebSocketClient,
   fixtureCommandTopic,
@@ -38,7 +41,7 @@ import {
   parseGroupStateTopic,
   sceneCommandTopic,
   sceneLifecycleTopic,
-} from "./mqtt-client.js?v=011ru1";
+} from "./mqtt-client.js?v=014a";
 
 let model = createInitialModel();
 let fixtureStructureKey = "";
@@ -48,13 +51,17 @@ const fixturePublishers = new Map();
 const groupPublishers = new Map();
 const LIVE_PUBLISH_INTERVAL_MS = 40; // 25/s, inside the required 20–30/s window.
 const LIVE_CONFIRMATION_TIMEOUT_MS = 2000;
+const COMMAND_RESULT_TIMEOUT_MS = 5000;
 const pendingConfirmations = new Map();
 let renderFramePending = false;
 let sceneRequestCounter = 0;
 let configRequestCounter = 0;
 let pendingConfigSet = null;
+let uncertainConfigSet = null;
 let settingsResult = { kind: "idle", text: "" };
+const invalidNumericSettings = new Set();
 const pendingSceneLifecycle = new Map();
+let uncertainSceneCreate = null;
 const pendingSceneRenames = new Map();
 let pendingSceneApply = null;
 let sceneResult = { kind: "idle", text: "" };
@@ -142,12 +149,13 @@ const elements = {
   connectionTitle: document.querySelector("#connection-title"),
   settings: {
     dmxPort: document.querySelector("#setting-dmx-port"),
-    fixtureCount: document.querySelector("#setting-fixture-count"),
     startAddress: document.querySelector("#setting-start-address"),
     artnetUniverse: document.querySelector("#setting-artnet-universe"),
     draftBadge: document.querySelector("#draft-badge"),
     legacyNote: document.querySelector("#legacy-universe-note"),
     result: document.querySelector("#settings-result"),
+    fixtureList: document.querySelector("#settings-fixture-list"),
+    addFixtureButton: document.querySelector("#settings-add-fixture-button"),
     groupList: document.querySelector("#settings-group-list"),
     addGroupButton: document.querySelector("#settings-add-group-button"),
     resetButton: document.querySelector("#settings-reset-button"),
@@ -189,8 +197,14 @@ function renderConnection() {
     offline: "Нет связи",
   };
 
-  elements.connectionTitle.textContent =
-    labels[connection.state] ?? labels.offline;
+  if (connection.connected && !model.daemon.known) {
+    elements.connectionTitle.textContent = "Ожидание статуса DMXWB…";
+  } else if (connection.connected && !model.daemon.available) {
+    elements.connectionTitle.textContent = "Служба DMXWB недоступна";
+  } else {
+    elements.connectionTitle.textContent =
+      labels[connection.state] ?? labels.offline;
+  }
 
   elements.connectionIndicator.classList.remove(
     "status-dot--online",
@@ -198,8 +212,10 @@ function renderConnection() {
     "status-dot--offline",
   );
 
-  if (connection.connected) {
+  if (connection.connected && model.daemon.available) {
     elements.connectionIndicator.classList.add("status-dot--online");
+  } else if (connection.connected && !model.daemon.known) {
+    elements.connectionIndicator.classList.add("status-dot--connecting");
   } else if (
     connection.state === "connecting" ||
     connection.state === "reconnecting"
@@ -211,7 +227,10 @@ function renderConnection() {
 }
 
 function canPublishCommands() {
-  return model.connection.connected === true;
+  return (
+    model.connection.connected === true &&
+    model.daemon.available === true
+  );
 }
 
 function publishCommand(topic, payload) {
@@ -822,10 +841,28 @@ function setSettingsResult(kind, text) {
 }
 
 function clearPendingConfigSet(reason = "") {
-  const hadPending = pendingConfigSet !== null;
+  if (!pendingConfigSet) {
+    return;
+  }
+
+  const transaction = pendingConfigSet;
+  if (transaction.timer) {
+    window.clearTimeout(transaction.timer);
+  }
   pendingConfigSet = null;
-  if (reason && hadPending) {
+  uncertainConfigSet = {
+    requestId: transaction.requestId,
+    proposal: transaction.proposal,
+    baseRevision: transaction.baseRevision,
+  };
+  if (reason) {
     settingsResult = { kind: "error", text: reason };
+  }
+
+  if (transaction.lastFactualSnapshot) {
+    maybeConfirmConfigSet(transaction.lastFactualSnapshot);
+  } else if (model.connection.connected) {
+    mqttClient.refreshSubscription(MQTT_CONFIG_TOPIC);
   }
 }
 
@@ -842,12 +879,23 @@ function configErrorText(errorCode) {
 }
 
 function handleConfigSetResult(result) {
-  if (!pendingConfigSet || result.request_id !== pendingConfigSet.requestId) {
+  const pendingMatches = pendingConfigSet?.requestId === result.request_id;
+  const uncertainMatches = uncertainConfigSet?.requestId === result.request_id;
+  if (!pendingMatches && !uncertainMatches) {
     return false;
   }
 
+  const transaction = pendingMatches ? pendingConfigSet : uncertainConfigSet;
+  if (pendingConfigSet?.timer) {
+    window.clearTimeout(pendingConfigSet.timer);
+  }
   pendingConfigSet = null;
+  uncertainConfigSet = null;
   if (!result.ok) {
+    if (result.error_code === "revision_conflict") {
+      uncertainConfigSet = transaction;
+      mqttClient.refreshSubscription(MQTT_CONFIG_TOPIC);
+    }
     settingsResult = {
       kind: "error",
       text: configErrorText(result.error_code),
@@ -856,7 +904,13 @@ function handleConfigSetResult(result) {
     return true;
   }
 
+  const confirmedConfig = {
+    ...transaction.proposal,
+    revision: result.revision,
+  };
+  model = setConfigSnapshot(model, confirmedConfig);
   model = resetConfigDraft(model);
+  clearNumericSettingsValidation();
   settingsResult = {
     kind: "success",
     text: "Конфигурация сохранена.",
@@ -865,11 +919,56 @@ function handleConfigSetResult(result) {
   return true;
 }
 
+function maybeConfirmConfigSet(snapshot) {
+  const transaction = pendingConfigSet ?? uncertainConfigSet;
+  if (!transaction?.proposal) {
+    return;
+  }
+
+  const factualConfig = { ...snapshot };
+  const proposedConfig = { ...transaction.proposal };
+  delete factualConfig.revision;
+  delete proposedConfig.revision;
+  if (JSON.stringify(factualConfig) !== JSON.stringify(proposedConfig)) {
+    if (pendingConfigSet) {
+      pendingConfigSet.lastFactualSnapshot = snapshot;
+      return;
+    }
+
+    uncertainConfigSet = null;
+    const factualRevision = Number(snapshot.revision);
+    if (factualRevision === transaction.baseRevision) {
+      settingsResult = {
+        kind: "error",
+        text: "Изменение не применилось. Черновик можно отправить повторно.",
+      };
+    } else {
+      settingsResult = {
+        kind: "error",
+        text: "Конфигурация изменилась. Отмените черновик и повторите изменения.",
+      };
+    }
+    return;
+  }
+
+  if (pendingConfigSet?.timer) {
+    window.clearTimeout(pendingConfigSet.timer);
+  }
+  pendingConfigSet = null;
+  uncertainConfigSet = null;
+  model = resetConfigDraft(model);
+  clearNumericSettingsValidation();
+  settingsResult = {
+    kind: "success",
+    text: "Конфигурация сохранена.",
+  };
+}
+
 function parseUnsignedSetting(input, minimum, maximum) {
-  if (!/^[0-9]+$/.test(input.value)) {
+  if (!/^[0-9]+$/.test(input.value.trim())) {
     return null;
   }
-  const value = Number(input.value);
+  const value = Number(input.value.trim());
   if (
     !Number.isSafeInteger(value) ||
     value < minimum ||
@@ -880,9 +979,110 @@ function parseUnsignedSetting(input, minimum, maximum) {
   return value;
 }
 
+function clearNumericSettingsValidation() {
+  invalidNumericSettings.clear();
+  for (const input of [
+    elements.settings.startAddress,
+    elements.settings.artnetUniverse,
+  ]) {
+    input.setAttribute("aria-invalid", "false");
+  }
+}
+
+function validateNumericSettingsForm() {
+  const specifications = [
+    {
+      key: "startAddress",
+      label: "Начальный адрес",
+      minimum: 1,
+      maximum: 300,
+    },
+    {
+      key: "artnetUniverse",
+      label: "Вселенная Art-Net",
+      minimum: 0,
+      maximum: 32767,
+    },
+  ];
+  const values = {
+    fixtureCount: structuralSettings(model)?.fixtureCount ?? 0,
+  };
+  const errors = [];
+
+  invalidNumericSettings.clear();
+  for (const specification of specifications) {
+    const input = elements.settings[specification.key];
+    const value = parseUnsignedSetting(
+      input,
+      specification.minimum,
+      specification.maximum,
+    );
+    if (value === null) {
+      invalidNumericSettings.add(specification.key);
+      input.setAttribute("aria-invalid", "true");
+      errors.push(
+        `${specification.label}: введите целое число от ` +
+          `${specification.minimum} до ${specification.maximum}.`,
+      );
+      continue;
+    }
+
+    input.setAttribute("aria-invalid", "false");
+    values[specification.key] = value;
+  }
+
+  if (
+    Number.isSafeInteger(values.fixtureCount) &&
+    Number.isSafeInteger(values.startAddress) &&
+    values.fixtureCount > 0
+  ) {
+    const lastAddress =
+      values.startAddress + values.fixtureCount * 4 - 1;
+    if (lastAddress > 300) {
+      elements.settings.startAddress.setAttribute("aria-invalid", "true");
+      errors.push(
+        `Диапазон светильников заканчивается на адресе ${lastAddress}; ` +
+          "максимальный физический адрес — 300.",
+      );
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    values,
+    error: errors[0] ?? "",
+  };
+}
+
 function publishConfigDraft() {
+  const validation = validateNumericSettingsForm();
+  if (!validation.valid) {
+    settingsResult = { kind: "error", text: validation.error };
+    scheduleRender();
+    return false;
+  }
+
   const info = configDraftInfo(model);
-  if (!info?.dirty || pendingConfigSet || !canPublishCommands()) {
+  if (
+    !info?.dirty ||
+    info.stale ||
+    pendingConfigSet ||
+    uncertainConfigSet ||
+    !canPublishCommands()
+  ) {
+    return false;
+  }
+
+  if (
+    info.proposal.fixtures?.count !== validation.values.fixtureCount ||
+    info.proposal.fixtures?.start_address !== validation.values.startAddress ||
+    info.proposal.artnet?.universe !== validation.values.artnetUniverse
+  ) {
+    settingsResult = {
+      kind: "error",
+      text: "Значения формы изменились. Проверьте поля перед применением.",
+    };
+    scheduleRender();
     return false;
   }
 
@@ -897,7 +1097,22 @@ function publishConfigDraft() {
     return false;
   }
 
-  pendingConfigSet = { requestId };
+  const timer = window.setTimeout(() => {
+    if (pendingConfigSet?.requestId !== requestId || pendingConfigSet.timer !== timer) {
+      return;
+    }
+    clearPendingConfigSet(
+      "Результат не получен. Проверяем фактическую конфигурацию DMXWB.",
+    );
+    scheduleRender();
+  }, COMMAND_RESULT_TIMEOUT_MS);
+  pendingConfigSet = {
+    requestId,
+    timer,
+    proposal: info.proposal,
+    baseRevision: info.baseRevision,
+    lastFactualSnapshot: null,
+  };
   settingsResult = {
     kind: "pending",
     text: "Применение…",
@@ -920,10 +1135,23 @@ function clearScenePending(reason = "") {
   const hadPending =
     pendingSceneRenames.size > 0 ||
     pendingSceneLifecycle.size > 0 ||
-    pendingSceneApply !== null;
+    pendingSceneApply !== null ||
+    uncertainSceneCreate !== null;
 
   for (const pending of pendingSceneRenames.values()) {
     window.clearTimeout(pending.timer);
+  }
+  for (const pending of pendingSceneLifecycle.values()) {
+    window.clearTimeout(pending.timer);
+    if (pending.operation === "create") {
+      uncertainSceneCreate = {
+        requestId: pending.requestId,
+        payload: pending.payload,
+      };
+    }
+  }
+  if (pendingSceneApply?.timer) {
+    window.clearTimeout(pendingSceneApply.timer);
   }
   pendingSceneRenames.clear();
   pendingSceneLifecycle.clear();
@@ -934,26 +1162,23 @@ function clearScenePending(reason = "") {
   }
 }
 
-function setPendingSceneRename(sceneId, expected) {
-  const old = pendingSceneRenames.get(sceneId);
-  if (old) {
-    window.clearTimeout(old.timer);
-  }
-
+function setPendingSceneRename(requestId, sceneId, expected) {
   const timer = window.setTimeout(() => {
-    const current = pendingSceneRenames.get(sceneId);
+    const current = pendingSceneRenames.get(requestId);
     if (current?.timer !== timer) {
       return;
     }
-    pendingSceneRenames.delete(sceneId);
+    pendingSceneRenames.delete(requestId);
     sceneResult = {
       kind: "error",
-      text: "Нет подтверждения нового имени сцены.",
+      text: "Нет ответа от DMXWB на переименование сцены.",
     };
     scheduleRender();
-  }, 3000);
+  }, COMMAND_RESULT_TIMEOUT_MS);
 
-  pendingSceneRenames.set(sceneId, {
+  pendingSceneRenames.set(requestId, {
+    requestId,
+    sceneId,
     expected,
     timer,
   });
@@ -961,13 +1186,13 @@ function setPendingSceneRename(sceneId, expected) {
 
 function confirmSceneRenames(scenes) {
   const byId = new Map(scenes.map((scene) => [scene.id, scene]));
-  for (const [sceneId, pending] of [...pendingSceneRenames.entries()]) {
-    const factual = byId.get(sceneId);
+  for (const [requestId, pending] of [...pendingSceneRenames.entries()]) {
+    const factual = byId.get(pending.sceneId);
     if (!factual || factual.name !== pending.expected) {
       continue;
     }
     window.clearTimeout(pending.timer);
-    pendingSceneRenames.delete(sceneId);
+    pendingSceneRenames.delete(requestId);
     sceneResult = {
       kind: "success",
       text: "Имя сцены сохранено.",
@@ -991,24 +1216,63 @@ function parseConfigResult(payload) {
 }
 
 function handleSceneConfigResult(result) {
-  const pending = pendingSceneLifecycle.get(result.request_id);
-  if (!pending) {
-    return;
+  const sceneErrors = {
+    not_found: "Сцена не найдена.",
+    validation: "Параметры сцены некорректны.",
+    idempotency_conflict:
+      "Этот запрос создания уже использован с другим именем сцены.",
+    operation_failed: "Не удалось выполнить операцию со сценой.",
+  };
+
+  if (pendingSceneApply?.requestId === result.request_id) {
+    window.clearTimeout(pendingSceneApply.timer);
+    pendingSceneApply = null;
+    sceneResult = result.ok
+      ? { kind: "success", text: "Сцена применена." }
+      : {
+          kind: "error",
+          text: sceneErrors[result.error_code] ?? "Применение сцены отклонено.",
+        };
+    scheduleRender();
+    return true;
   }
 
+  const pendingRename = pendingSceneRenames.get(result.request_id);
+  if (pendingRename) {
+    window.clearTimeout(pendingRename.timer);
+    pendingSceneRenames.delete(result.request_id);
+    sceneResult = result.ok
+      ? { kind: "success", text: "Имя сцены сохранено." }
+      : {
+          kind: "error",
+          text: sceneErrors[result.error_code] ?? "Переименование сцены отклонено.",
+        };
+    scheduleRender();
+    return true;
+  }
+
+  const pending = pendingSceneLifecycle.get(result.request_id) ??
+    (uncertainSceneCreate?.requestId === result.request_id
+      ? { operation: "create", ...uncertainSceneCreate }
+      : null);
+  if (!pending) {
+    return false;
+  }
+
+  if (pending.timer) {
+    window.clearTimeout(pending.timer);
+  }
   pendingSceneLifecycle.delete(result.request_id);
+  if (uncertainSceneCreate?.requestId === result.request_id) {
+    uncertainSceneCreate = null;
+  }
   if (!result.ok) {
-    const sceneErrors = {
-      not_found: "Сцена не найдена.",
-      validation: "Параметры сцены некорректны.",
-      operation_failed: "Не удалось выполнить операцию со сценой.",
-    };
     sceneResult = {
       kind: "error",
       text: sceneErrors[result.error_code] ?? "Операция сцены отклонена.",
     };
     scheduleRender();
-    return;
+    return true;
   }
 
   if (pending.operation === "create") {
@@ -1025,6 +1289,7 @@ function handleSceneConfigResult(result) {
     text: successText[pending.operation] ?? "Готово.",
   };
   scheduleRender();
+  return true;
 }
 
 function publishSceneLifecycle(topic, payload, operation) {
@@ -1037,7 +1302,39 @@ function publishSceneLifecycle(topic, payload, operation) {
     return false;
   }
 
-  pendingSceneLifecycle.set(requestId, { operation });
+  const timer = window.setTimeout(() => {
+    const current = pendingSceneLifecycle.get(requestId);
+    if (current?.timer !== timer) {
+      return;
+    }
+    pendingSceneLifecycle.delete(requestId);
+    if (operation === "create") {
+      uncertainSceneCreate = {
+        requestId,
+        payload: { ...payload },
+      };
+      sceneResult = {
+        kind: "error",
+        text: "Ответ потерян. Повторное создание использует тот же запрос.",
+      };
+    } else {
+      sceneResult = {
+        kind: "error",
+        text: "Нет ответа от DMXWB. Проверьте фактическое состояние.",
+      };
+    }
+    scheduleRender();
+  }, COMMAND_RESULT_TIMEOUT_MS);
+  pendingSceneLifecycle.set(requestId, {
+    requestId,
+    operation,
+    payload: { ...payload },
+    timer,
+  });
+  if (operation === "create" &&
+      uncertainSceneCreate?.requestId === requestId) {
+    uncertainSceneCreate = null;
+  }
   sceneResult = {
     kind: "pending",
     text: "Выполнение…",
@@ -1119,7 +1416,9 @@ function updateSceneCards(scenes) {
     }
 
     const name = card.querySelector("[data-scene-name]");
-    const pendingRename = pendingSceneRenames.get(scene.id);
+    const pendingRename = [...pendingSceneRenames.values()].find(
+      (pending) => pending.sceneId === scene.id,
+    );
 
     if (document.activeElement !== name) {
       name.value = pendingRename?.expected ?? scene.name;
@@ -1143,7 +1442,8 @@ function renderSceneControls(scenes) {
   updateSceneCards(scenes);
 
   const connected = canPublishCommands();
-  elements.sceneCreateName.disabled = !connected || pendingSceneLifecycle.size > 0;
+  elements.sceneCreateName.disabled =
+    !connected || pendingSceneLifecycle.size > 0 || uncertainSceneCreate !== null;
   elements.sceneCreateButton.disabled =
     !connected || pendingSceneLifecycle.size > 0 || pendingSceneApply !== null;
 
@@ -1167,6 +1467,7 @@ function maybeConfirmSceneApply() {
     return;
   }
 
+  window.clearTimeout(pendingSceneApply.timer);
   pendingSceneApply = null;
   sceneResult = {
     kind: "success",
@@ -1189,6 +1490,65 @@ function renderStatus() {
   for (const [field, element] of Object.entries(elements.statusFields)) {
     element.textContent = summary[field] ?? "—";
   }
+}
+
+function createSettingsFixtureCard(fixture, index, startAddress) {
+  const card = document.createElement("article");
+  card.className = "settings-fixture-card";
+  card.dataset.settingsFixtureId = String(fixture.id);
+
+  const identity = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = fixture.name;
+  const address = document.createElement("span");
+  address.className = "field-note";
+  const firstAddress = startAddress + index * 4;
+  address.textContent = `ID ${fixture.id} · DMX ${firstAddress}–${firstAddress + 3}`;
+  identity.append(name, address);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "secondary-button settings-fixture-remove";
+  remove.dataset.settingsFixtureRemove = "";
+  remove.textContent = "Удалить";
+
+  card.append(identity, remove);
+  return card;
+}
+
+function renderSettingsFixtureEditor() {
+  const editor = structuralGroupDrafts(model);
+  const settings = structuralSettings(model);
+  const disabled = pendingConfigSet !== null || uncertainConfigSet !== null;
+  const fixtures = editor?.fixtures ?? [];
+  const startAddress = settings?.startAddress ?? 1;
+  const nextLastAddress = startAddress + (fixtures.length + 1) * 4 - 1;
+
+  elements.settings.addFixtureButton.disabled =
+    !editor ||
+    disabled ||
+    invalidNumericSettings.has("startAddress") ||
+    fixtures.length >= 75 ||
+    nextLastAddress > 300;
+  elements.settings.fixtureList.replaceChildren();
+
+  if (!editor || fixtures.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    const title = document.createElement("strong");
+    title.textContent = "Нет светильников";
+    const text = document.createElement("span");
+    text.textContent = "Добавьте первый светильник.";
+    empty.append(title, text);
+    elements.settings.fixtureList.append(empty);
+    return;
+  }
+
+  fixtures.forEach((fixture, index) => {
+    const card = createSettingsFixtureCard(fixture, index, startAddress);
+    card.querySelector("[data-settings-fixture-remove]").disabled = disabled;
+    elements.settings.fixtureList.append(card);
+  });
 }
 
 function createSettingsGroupCard(group, fixtures) {
@@ -1245,9 +1605,10 @@ function createSettingsGroupCard(group, fixtures) {
 
 function renderSettingsGroupEditor() {
   const editor = structuralGroupDrafts(model);
-  const disabled = pendingConfigSet !== null;
+  const disabled = pendingConfigSet !== null || uncertainConfigSet !== null;
 
-  elements.settings.addGroupButton.disabled = !editor || disabled;
+  elements.settings.addGroupButton.disabled =
+    !editor || disabled || editor.fixtures.length === 0;
   elements.settings.groupList.replaceChildren();
 
   if (!editor || editor.groups.length === 0) {
@@ -1281,9 +1642,10 @@ function renderSettings() {
   const fields = elements.settings;
 
   if (!settings || !info) {
+    clearNumericSettingsValidation();
+    renderSettingsFixtureEditor();
     renderSettingsGroupEditor();
     fields.dmxPort.value = "/dev/ttyRS485-1";
-    fields.fixtureCount.value = "";
     fields.startAddress.value = "";
     fields.artnetUniverse.value = "";
     fields.draftBadge.textContent = "Нет конфигурации";
@@ -1293,7 +1655,6 @@ function renderSettings() {
     fields.resetButton.disabled = true;
     for (const input of [
       fields.dmxPort,
-      fields.fixtureCount,
       fields.startAddress,
       fields.artnetUniverse,
     ]) {
@@ -1302,23 +1663,30 @@ function renderSettings() {
     return;
   }
 
+  renderSettingsFixtureEditor();
   renderSettingsGroupEditor();
 
   fields.dmxPort.value = settings.dmxPort;
-  fields.fixtureCount.value = String(settings.fixtureCount);
-  fields.startAddress.value = String(settings.startAddress);
-  fields.artnetUniverse.value = String(settings.artnetUniverse);
+  if (!invalidNumericSettings.has("startAddress")) {
+    fields.startAddress.value = String(settings.startAddress);
+  }
+  if (!invalidNumericSettings.has("artnetUniverse")) {
+    fields.artnetUniverse.value = String(settings.artnetUniverse);
+  }
+
+  const numericValidation = validateNumericSettingsForm();
 
   for (const input of [
     fields.dmxPort,
-    fields.fixtureCount,
     fields.startAddress,
     fields.artnetUniverse,
   ]) {
-    input.disabled = pendingConfigSet !== null;
+    input.disabled = pendingConfigSet !== null || uncertainConfigSet !== null;
   }
 
-  if (!info.dirty) {
+  if (!numericValidation.valid) {
+    fields.draftBadge.textContent = "Некорректное значение";
+  } else if (!info.dirty) {
     fields.draftBadge.textContent = "Сохранено";
   } else if (info.stale) {
     fields.draftBadge.textContent = "Конфигурация изменилась";
@@ -1332,17 +1700,27 @@ function renderSettings() {
 
   fields.result.classList.toggle(
     "settings-result--error",
-    settingsResult.kind === "error",
+    !numericValidation.valid || settingsResult.kind === "error",
   );
   fields.result.classList.toggle(
     "settings-result--success",
-    settingsResult.kind === "success",
+    numericValidation.valid && settingsResult.kind === "success",
   );
-  fields.result.textContent = settingsResult.text;
+  fields.result.textContent = numericValidation.valid
+    ? settingsResult.text
+    : numericValidation.error;
 
   fields.applyButton.disabled =
-    !info.dirty || pendingConfigSet !== null || !canPublishCommands();
-  fields.resetButton.disabled = !info.dirty || pendingConfigSet !== null;
+    !numericValidation.valid ||
+    !info.dirty ||
+    info.stale ||
+    pendingConfigSet !== null ||
+    uncertainConfigSet !== null ||
+    !canPublishCommands();
+  fields.resetButton.disabled =
+    (!info.dirty && numericValidation.valid) ||
+    pendingConfigSet !== null ||
+    uncertainConfigSet !== null;
 }
 
 function render() {
@@ -1373,6 +1751,21 @@ function parseSnapshot(payload) {
 }
 
 function applyMqttMessage(topic, payload) {
+  if (topic === MQTT_SYSTEM_STATUS_TOPIC) {
+    model = setDaemonStatus(model, payload);
+    if (!model.daemon.available) {
+      clearPendingConfirmations();
+      clearPendingConfigSet(
+        "Изменение конфигурации не подтверждено: служба DMXWB недоступна.",
+      );
+      clearScenePending(
+        "Команда сцены не подтверждена: служба DMXWB недоступна.",
+      );
+    }
+    scheduleRender();
+    return;
+  }
+
   if (topic === MQTT_CONFIG_RESULT_TOPIC) {
     const result = parseConfigResult(payload);
     if (!handleConfigSetResult(result)) {
@@ -1390,6 +1783,7 @@ function applyMqttMessage(topic, payload) {
 
     if (topic === MQTT_CONFIG_TOPIC) {
       model = setConfigSnapshot(model, snapshot);
+      maybeConfirmConfigSet(snapshot);
       const groups = Array.isArray(snapshot.groups) ? snapshot.groups : [];
       mqttClient.subscribe(
         groups.flatMap((group) => {
@@ -1438,8 +1832,54 @@ for (const button of elements.sourceButtons) {
   });
 }
 
+elements.settings.addFixtureButton.addEventListener("click", () => {
+  if (pendingConfigSet || uncertainConfigSet) {
+    return;
+  }
+
+  try {
+    model = addFixtureDraft(model);
+    settingsResult = { kind: "idle", text: "" };
+    scheduleRender();
+  } catch (error) {
+    setSettingsResult("error", String(error?.message ?? error));
+  }
+});
+
+elements.settings.fixtureList.addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-settings-fixture-remove]");
+  if (!remove || remove.disabled || pendingConfigSet || uncertainConfigSet) {
+    return;
+  }
+
+  const card = remove.closest("[data-settings-fixture-id]");
+  if (!card) {
+    return;
+  }
+
+  const fixtureId = Number(card.dataset.settingsFixtureId);
+  const editor = structuralGroupDrafts(model);
+  const fixture = editor?.fixtures.find(
+    (candidate) => Number(candidate.id) === fixtureId,
+  );
+  const fixtureName = fixture?.name ?? `Светильник ${fixtureId}`;
+  if (!window.confirm(`Удалить «${fixtureName}»?`)) {
+    return;
+  }
+
+  model = removeFixtureDraft(model, fixtureId);
+  settingsResult = { kind: "idle", text: "" };
+  scheduleRender();
+});
+
 elements.settings.addGroupButton.addEventListener("click", () => {
-  if (pendingConfigSet) {
+  const editor = structuralGroupDrafts(model);
+  if (
+    pendingConfigSet ||
+    uncertainConfigSet ||
+    !editor ||
+    editor.fixtures.length === 0
+  ) {
     return;
   }
 
@@ -1454,7 +1894,7 @@ elements.settings.addGroupButton.addEventListener("click", () => {
 
 elements.settings.groupList.addEventListener("change", (event) => {
   const checkbox = event.target.closest("[data-settings-group-member]");
-  if (!checkbox || pendingConfigSet) {
+  if (!checkbox || pendingConfigSet || uncertainConfigSet) {
     return;
   }
 
@@ -1479,7 +1919,7 @@ elements.settings.groupList.addEventListener("change", (event) => {
 
 elements.settings.groupList.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-settings-group-remove]");
-  if (!remove || remove.disabled || pendingConfigSet) {
+  if (!remove || remove.disabled || pendingConfigSet || uncertainConfigSet) {
     return;
   }
 
@@ -1505,54 +1945,39 @@ elements.settings.dmxPort.addEventListener("change", () => {
   scheduleRender();
 });
 
-elements.settings.fixtureCount.addEventListener("input", () => {
-  const count = parseUnsignedSetting(elements.settings.fixtureCount, 0, 75);
-  if (count === null) {
-    return;
-  }
-  try {
-    model = resizeFixtureDraft(model, count);
-    settingsResult = { kind: "idle", text: "" };
-    scheduleRender();
-  } catch (error) {
-    setSettingsResult("error", String(error?.message ?? error));
-  }
-});
-
 elements.settings.startAddress.addEventListener("input", () => {
-  const value = parseUnsignedSetting(elements.settings.startAddress, 1, 300);
-  if (value === null) {
+  const validation = validateNumericSettingsForm();
+  if (!Number.isSafeInteger(validation.values.startAddress)) {
+    scheduleRender();
     return;
   }
   model = updateConfigDraft(model, (draft) => {
     draft.fixtures ??= {};
-    draft.fixtures.start_address = value;
+    draft.fixtures.start_address = validation.values.startAddress;
   });
   settingsResult = { kind: "idle", text: "" };
   scheduleRender();
 });
 
 elements.settings.artnetUniverse.addEventListener("input", () => {
-  const value = parseUnsignedSetting(
-    elements.settings.artnetUniverse,
-    0,
-    32767,
-  );
-  if (value === null) {
+  const validation = validateNumericSettingsForm();
+  if (!Number.isSafeInteger(validation.values.artnetUniverse)) {
+    scheduleRender();
     return;
   }
   model = updateConfigDraft(model, (draft) => {
     draft.artnet ??= {};
-    draft.artnet.universe = value;
+    draft.artnet.universe = validation.values.artnetUniverse;
   });
   settingsResult = { kind: "idle", text: "" };
   scheduleRender();
 });
 
 elements.settings.resetButton.addEventListener("click", () => {
-  if (pendingConfigSet) {
+  if (pendingConfigSet || uncertainConfigSet) {
     return;
   }
+  clearNumericSettingsValidation();
   model = resetConfigDraft(model);
   settingsResult = { kind: "idle", text: "" };
   scheduleRender();
@@ -1567,13 +1992,13 @@ elements.sceneCreateButton.addEventListener("click", () => {
     return;
   }
 
-  const requestId = makeSceneRequestId("create");
+  const payload = uncertainSceneCreate?.payload ?? {
+    request_id: makeSceneRequestId("create"),
+    name: elements.sceneCreateName.value,
+  };
   publishSceneLifecycle(
     MQTT_SCENE_CREATE_TOPIC,
-    {
-      request_id: requestId,
-      name: elements.sceneCreateName.value,
-    },
+    payload,
     "create",
   );
 });
@@ -1597,8 +2022,14 @@ elements.sceneList.addEventListener("change", (event) => {
   }
   const sceneId = Number(card.dataset.sceneId);
 
-  if (publishCommand(sceneCommandTopic(sceneId, "name"), name.value)) {
-    setPendingSceneRename(sceneId, name.value);
+  const requestId = makeSceneRequestId("rename");
+  if (
+    publishCommand(
+      sceneLifecycleTopic(sceneId, "rename"),
+      JSON.stringify({ request_id: requestId, name: name.value }),
+    )
+  ) {
+    setPendingSceneRename(requestId, sceneId, name.value);
     sceneResult = {
       kind: "pending",
       text: "Ожидание подтверждения нового имени…",
@@ -1626,8 +2057,30 @@ elements.sceneList.addEventListener("click", (event) => {
 
   const action = button.dataset.sceneAction;
   if (action === "apply") {
-    if (publishCommand(sceneCommandTopic(sceneId, "apply"), "1")) {
+    const requestId = makeSceneRequestId("apply");
+    if (
+      publishCommand(
+        sceneLifecycleTopic(sceneId, "apply"),
+        JSON.stringify({ request_id: requestId }),
+      )
+    ) {
+      const timer = window.setTimeout(() => {
+        if (
+          pendingSceneApply?.requestId !== requestId ||
+          pendingSceneApply.timer !== timer
+        ) {
+          return;
+        }
+        pendingSceneApply = null;
+        sceneResult = {
+          kind: "error",
+          text: "Нет ответа от DMXWB на применение сцены.",
+        };
+        scheduleRender();
+      }, COMMAND_RESULT_TIMEOUT_MS);
       pendingSceneApply = {
+        requestId,
+        timer,
         scene: {
           ...scene,
           fixtures: scene.fixtures.map((fixture) => ({ ...fixture })),
@@ -1949,6 +2402,7 @@ mqttClient.subscribe([
   MQTT_CONFIG_RESULT_TOPIC,
   MQTT_STATE_TOPIC,
   MQTT_STATUS_TOPIC,
+  MQTT_SYSTEM_STATUS_TOPIC,
 ]);
 
 window.addEventListener(

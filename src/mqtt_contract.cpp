@@ -18,6 +18,8 @@ constexpr std::string_view kScenePrefix = "/devices/dmxwb_scene_";
 constexpr std::string_view kControlsMarker = "/controls/";
 constexpr std::string_view kCommandSuffix = "/on";
 constexpr std::string_view kSceneLifecyclePrefix = "/dmxwb/scenes/";
+constexpr std::string_view kSceneRenameSuffix = "/rename";
+constexpr std::string_view kSceneApplySuffix = "/apply";
 constexpr std::string_view kSceneOverwriteSuffix = "/overwrite";
 constexpr std::string_view kSceneDeleteSuffix = "/delete";
 
@@ -91,53 +93,6 @@ struct ParsedDeviceCommandTopic final {
         return false;
     }
     output = RgbwValues{red, green, blue, 0};
-    return true;
-}
-
-[[nodiscard]] bool is_valid_utf8(std::string_view text) noexcept {
-    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
-    std::size_t index = 0;
-    while (index < text.size()) {
-        const auto first = bytes[index];
-        if (first <= 0x7FU) {
-            ++index;
-            continue;
-        }
-
-        std::size_t continuation_count = 0;
-        std::uint32_t codepoint = 0;
-        if (first >= 0xC2U && first <= 0xDFU) {
-            continuation_count = 1;
-            codepoint = static_cast<std::uint32_t>(first & 0x1FU);
-        } else if (first >= 0xE0U && first <= 0xEFU) {
-            continuation_count = 2;
-            codepoint = static_cast<std::uint32_t>(first & 0x0FU);
-        } else if (first >= 0xF0U && first <= 0xF4U) {
-            continuation_count = 3;
-            codepoint = static_cast<std::uint32_t>(first & 0x07U);
-        } else {
-            return false;
-        }
-
-        if (continuation_count > text.size() - index - 1U) {
-            return false;
-        }
-        for (std::size_t offset = 1; offset <= continuation_count; ++offset) {
-            const auto next = bytes[index + offset];
-            if ((next & 0xC0U) != 0x80U) {
-                return false;
-            }
-            codepoint = (codepoint << 6U) | static_cast<std::uint32_t>(next & 0x3FU);
-        }
-
-        if ((continuation_count == 2U && codepoint < 0x800U) ||
-            (continuation_count == 3U && codepoint < 0x10000U) ||
-            (codepoint >= 0xD800U && codepoint <= 0xDFFFU) ||
-            codepoint > 0x10FFFFU) {
-            return false;
-        }
-        index += continuation_count + 1U;
-    }
     return true;
 }
 
@@ -306,7 +261,13 @@ MqttCommandParseResult parse_mqtt_command(
     if (topic.starts_with(kSceneLifecyclePrefix)) {
         MqttCommandType lifecycle_type = MqttCommandType::scene_overwrite;
         std::string_view suffix;
-        if (topic.ends_with(kSceneOverwriteSuffix)) {
+        if (topic.ends_with(kSceneRenameSuffix)) {
+            lifecycle_type = MqttCommandType::scene_rename_request;
+            suffix = kSceneRenameSuffix;
+        } else if (topic.ends_with(kSceneApplySuffix)) {
+            lifecycle_type = MqttCommandType::scene_apply_request;
+            suffix = kSceneApplySuffix;
+        } else if (topic.ends_with(kSceneOverwriteSuffix)) {
             suffix = kSceneOverwriteSuffix;
         } else if (topic.ends_with(kSceneDeleteSuffix)) {
             lifecycle_type = MqttCommandType::scene_delete;
@@ -379,8 +340,8 @@ MqttCommandParseResult parse_mqtt_command(
     if (parsed_topic->kind == DeviceKind::scene) {
         command.scene_id = parsed_topic->id;
         if (control == "name") {
-            if (!is_valid_utf8(payload)) {
-                return rejected_result("scene name must be valid UTF-8");
+            if (payload.size() > kEntityNameMaxBytes || !is_valid_utf8(payload)) {
+                return rejected_result("scene name must be valid UTF-8 up to 256 bytes");
             }
             command.type = MqttCommandType::scene_name;
             command.text = std::string{payload};
@@ -404,8 +365,9 @@ MqttCommandParseResult parse_mqtt_command(
     }
 
     if (control == "name") {
-        if (!is_valid_utf8(payload)) {
-            return rejected_result(fixture ? "fixture name must be valid UTF-8" : "group name must be valid UTF-8");
+        if (payload.size() > kEntityNameMaxBytes || !is_valid_utf8(payload)) {
+            return rejected_result(fixture ? "fixture name must be valid UTF-8 up to 256 bytes" :
+                                             "group name must be valid UTF-8 up to 256 bytes");
         }
         command.type = fixture ? MqttCommandType::fixture_name : MqttCommandType::group_name;
         command.text = std::string{payload};
@@ -526,15 +488,9 @@ std::vector<MqttPublication> build_system_metadata_publications() {
     return output;
 }
 
-std::vector<MqttPublication> build_system_state_publications(
-    MqttApplicationStatus status,
-    PersistedSource source) {
+std::vector<MqttPublication> build_system_source_publications(PersistedSource source) {
     std::vector<MqttPublication> output;
-    output.reserve(2);
-    append_publication(
-        output,
-        "/devices/dmxwb/controls/status",
-        std::string{mqtt_application_status_name(status)});
+    output.reserve(1);
     append_publication(
         output,
         "/devices/dmxwb/controls/source",
@@ -552,15 +508,15 @@ std::vector<MqttPublication> build_fixture_metadata_publications(const Fixture& 
         append_publication(output, prefix + "/controls/" + std::string{control} + "/meta", std::move(payload));
     };
 
-    add("name", make_control_meta("text", false, true, "Name", "Имя"));
-    add("power", make_control_meta("switch", false, true, "Power", "Питание"));
-    add("red", make_control_meta("range", false, true, "Red", "Красный", 0U, 255U));
-    add("green", make_control_meta("range", false, true, "Green", "Зелёный", 0U, 255U));
-    add("blue", make_control_meta("range", false, true, "Blue", "Синий", 0U, 255U));
-    add("color", make_control_meta("rgb", false, true, "Color", "Цвет"));
-    add("brightness", make_control_meta("range", false, true, "Brightness", "Яркость", 0U, 100U));
-    add("temperature", make_control_meta("range", false, true, "Temperature", "Температура", 0U, 100U));
-    add("reset", make_control_meta("pushbutton", false, true, "Reset", "Сброс"));
+    add("name", make_control_meta("text", false, false, "Name", "Имя"));
+    add("power", make_control_meta("switch", false, false, "Power", "Питание"));
+    add("red", make_control_meta("range", false, false, "Red", "Красный", 0U, 255U));
+    add("green", make_control_meta("range", false, false, "Green", "Зелёный", 0U, 255U));
+    add("blue", make_control_meta("range", false, false, "Blue", "Синий", 0U, 255U));
+    add("color", make_control_meta("rgb", false, false, "Color", "Цвет"));
+    add("brightness", make_control_meta("range", false, false, "Brightness", "Яркость", 0U, 100U));
+    add("temperature", make_control_meta("range", false, false, "Temperature", "Температура", 0U, 100U));
+    add("reset", make_control_meta("pushbutton", false, false, "Reset", "Сброс"));
     return output;
 }
 
@@ -617,15 +573,15 @@ std::vector<MqttPublication> build_group_metadata_publications(const GroupConfig
     const auto add = [&](std::string_view control, std::string payload) {
         append_publication(output, prefix + "/controls/" + std::string{control} + "/meta", std::move(payload));
     };
-    add("name", make_control_meta("text", false, true, "Name", "Имя"));
-    add("power", make_control_meta("switch", false, true, "Power", "Питание"));
-    add("red", make_control_meta("range", false, true, "Red", "Красный", 0U, 255U));
-    add("green", make_control_meta("range", false, true, "Green", "Зелёный", 0U, 255U));
-    add("blue", make_control_meta("range", false, true, "Blue", "Синий", 0U, 255U));
-    add("color", make_control_meta("rgb", false, true, "Color", "Цвет"));
-    add("brightness", make_control_meta("range", false, true, "Brightness", "Яркость", 0U, 100U));
-    add("temperature", make_control_meta("range", false, true, "Temperature", "Температура", 0U, 100U));
-    add("reset", make_control_meta("pushbutton", false, true, "Reset", "Сброс"));
+    add("name", make_control_meta("text", false, false, "Name", "Имя"));
+    add("power", make_control_meta("switch", false, false, "Power", "Питание"));
+    add("red", make_control_meta("range", false, false, "Red", "Красный", 0U, 255U));
+    add("green", make_control_meta("range", false, false, "Green", "Зелёный", 0U, 255U));
+    add("blue", make_control_meta("range", false, false, "Blue", "Синий", 0U, 255U));
+    add("color", make_control_meta("rgb", false, false, "Color", "Цвет"));
+    add("brightness", make_control_meta("range", false, false, "Brightness", "Яркость", 0U, 100U));
+    add("temperature", make_control_meta("range", false, false, "Temperature", "Температура", 0U, 100U));
+    add("reset", make_control_meta("pushbutton", false, false, "Reset", "Сброс"));
     return output;
 }
 
@@ -671,11 +627,11 @@ std::vector<MqttPublication> build_scene_metadata_publications(const SceneConfig
     append_publication(
         output,
         prefix + "/controls/name/meta",
-        make_control_meta("text", false, true, "Name", "Имя"));
+        make_control_meta("text", false, false, "Name", "Имя"));
     append_publication(
         output,
         prefix + "/controls/apply/meta",
-        make_control_meta("pushbutton", false, true, "Apply", "Применить"));
+        make_control_meta("pushbutton", false, false, "Apply", "Применить"));
     return output;
 }
 
@@ -696,15 +652,13 @@ std::vector<MqttPublication> build_scene_retained_cleanup_publications(SceneId s
     return output;
 }
 
-std::vector<MqttPublication> build_internal_snapshot_publications(
+std::vector<MqttPublication> build_internal_model_publications(
     std::string config_json,
-    std::string state_json,
-    std::string status_json) {
+    std::string state_json) {
     std::vector<MqttPublication> output;
-    output.reserve(3);
+    output.reserve(2);
     append_publication(output, std::string{kMqttConfigTopic}, std::move(config_json));
     append_publication(output, std::string{kMqttStateTopic}, std::move(state_json));
-    append_publication(output, std::string{kMqttStatusTopic}, std::move(status_json));
     return output;
 }
 

@@ -142,6 +142,15 @@ void test_group_scene_parser_contract() {
         parsed.command->scene_id == 200 && parsed.command->text == "Вечер",
         "Scene UTF-8 Name /on parsed");
 
+    const std::string boundary_name(dmxwb::kEntityNameMaxBytes, 'x');
+    parsed = dmxwb::parse_mqtt_command(
+        "/devices/dmxwb_group_100/controls/name/on", boundary_name, false);
+    expect_true(parsed.accepted(), "Group rename accepts 256-byte UTF-8 Name");
+    parsed = dmxwb::parse_mqtt_command(
+        "/devices/dmxwb_group_100/controls/name/on", boundary_name + "x", false);
+    expect_true(parsed.status == dmxwb::MqttCommandParseStatus::rejected,
+        "Group rename rejects 257-byte Name");
+
     parsed = dmxwb::parse_mqtt_command(
         "/devices/dmxwb_scene_200/controls/apply/on", "1", false);
     expect_true(parsed.accepted() && parsed.command->type == dmxwb::MqttCommandType::scene_apply,
@@ -171,6 +180,20 @@ void test_group_scene_parser_contract() {
         "Scene lifecycle overwrite stable ID parsed");
 
     parsed = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/200/rename", R"({"request_id":"rename-1","name":"Evening"})", false);
+    expect_true(parsed.accepted() &&
+        parsed.command->type == dmxwb::MqttCommandType::scene_rename_request &&
+        parsed.command->scene_id == 200,
+        "Scene lifecycle rename stable ID parsed");
+
+    parsed = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/200/apply", R"({"request_id":"apply-1"})", false);
+    expect_true(parsed.accepted() &&
+        parsed.command->type == dmxwb::MqttCommandType::scene_apply_request &&
+        parsed.command->scene_id == 200,
+        "Scene lifecycle apply stable ID parsed");
+
+    parsed = dmxwb::parse_mqtt_command(
         "/dmxwb/scenes/200/delete", R"({"request_id":"delete-1"})", true);
     expect_true(parsed.status == dmxwb::MqttCommandParseStatus::ignored,
         "retained Scene lifecycle command ignored");
@@ -181,13 +204,14 @@ void test_group_scene_publication_contract() {
     const dmxwb::GroupControlState state{100, true, 1, 2, 3, 44, 55};
     const auto metadata = dmxwb::build_group_metadata_publications(group);
     expect_true(metadata.size() == 10, "Group metadata has device plus nine controls");
-    bool hidden = true;
+    bool visible = true;
     for (const auto& publication : metadata) {
         if (publication.topic.ends_with("/meta") && publication.topic != "/devices/dmxwb_group_100/meta") {
-            hidden = hidden && publication.payload.find("\"hidden\":true") != std::string::npos;
+            visible = visible && publication.payload.find("\"hidden\":false") != std::string::npos &&
+                publication.payload.find("\"hidden\":true") == std::string::npos;
         }
     }
-    expect_true(hidden, "all Group controls are hidden in standard WB web");
+    expect_true(visible, "all Group controls are visible in standard WB web");
 
     const auto states = dmxwb::build_group_state_publications(group, state);
     expect_true(contains_publication(states, "/devices/dmxwb_group_100/controls/power", "1"),
@@ -198,8 +222,15 @@ void test_group_scene_publication_contract() {
     const dmxwb::SceneConfigRecord scene{200, "Blue pair", {}};
     const auto scene_meta = dmxwb::build_scene_metadata_publications(scene);
     expect_true(scene_meta.size() == 3, "Scene metadata has device, Name and Apply");
-    expect_true(find_publication(scene_meta, "/devices/dmxwb_scene_200/controls/apply/meta") != nullptr,
-        "Scene Apply metadata published");
+    const auto* scene_name_meta =
+        find_publication(scene_meta, "/devices/dmxwb_scene_200/controls/name/meta");
+    const auto* scene_apply_meta =
+        find_publication(scene_meta, "/devices/dmxwb_scene_200/controls/apply/meta");
+    expect_true(
+        scene_name_meta != nullptr && scene_apply_meta != nullptr &&
+            scene_name_meta->payload.find("\"hidden\":false") != std::string::npos &&
+            scene_apply_meta->payload.find("\"hidden\":false") != std::string::npos,
+        "Scene Name and Apply controls are visible in standard WB web");
     const auto scene_state = dmxwb::build_scene_state_publications(scene);
     expect_true(scene_state.size() == 1 && scene_state.front().payload == "Blue pair",
         "Scene only has retained Name state; Apply is stateless");
@@ -396,14 +427,33 @@ void test_scene_lifecycle_controller_contract() {
         "Scene create reuses non-retained config/result correlation contract");
     expect_true(find_publication(update.publications, "/devices/dmxwb_scene_201/meta") != nullptr,
         "Scene create publishes retained Scene device metadata");
+    expect_true(find_publication(update.publications, dmxwb::kMqttStatusTopic) == nullptr &&
+                    find_publication(update.publications, "/devices/dmxwb/controls/status") == nullptr,
+        "Scene create does not publish operational status");
+
+    lifecycle = dmxwb::parse_mqtt_command(
+        "/dmxwb/scenes/201/rename",
+        R"({"request_id":"rename-201","name":"Renamed scene"})",
+        false);
+    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{3});
+    result_pub = find_publication(update.publications, dmxwb::kMqttConfigResultTopic);
+    const auto renamed = std::find_if(
+        runtime.config().scenes.begin(), runtime.config().scenes.end(),
+        [](const dmxwb::SceneConfigRecord& scene) { return scene.id == 201; });
+    expect_true(update.applied && runtime.config().revision == 11 &&
+        renamed != runtime.config().scenes.end() && renamed->name == "Renamed scene" &&
+        result_pub != nullptr &&
+        result_pub->payload.find("\"request_id\":\"rename-201\"") != std::string::npos &&
+        result_pub->payload.find("\"ok\":true") != std::string::npos,
+        "Scene rename returns a correlated success result");
 
     fixture_color = dmxwb::parse_mqtt_command(
         "/devices/dmxwb_fixture_10/controls/color/on", "0;0;255", false);
-    (void)controller.process_command(*fixture_color.command, t0 + std::chrono::milliseconds{3});
+    (void)controller.process_command(*fixture_color.command, t0 + std::chrono::milliseconds{4});
     lifecycle = dmxwb::parse_mqtt_command(
         "/dmxwb/scenes/201/overwrite", R"({"request_id":"overwrite-201"})", false);
-    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{4});
-    expect_true(update.applied && update.snapshot == nullptr && runtime.config().revision == 11,
+    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{5});
+    expect_true(update.applied && update.snapshot == nullptr && runtime.config().revision == 12,
         "Scene overwrite lifecycle persists current state without physical output change");
     const auto overwritten = std::find_if(
         runtime.config().scenes.begin(), runtime.config().scenes.end(),
@@ -411,40 +461,51 @@ void test_scene_lifecycle_controller_contract() {
     expect_true(overwritten != runtime.config().scenes.end() &&
         overwritten->fixtures.front().rgbw == dmxwb::RgbwValues{0, 0, 255, 0},
         "Scene overwrite replaces saved snapshot with current Fixture state");
+    expect_true(find_publication(update.publications, dmxwb::kMqttStatusTopic) == nullptr,
+        "Scene overwrite does not publish operational status");
 
     fixture_color = dmxwb::parse_mqtt_command(
         "/devices/dmxwb_fixture_10/controls/color/on", "255;0;0", false);
-    (void)controller.process_command(*fixture_color.command, t0 + std::chrono::milliseconds{5});
+    (void)controller.process_command(*fixture_color.command, t0 + std::chrono::milliseconds{6});
     auto apply = dmxwb::parse_mqtt_command(
-        "/devices/dmxwb_scene_201/controls/apply/on", "1", false);
-    update = controller.process_command(*apply.command, t0 + std::chrono::milliseconds{6});
-    expect_true(update.applied && update.snapshot != nullptr,
-        "lifecycle-created Scene applies through one whole Controller snapshot");
+        "/dmxwb/scenes/201/apply", R"({"request_id":"apply-201"})", false);
+    update = controller.process_command(*apply.command, t0 + std::chrono::milliseconds{7});
+    result_pub = find_publication(update.publications, dmxwb::kMqttConfigResultTopic);
+    expect_true(update.applied && update.snapshot != nullptr && result_pub != nullptr &&
+        result_pub->payload.find("\"request_id\":\"apply-201\"") != std::string::npos &&
+        result_pub->payload.find("\"ok\":true") != std::string::npos,
+        "lifecycle-created Scene apply returns a correlated success result");
     expect_true(find_publication(update.publications,
         "/devices/dmxwb_fixture_10/controls/color") != nullptr,
         "lifecycle-created Scene Apply publishes factual Fixture state");
+    expect_true(find_publication(update.publications, dmxwb::kMqttStatusTopic) == nullptr,
+        "Scene Apply does not publish operational status");
 
     lifecycle = dmxwb::parse_mqtt_command(
         "/dmxwb/scenes/201/delete", R"({"request_id":"delete-201"})", false);
-    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{7});
-    expect_true(update.applied && update.snapshot == nullptr && runtime.config().revision == 12,
+    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{8});
+    expect_true(update.applied && update.snapshot == nullptr && runtime.config().revision == 13,
         "Scene delete lifecycle atomically removes config without DMX mutation");
     expect_true(std::none_of(
         runtime.config().scenes.begin(), runtime.config().scenes.end(),
         [](const dmxwb::SceneConfigRecord& scene) { return scene.id == 201; }),
         "Scene delete removes stable ID from config");
-    const auto* cleanup = find_publication(update.publications, "/devices/dmxwb_scene_201/meta");
+    const auto durable_cleanup = controller.build_retained_cleanup(
+        runtime.pending_mqtt_retained_cleanup());
+    const auto* cleanup = find_publication(durable_cleanup, "/devices/dmxwb_scene_201/meta");
     expect_true(cleanup != nullptr && cleanup->retained && cleanup->payload.empty(),
-        "Scene lifecycle delete clears retained Scene device topics");
+        "Scene lifecycle delete creates durable retained Scene tombstones");
+    expect_true(find_publication(update.publications, dmxwb::kMqttStatusTopic) == nullptr,
+        "Scene delete does not publish operational status");
 
     lifecycle = dmxwb::parse_mqtt_command(
-        "/dmxwb/scenes/999/delete", R"({"request_id":"missing-999"})", false);
-    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{8});
+        "/dmxwb/scenes/201/apply", R"({"request_id":"apply-deleted-201"})", false);
+    update = controller.process_command(*lifecycle.command, t0 + std::chrono::milliseconds{9});
     result_pub = find_publication(update.publications, dmxwb::kMqttConfigResultTopic);
     expect_true(!update.applied && result_pub != nullptr &&
-        result_pub->payload.find("\"request_id\":\"missing-999\"") != std::string::npos &&
+        result_pub->payload.find("\"request_id\":\"apply-deleted-201\"") != std::string::npos &&
         result_pub->payload.find("\"error_code\":\"not_found\"") != std::string::npos,
-        "missing Scene lifecycle operation returns correlated not_found result");
+        "apply of a concurrently deleted Scene returns correlated not_found result");
 }
 
 void test_config_removes_group_scene_retained_topics() {
@@ -463,14 +524,117 @@ void test_config_removes_group_scene_retained_topics() {
     auto command = dmxwb::parse_mqtt_command(dmxwb::kMqttConfigSetTopic, payload, false);
     const auto update = controller.process_command(*command.command, dmxwb::PersistenceRuntime::time_point{});
     expect_true(update.applied, "structural config removing Group/Scene applies");
-    const auto* group_meta = find_publication(update.publications, "/devices/dmxwb_group_101/meta");
-    const auto* scene_meta = find_publication(update.publications, "/devices/dmxwb_scene_200/meta");
+    const auto cleanup = controller.build_retained_cleanup(
+        runtime.pending_mqtt_retained_cleanup());
+    const auto* group_meta = find_publication(cleanup, "/devices/dmxwb_group_101/meta");
+    const auto* scene_meta = find_publication(cleanup, "/devices/dmxwb_scene_200/meta");
     expect_true(group_meta != nullptr && group_meta->retained && group_meta->payload.empty(),
-        "removed Group device metadata is cleared with empty retained publication");
+        "removed Group device metadata has a durable retained tombstone");
     expect_true(scene_meta != nullptr && scene_meta->retained && scene_meta->payload.empty(),
-        "removed Scene device metadata is cleared with empty retained publication");
+        "removed Scene device metadata has a durable retained tombstone");
     expect_true(find_publication(update.publications, "/devices/dmxwb_group_100/meta") != nullptr,
         "surviving Group metadata is republished after structural config");
+}
+
+void test_scene_create_idempotency_survives_restart_and_is_bounded() {
+    TempDirectory temp;
+    if (!temp.valid()) return;
+    const auto config = make_config();
+    expect_true(prepare_runtime_files(temp, config),
+        "Scene Create idempotency runtime files prepared");
+
+    const std::string payload =
+        R"({"request_id":"idempotent-create","name":"Idempotent Scene"})";
+    {
+        dmxwb::PersistenceRuntime runtime{
+            temp.file("config.json"), temp.file("state.json")};
+        dmxwb::MqttController controller{runtime};
+        auto command = dmxwb::parse_mqtt_command(
+            dmxwb::kMqttSceneCreateTopic, payload, false);
+        const auto first = controller.process_command(
+            *command.command, dmxwb::PersistenceRuntime::time_point{});
+        const auto* first_result = find_publication(
+            first.publications, dmxwb::kMqttConfigResultTopic);
+        expect_true(first.applied && runtime.config().scenes.size() == 2 &&
+                        runtime.config().id_counters.next_scene_id == 202 &&
+                        runtime.config().revision == 10,
+            "first Scene Create commits one monotonic stable ID");
+        expect_true(first_result != nullptr &&
+                        first_result->payload.find("\"entity_id\":201") != std::string::npos &&
+                        first_result->payload.find("\"revision\":10") != std::string::npos,
+            "first Scene Create outcome contains its stable ID and revision");
+
+        const auto replay = controller.process_command(
+            *command.command,
+            dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{1});
+        const auto* replay_result = find_publication(
+            replay.publications, dmxwb::kMqttConfigResultTopic);
+        expect_true(replay.applied && runtime.config().scenes.size() == 2 &&
+                        runtime.config().id_counters.next_scene_id == 202 &&
+                        runtime.config().revision == 10,
+            "same Scene Create request replays without config mutation");
+        expect_true(replay_result != nullptr && first_result != nullptr &&
+                        replay_result->payload == first_result->payload,
+            "same Scene Create request returns the identical correlated outcome");
+
+        auto conflict_command = dmxwb::parse_mqtt_command(
+            dmxwb::kMqttSceneCreateTopic,
+            R"({"request_id":"idempotent-create","name":"Different Scene"})",
+            false);
+        const auto conflict = controller.process_command(
+            *conflict_command.command,
+            dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{2});
+        const auto* conflict_result = find_publication(
+            conflict.publications, dmxwb::kMqttConfigResultTopic);
+        expect_true(!conflict.applied && runtime.config().scenes.size() == 2 &&
+                        runtime.config().revision == 10 &&
+                        conflict_result != nullptr &&
+                        conflict_result->payload.find("idempotency_conflict") != std::string::npos,
+            "same request ID with another Name is rejected without mutation");
+    }
+
+    dmxwb::PersistenceRuntime restarted{
+        temp.file("config.json"), temp.file("state.json")};
+    dmxwb::MqttController restarted_controller{restarted};
+    auto replay_command = dmxwb::parse_mqtt_command(
+        dmxwb::kMqttSceneCreateTopic, payload, false);
+    const auto replay_after_restart = restarted_controller.process_command(
+        *replay_command.command,
+        dmxwb::PersistenceRuntime::time_point{} + std::chrono::milliseconds{3});
+    const auto* restart_result = find_publication(
+        replay_after_restart.publications, dmxwb::kMqttConfigResultTopic);
+    expect_true(replay_after_restart.applied && restarted.config().scenes.size() == 2 &&
+                    restarted.config().revision == 10 && restart_result != nullptr &&
+                    restart_result->payload.find("\"entity_id\":201") != std::string::npos &&
+                    restart_result->payload.find("\"revision\":10") != std::string::npos,
+        "Scene Create idempotency survives process restart");
+
+    bool bounded_creates_applied = true;
+    for (std::size_t index = 0; index < dmxwb::kSceneCreateIdempotencyCapacity; ++index) {
+        const auto request_id = "bounded-" + std::to_string(index);
+        const auto bounded_payload =
+            "{\"request_id\":\"" + request_id +
+            "\",\"name\":\"Bounded Scene\"}";
+        auto command = dmxwb::parse_mqtt_command(
+            dmxwb::kMqttSceneCreateTopic, bounded_payload, false);
+        const auto update = restarted_controller.process_command(
+            *command.command,
+            dmxwb::PersistenceRuntime::time_point{} +
+                std::chrono::milliseconds{4 + static_cast<long long>(index)});
+        bounded_creates_applied = bounded_creates_applied && update.applied;
+    }
+    expect_true(bounded_creates_applied, "bounded Scene Create records commit");
+
+    const auto bounded_state = restarted.capture_state();
+    expect_true(
+        bounded_state.scene_create_idempotency.size() ==
+            dmxwb::kSceneCreateIdempotencyCapacity,
+        "Scene Create idempotency history remains bounded");
+    expect_true(restarted.find_scene_create_idempotency("idempotent-create") == nullptr &&
+                    restarted.find_scene_create_idempotency(
+                        "bounded-" + std::to_string(
+                            dmxwb::kSceneCreateIdempotencyCapacity - 1U)) != nullptr,
+        "bounded history evicts the oldest record and retains the newest");
 }
 
 }  // namespace
@@ -483,6 +647,7 @@ int main() {
     test_names_and_full_republish();
     test_scene_lifecycle_controller_contract();
     test_config_removes_group_scene_retained_topics();
+    test_scene_create_idempotency_survives_restart_and_is_bounded();
 
     if (failures == 0) {
         std::cout << "DMXWB DEV-008B2 MQTT Group/Scene tests: PASS\n";

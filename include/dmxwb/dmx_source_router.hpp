@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmxwb/dmx_snapshot.hpp"
+#include "dmxwb/instrumentation.hpp"
 #include "dmxwb/persistence.hpp"
 
 #include <cstdint>
@@ -47,7 +48,8 @@ public:
 
     DmxSourceRouter(
         PersistedSource initial_source,
-        PhysicalPublish physical_publish);
+        PhysicalPublish physical_publish,
+        InstrumentationMode instrumentation_mode = InstrumentationMode::engineering);
 
     DmxSourceRouter(const DmxSourceRouter&) = delete;
     DmxSourceRouter& operator=(const DmxSourceRouter&) = delete;
@@ -70,6 +72,7 @@ public:
     [[nodiscard]] bool has_artnet_snapshot() const noexcept;
     [[nodiscard]] bool artnet_output_active() const noexcept;
     [[nodiscard]] DmxSourceRouterDiagnostics diagnostics() const noexcept;
+    [[nodiscard]] InstrumentationMode instrumentation_mode() const noexcept;
 
 private:
     [[nodiscard]] DmxSourceRouteResult cache_snapshot_locked(
@@ -93,6 +96,7 @@ private:
     std::shared_ptr<const DmxSnapshot> latest_artnet_;
     std::optional<PersistedSource> last_physical_source_;
     DmxSnapshot::Generation next_physical_generation_{1};
+    InstrumentationMode instrumentation_mode_{InstrumentationMode::engineering};
     DmxSourceRouterDiagnostics diagnostics_{};
 };
 

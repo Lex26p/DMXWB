@@ -10,24 +10,36 @@ DMXWB не заменяет Wiren Board и не является самосто�
 
 ## Статус
 
-Последний завершённый engineering gate:
+Последний подтверждённый engineering step:
 
 ```text
-DEV-011 — static MQTT-only Web UI
-acceptance base: d356b41a99572daaaa58126244b84577ddd449ea
+DEV-013 — full integration and final acceptance
 ```
 
-DEV-011 подтверждён static/host проверками и реальным WB8 acceptance. Web работает
-только через MQTT, а физический DMX продолжает работу независимо от браузера.
+DEV-013A–D подтвердили финальную host/ARM64-сборку, Fixture/Group/Scene/MQTT,
+Art-Net/Source/Web/recovery и полностью офлайн-установленный релиз после reboot
+реального WB8. Исходная среда контроллера после acceptance восстановлена.
 
-Следующий engineering gate:
+Текущая точка процесса:
 
 ```text
-DEV-012 — systemd, diagnostics and fully offline deployment
+DEV-014C — clean-state acceptance and replacement final package
 ```
+
+DEV-014A и DEV-014B получили focused PASS. DEV-014C host/ARM64 PASS собрал
+заменяющий пакет `0.1.1` с `source_id=dev014c-final`. До окончательного
+релиза осталась одна clean-state/reboot проверка этого пакета на WB8.
 
 Актуальная подробная точка проекта:
 [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md).
+
+## Инструкции
+
+- [`docs/WEB_USER_GUIDE.md`](docs/WEB_USER_GUIDE.md) — подключение, Source,
+  светильники, группы, сцены, настройки и восстановление Web-связи.
+- [`docs/INSTALL_UPDATE_REMOVE_GUIDE.md`](docs/INSTALL_UPDATE_REMOVE_GUIDE.md) —
+  пошаговая офлайн-установка, обновление, обычное удаление с сохранением данных,
+  повторная установка, явный purge, проверки и полный справочник команд.
 
 ## Подтверждённая архитектура
 
@@ -236,8 +248,7 @@ bash tools/wb8/build_bullseye_arm64.sh
 ## Что ещё впереди
 
 ```text
-DEV-012 — systemd, diagnostics and fully offline deployment
-DEV-013 — full integration, offline install and 24h acceptance
+DEV-013  — full integration and final acceptance
 ```
 
 До production distribution также остаётся Deferred зарегистрированный Art-Net OEM

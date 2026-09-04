@@ -13,6 +13,8 @@ namespace dmxwb {
 
 inline constexpr std::uint32_t kPersistenceVersion = 1;
 inline constexpr std::uint16_t kArtNetUniverseMax = 32767;
+inline constexpr std::size_t kEntityNameMaxBytes = 256;
+inline constexpr std::size_t kSceneCreateIdempotencyCapacity = 64;
 
 using GroupId = std::uint64_t;
 using SceneId = std::uint64_t;
@@ -84,10 +86,35 @@ struct FixtureRuntimeState final {
     [[nodiscard]] friend bool operator==(const FixtureRuntimeState&, const FixtureRuntimeState&) = default;
 };
 
+struct MqttRetainedCleanup final {
+    std::vector<Fixture::Id> fixture_ids;
+    std::vector<GroupId> group_ids;
+    std::vector<SceneId> scene_ids;
+
+    [[nodiscard]] bool empty() const noexcept {
+        return fixture_ids.empty() && group_ids.empty() && scene_ids.empty();
+    }
+    [[nodiscard]] friend bool operator==(
+        const MqttRetainedCleanup&,
+        const MqttRetainedCleanup&) = default;
+};
+
+struct SceneCreateIdempotencyRecord final {
+    std::string request_id;
+    std::string name;
+    SceneId scene_id{0};
+    std::uint64_t revision{0};
+    [[nodiscard]] friend bool operator==(
+        const SceneCreateIdempotencyRecord&,
+        const SceneCreateIdempotencyRecord&) = default;
+};
+
 struct AppState final {
     std::uint32_t version{kPersistenceVersion};
     PersistedSource source{PersistedSource::mqtt};
     std::vector<FixtureRuntimeState> fixtures;
+    MqttRetainedCleanup mqtt_retained_cleanup;
+    std::vector<SceneCreateIdempotencyRecord> scene_create_idempotency;
     [[nodiscard]] friend bool operator==(const AppState&, const AppState&) = default;
 };
 
@@ -122,11 +149,25 @@ struct PersistenceResult final {
 [[nodiscard]] AppConfig make_default_config();
 [[nodiscard]] AppState make_default_state(const AppConfig& config);
 
+[[nodiscard]] bool is_valid_utf8(std::string_view text) noexcept;
 [[nodiscard]] PersistenceError validate_config(const AppConfig& config);
+// Validates invariants that require the last committed configuration: ID
+// generators never move backwards and an ID absent from the current model can
+// never be reintroduced below the already allocated range.
+[[nodiscard]] PersistenceError validate_config_transition(
+    const AppConfig& current_config,
+    const AppConfig& proposed_config);
 [[nodiscard]] PersistenceError validate_state(const AppState& state, const AppConfig& config);
 [[nodiscard]] PersistenceError validate_expected_revision(
     std::uint64_t current_revision,
     std::uint64_t expected_revision);
+
+// Rebuilds a state for a changed configuration by stable Fixture ID. Matching
+// records are preserved, removed IDs are discarded and newly configured IDs get
+// safe defaults. Malformed source records are rejected rather than normalized.
+[[nodiscard]] PersistenceResult<AppState> reconcile_state_for_config(
+    const AppState& previous_state,
+    const AppConfig& config);
 
 [[nodiscard]] std::string serialize_config_json(const AppConfig& config);
 [[nodiscard]] std::string serialize_state_json(const AppState& state);

@@ -8,6 +8,12 @@ const EMPTY_CONNECTION = Object.freeze({
   attempt: 0,
 });
 
+const EMPTY_DAEMON = Object.freeze({
+  known: false,
+  available: false,
+  status: "off",
+});
+
 function deepClone(value) {
   if (value === null || value === undefined) {
     return value;
@@ -27,6 +33,7 @@ export function normalizeSource(value) {
 export function createInitialModel() {
   return {
     connection: { ...EMPTY_CONNECTION },
+    daemon: { ...EMPTY_DAEMON },
     config: null,
     configDraft: null,
     configDraftBaseRevision: null,
@@ -38,12 +45,26 @@ export function createInitialModel() {
 }
 
 export function setConnection(model, connection) {
+  const connected = Boolean(connection?.connected);
   return {
     ...model,
     connection: {
       ...EMPTY_CONNECTION,
       ...deepClone(connection),
-      connected: Boolean(connection?.connected),
+      connected,
+    },
+    daemon: connected ? model.daemon : { ...EMPTY_DAEMON },
+  };
+}
+
+export function setDaemonStatus(model, payload) {
+  const status = String(payload ?? "").trim().toLowerCase();
+  return {
+    ...model,
+    daemon: {
+      known: true,
+      available: status === "running" || status === "error",
+      status,
     },
   };
 }
@@ -54,8 +75,8 @@ export function setConfigSnapshot(model, config) {
 
   if (model.configDraftDirty && model.configDraft) {
     // A newer retained config must never destroy an in-progress local draft.
-    // The preserved base revision intentionally makes a later Apply stale,
-    // so the backend can reject it with revision_conflict.
+    // The preserved base revision exposes an explicit stale state; Web blocks
+    // Apply until the user resets or repeats the edits from factual config.
     return {
       ...model,
       config: snapshot,
@@ -109,11 +130,7 @@ export function updateConfigDraft(model, updater) {
   };
 }
 
-export function resizeFixtureDraft(model, fixtureCount) {
-  if (!Number.isSafeInteger(fixtureCount) || fixtureCount < 0) {
-    return model;
-  }
-
+export function addFixtureDraft(model) {
   return updateConfigDraft(model, (draft) => {
     draft.fixtures ??= { count: 0, start_address: 1, items: [] };
     draft.fixtures.items = Array.isArray(draft.fixtures.items)
@@ -126,32 +143,66 @@ export function resizeFixtureDraft(model, fixtureCount) {
     };
 
     const items = draft.fixtures.items;
-    while (items.length < fixtureCount) {
-      const id = Number(draft.id_counters.next_fixture_id);
-      if (!Number.isSafeInteger(id) || id <= 0) {
-        throw new RangeError("Некорректный счётчик идентификаторов светильников.");
-      }
-      items.push({ id, name: `Светильник ${id}` });
-      draft.id_counters.next_fixture_id = id + 1;
+    if (items.length >= 75) {
+      throw new RangeError("Достигнуто максимальное количество светильников — 75.");
     }
 
-    if (items.length > fixtureCount) {
-      items.splice(fixtureCount);
-      const activeIds = new Set(items.map((fixture) => String(fixture.id)));
-      if (Array.isArray(draft.groups)) {
-        for (const group of draft.groups) {
-          if (Array.isArray(group.members)) {
-            group.members = group.members.filter((id) =>
-              activeIds.has(String(id)),
-            );
-          }
+    const startAddress = Number(draft.fixtures.start_address);
+    const lastAddress = startAddress + (items.length + 1) * 4 - 1;
+    if (
+      !Number.isSafeInteger(startAddress) ||
+      startAddress < 1 ||
+      startAddress > 300 ||
+      lastAddress > 300
+    ) {
+      throw new RangeError(
+        "Для нового светильника недостаточно DMX-адресов до физического предела 300.",
+      );
+    }
+
+    const id = Number(draft.id_counters.next_fixture_id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new RangeError("Некорректный счётчик идентификаторов светильников.");
+    }
+
+    items.push({ id, name: `Светильник ${id}` });
+    draft.fixtures.count = items.length;
+    draft.id_counters.next_fixture_id = id + 1;
+  });
+}
+
+export function removeFixtureDraft(model, fixtureIdValue) {
+  const fixtureId = Number(fixtureIdValue);
+  if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+    return model;
+  }
+
+  return updateConfigDraft(model, (draft) => {
+    draft.fixtures ??= { count: 0, start_address: 1, items: [] };
+    const items = Array.isArray(draft.fixtures.items)
+      ? draft.fixtures.items
+      : [];
+    if (!items.some((fixture) => Number(fixture.id) === fixtureId)) {
+      return;
+    }
+
+    draft.fixtures.items = items.filter(
+      (fixture) => Number(fixture.id) !== fixtureId,
+    );
+    draft.fixtures.count = draft.fixtures.items.length;
+
+    if (Array.isArray(draft.groups)) {
+      for (const group of draft.groups) {
+        if (Array.isArray(group.members)) {
+          group.members = group.members.filter(
+            (memberId) => Number(memberId) !== fixtureId,
+          );
         }
       }
-      // Scene snapshots are historical records and intentionally keep
-      // stable IDs of Fixtures that were removed.
     }
 
-    draft.fixtures.count = fixtureCount;
+    // Stable Fixture IDs are never reused. Historical Scene snapshots keep the
+    // deleted ID so they can never target a different future Fixture.
   });
 }
 
@@ -520,7 +571,9 @@ export function structuralSettings(model) {
 
   return {
     dmxPort: draft.dmx?.port ?? "",
-    fixtureCount: finiteInteger(draft.fixtures?.count, 0),
+    fixtureCount: Array.isArray(draft.fixtures?.items)
+      ? draft.fixtures.items.length
+      : 0,
     startAddress: finiteInteger(draft.fixtures?.start_address, 1),
     artnetUniverse: finiteInteger(draft.artnet?.universe, 0),
   };

@@ -109,7 +109,10 @@ GroupControlResult GroupSceneManager::apply_group_command(
     return {true, fixtures_changed, build_group_state(*group, *stored), {}};
 }
 
-SceneOperationResult GroupSceneManager::create_scene(std::string name, time_point now) {
+SceneOperationResult GroupSceneManager::create_scene(
+    std::string name,
+    time_point now,
+    std::optional<std::string> idempotency_request_id) {
     synchronize_config();
     AppConfig proposed = runtime_.config();
     if (proposed.id_counters.next_scene_id == 0 ||
@@ -119,11 +122,24 @@ SceneOperationResult GroupSceneManager::create_scene(std::string name, time_poin
 
     const SceneId scene_id = proposed.id_counters.next_scene_id;
     ++proposed.id_counters.next_scene_id;
+    const std::string idempotency_name = name;
     proposed.scenes.push_back(SceneConfigRecord{
         scene_id,
         std::move(name),
         capture_scene_snapshot()});
-    return commit_scene_config(std::move(proposed), scene_id, now);
+    std::optional<SceneCreateIdempotencyRecord> idempotency_record;
+    if (idempotency_request_id.has_value()) {
+        idempotency_record = SceneCreateIdempotencyRecord{
+            std::move(*idempotency_request_id),
+            idempotency_name,
+            scene_id,
+            runtime_.config().revision + 1U};
+    }
+    return commit_scene_config(
+        std::move(proposed),
+        scene_id,
+        now,
+        std::move(idempotency_record));
 }
 
 SceneOperationResult GroupSceneManager::overwrite_scene(SceneId scene_id, time_point now) {
@@ -319,11 +335,13 @@ std::vector<SceneFixtureRecord> GroupSceneManager::capture_scene_snapshot() cons
 SceneOperationResult GroupSceneManager::commit_scene_config(
     AppConfig proposed,
     SceneId scene_id,
-    time_point now) {
+    time_point now,
+    std::optional<SceneCreateIdempotencyRecord> idempotency_record) {
     const auto committed = runtime_.apply_config_transaction(
         runtime_.config().revision,
         proposed,
-        now);
+        now,
+        std::move(idempotency_record));
     if (!committed.ok()) {
         return {false, false, false, scene_id, runtime_.config().revision, committed.error.message};
     }

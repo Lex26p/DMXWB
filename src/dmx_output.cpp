@@ -97,11 +97,13 @@ DmxOutputLoop::DmxOutputLoop(
     DmxTransportInterface& transport,
     DmxOutputMailbox& mailbox,
     MonotonicClock& clock,
-    std::chrono::milliseconds reopen_interval)
+    std::chrono::milliseconds reopen_interval,
+    InstrumentationMode instrumentation_mode)
     : transport_(transport),
       mailbox_(mailbox),
       clock_(clock),
-      reopen_interval_(reopen_interval) {}
+      reopen_interval_(reopen_interval),
+      instrumentation_mode_(instrumentation_mode) {}
 
 DmxOutputStep DmxOutputLoop::step() {
     auto now = clock_.now();
@@ -112,14 +114,20 @@ DmxOutputStep DmxOutputLoop::step() {
         }
 
         if (has_attempted_open_) {
-            reopen_attempts_.fetch_add(1, std::memory_order_relaxed);
+            if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+                reopen_attempts_.fetch_add(1, std::memory_order_relaxed);
+            }
         } else {
             has_attempted_open_ = true;
         }
-        open_attempts_.fetch_add(1, std::memory_order_relaxed);
+        if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+            open_attempts_.fetch_add(1, std::memory_order_relaxed);
+        }
 
         if (!transport_.open()) {
-            open_failures_.fetch_add(1, std::memory_order_relaxed);
+            if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+                open_failures_.fetch_add(1, std::memory_order_relaxed);
+            }
             serial_open_.store(false, std::memory_order_release);
             transport_error_seen_ = true;
             set_error(std::string{transport_.last_error()});
@@ -130,7 +138,9 @@ DmxOutputStep DmxOutputLoop::step() {
 
         serial_open_.store(true, std::memory_order_release);
         if (transport_error_seen_) {
-            recoveries_.fetch_add(1, std::memory_order_relaxed);
+            if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+                recoveries_.fetch_add(1, std::memory_order_relaxed);
+            }
             transport_error_seen_ = false;
         }
         set_error({});
@@ -146,11 +156,15 @@ DmxOutputStep DmxOutputLoop::step() {
 
     const auto frame = mailbox_.acquire();
     const auto scheduled_start = next_frame_start_.value_or(now);
-    const auto send_started = clock_.now();
+    const auto send_started = engineering_instrumentation_enabled(instrumentation_mode_)
+        ? clock_.now()
+        : MonotonicClock::time_point{};
 
     if (!transport_.send_frame(frame)) {
         const auto failed_at = clock_.now();
-        send_failures_.fetch_add(1, std::memory_order_relaxed);
+        if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+            send_failures_.fetch_add(1, std::memory_order_relaxed);
+        }
         transport_error_seen_ = true;
         set_error(std::string{transport_.last_error()});
         transport_.close();
@@ -161,16 +175,20 @@ DmxOutputStep DmxOutputLoop::step() {
     }
 
     const auto send_finished = clock_.now();
-    const auto send_duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(send_finished - send_started);
-    update_max_send_duration(send_duration);
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        const auto send_duration =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(send_finished - send_started);
+        update_max_send_duration(send_duration);
 
-    const auto wire_time = minimum_dmx_frame_time(frame.channels.size());
-    if (send_duration > wire_time) {
-        update_max_transport_overhead(send_duration - wire_time);
+        const auto wire_time = minimum_dmx_frame_time(frame.channels.size());
+        if (send_duration > wire_time) {
+            update_max_transport_overhead(send_duration - wire_time);
+        }
     }
 
-    frames_sent_.fetch_add(1, std::memory_order_relaxed);
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        frames_sent_.fetch_add(1, std::memory_order_relaxed);
+    }
     active_generation_.store(frame.generation, std::memory_order_release);
 
     auto next_start = scheduled_start + active_period();
@@ -179,7 +197,7 @@ DmxOutputStep DmxOutputLoop::step() {
         next_start += active_period();
         ++missed;
     }
-    if (missed != 0) {
+    if (missed != 0 && engineering_instrumentation_enabled(instrumentation_mode_)) {
         missed_deadlines_.fetch_add(missed, std::memory_order_relaxed);
     }
     next_frame_start_ = next_start;
@@ -217,6 +235,22 @@ DmxOutputDiagnostics DmxOutputLoop::diagnostics() const {
     return result;
 }
 
+DmxOutputOperationalState DmxOutputLoop::operational_state() const {
+    DmxOutputOperationalState result;
+    result.serial_open = serial_open_.load(std::memory_order_acquire);
+    result.active_generation = active_generation_.load(std::memory_order_acquire);
+    result.refresh_hz = kDmxOutputRefreshHz;
+    {
+        std::lock_guard<std::mutex> lock{error_mutex_};
+        result.last_error = last_error_;
+    }
+    return result;
+}
+
+InstrumentationMode DmxOutputLoop::instrumentation_mode() const noexcept {
+    return instrumentation_mode_;
+}
+
 void DmxOutputLoop::set_error(std::string message) {
     std::lock_guard<std::mutex> lock{error_mutex_};
     last_error_ = std::move(message);
@@ -235,16 +269,20 @@ MonotonicClock::duration DmxOutputLoop::active_period() noexcept {
     return std::chrono::duration_cast<MonotonicClock::duration>(std::chrono::nanoseconds{period_ns});
 }
 
-DmxOutput::DmxOutput(DmxOutputConfig config)
+DmxOutput::DmxOutput(
+    DmxOutputConfig config,
+    InstrumentationMode instrumentation_mode)
     : DmxOutput(
           config,
           std::make_unique<DmxTransport>(config.port),
-          std::make_unique<SteadyMonotonicClock>()) {}
+          std::make_unique<SteadyMonotonicClock>(),
+          instrumentation_mode) {}
 
 DmxOutput::DmxOutput(
     DmxOutputConfig config,
     std::unique_ptr<DmxTransportInterface> transport,
-    std::unique_ptr<MonotonicClock> clock)
+    std::unique_ptr<MonotonicClock> clock,
+    InstrumentationMode instrumentation_mode)
     : config_(std::move(config)),
       transport_(std::move(transport)),
       clock_(std::move(clock)) {
@@ -259,7 +297,8 @@ DmxOutput::DmxOutput(
         *transport_,
         mailbox_,
         *clock_,
-        config_.reopen_interval);
+        config_.reopen_interval,
+        instrumentation_mode);
 }
 
 DmxOutput::~DmxOutput() {
@@ -300,6 +339,17 @@ bool DmxOutput::publish_snapshot(const DmxSnapshot& snapshot) {
 
 DmxOutputDiagnostics DmxOutput::diagnostics() const {
     return loop_->diagnostics();
+}
+
+DmxOutputOperationalState DmxOutput::operational_state() const {
+    auto result = loop_->operational_state();
+    result.running = running();
+    result.slot_count = mailbox_.published_slot_count();
+    return result;
+}
+
+InstrumentationMode DmxOutput::instrumentation_mode() const noexcept {
+    return loop_->instrumentation_mode();
 }
 
 void DmxOutput::worker_main() noexcept {

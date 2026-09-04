@@ -13,12 +13,25 @@ namespace {
            config.pending_poll_reply_limit > 0;
 }
 
+[[nodiscard]] std::optional<std::chrono::milliseconds> elapsed_age(
+    ArtNetRuntime::time_point now,
+    std::optional<ArtNetRuntime::time_point> event_time) noexcept {
+    if (!event_time.has_value()) {
+        return std::nullopt;
+    }
+    if (now < *event_time) {
+        return std::chrono::milliseconds{0};
+    }
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now - *event_time);
+}
+
 }  // namespace
 
 std::unique_ptr<ArtNetRuntime> ArtNetRuntime::create(
     ArtNetRuntimeConfig config,
     IArtNetDatagramTransport& transport,
-    IArtNetPollReplyDelaySource& delay_source) noexcept {
+    IArtNetPollReplyDelaySource& delay_source,
+    InstrumentationMode instrumentation_mode) noexcept {
     if (!runtime_config_valid(config)) {
         return nullptr;
     }
@@ -29,18 +42,24 @@ std::unique_ptr<ArtNetRuntime> ArtNetRuntime::create(
     }
 
     return std::unique_ptr<ArtNetRuntime>{new ArtNetRuntime(
-        std::move(config), std::move(*core), transport, delay_source)};
+        std::move(config),
+        std::move(*core),
+        transport,
+        delay_source,
+        instrumentation_mode)};
 }
 
 ArtNetRuntime::ArtNetRuntime(
     ArtNetRuntimeConfig config,
     ArtNetCore core,
     IArtNetDatagramTransport& transport,
-    IArtNetPollReplyDelaySource& delay_source) noexcept
+    IArtNetPollReplyDelaySource& delay_source,
+    InstrumentationMode instrumentation_mode) noexcept
     : config_(std::move(config)),
       core_(std::move(core)),
       transport_(transport),
       delay_source_(delay_source),
+      instrumentation_mode_(instrumentation_mode),
       artnet_output_active_(config_.poll_reply_identity.artnet_output_active),
       latest_snapshot_(std::shared_ptr<const DmxSnapshot>{}) {}
 
@@ -96,8 +115,28 @@ const ArtNetRuntimeDiagnostics& ArtNetRuntime::diagnostics() const noexcept {
     return diagnostics_;
 }
 
+ArtNetRuntimeOperationalState ArtNetRuntime::operational_state(time_point now) const noexcept {
+    ArtNetRuntimeOperationalState result;
+    result.transport_open = transport_.is_open();
+    result.artnet_output_active = artnet_output_active_.load(std::memory_order_acquire);
+    result.has_committed_dmx = core_.has_committed_dmx();
+    result.source_state = core_.source_state();
+    result.sync_mode = core_.sync_mode();
+    result.active_source = core_.active_source();
+    result.conflicting_source = core_.conflicting_source();
+    result.last_sequence = core_.last_sequence();
+    result.last_packet_age = elapsed_age(now, core_.last_artdmx_time());
+    result.last_sync_age = elapsed_age(now, core_.last_sync_time());
+    result.committed_revision = core_.committed_revision();
+    return result;
+}
+
 std::size_t ArtNetRuntime::pending_poll_replies() const noexcept {
     return pending_poll_replies_.size();
+}
+
+InstrumentationMode ArtNetRuntime::instrumentation_mode() const noexcept {
+    return instrumentation_mode_;
 }
 
 void ArtNetRuntime::try_bind(time_point now) noexcept {
@@ -105,18 +144,18 @@ void ArtNetRuntime::try_bind(time_point now) noexcept {
         return;
     }
 
-    ++diagnostics_.bind_attempts;
+    increment_engineering_counter(diagnostics_.bind_attempts);
     if (transport_.open_and_bind(kArtNetUdpPort)) {
         diagnostics_.transport_open = true;
         next_bind_attempt_.reset();
         if (transport_failure_seen_) {
-            ++diagnostics_.transport_recoveries;
+            increment_engineering_counter(diagnostics_.transport_recoveries);
             transport_failure_seen_ = false;
         }
         return;
     }
 
-    ++diagnostics_.bind_failures;
+    increment_engineering_counter(diagnostics_.bind_failures);
     diagnostics_.transport_open = false;
     transport_failure_seen_ = true;
     next_bind_attempt_ = now + config_.rebind_delay;
@@ -139,7 +178,7 @@ void ArtNetRuntime::process_received_datagrams(time_point now) noexcept {
             return;
         }
 
-        ++diagnostics_.datagrams_received;
+        increment_engineering_counter(diagnostics_.datagrams_received);
         const auto packet = std::span<const std::uint8_t>{
             receive_buffer_.data(), receive_result.captured_size};
         const auto result = core_.process_datagram(packet, receive_result.source_ip, now);
@@ -158,13 +197,13 @@ void ArtNetRuntime::process_core_result(
     ArtNetIpv4Address local_ip,
     time_point now) noexcept {
     if (result.rejected()) {
-        ++diagnostics_.core_rejections;
+        increment_engineering_counter(diagnostics_.core_rejections);
     }
 
     if (result.action == ArtNetAction::conflict) {
-        ++diagnostics_.conflicts;
+        increment_engineering_counter(diagnostics_.conflicts);
     } else if (result.action == ArtNetAction::source_lost) {
-        ++diagnostics_.source_lost_events;
+        increment_engineering_counter(diagnostics_.source_lost_events);
     } else if (result.action == ArtNetAction::poll_reply_requested) {
         schedule_poll_reply(source_ip, local_ip, now);
     }
@@ -192,7 +231,7 @@ void ArtNetRuntime::publish_snapshot_if_changed() noexcept {
     std::atomic_store_explicit(&latest_snapshot_, std::move(snapshot), std::memory_order_release);
 #endif
     last_published_revision_ = revision;
-    ++diagnostics_.snapshots_published;
+    increment_engineering_counter(diagnostics_.snapshots_published);
 }
 
 void ArtNetRuntime::schedule_poll_reply(
@@ -200,7 +239,7 @@ void ArtNetRuntime::schedule_poll_reply(
     ArtNetIpv4Address local_ip,
     time_point now) noexcept {
     if (pending_poll_replies_.size() >= config_.pending_poll_reply_limit) {
-        ++diagnostics_.poll_replies_dropped;
+        increment_engineering_counter(diagnostics_.poll_replies_dropped);
         return;
     }
 
@@ -208,7 +247,7 @@ void ArtNetRuntime::schedule_poll_reply(
         destination,
         local_ip,
         now + next_poll_reply_delay()});
-    ++diagnostics_.poll_replies_scheduled;
+    increment_engineering_counter(diagnostics_.poll_replies_scheduled);
 }
 
 void ArtNetRuntime::send_due_poll_replies(time_point now) noexcept {
@@ -227,19 +266,19 @@ void ArtNetRuntime::send_due_poll_replies(time_point now) noexcept {
             artnet_output_active_.load(std::memory_order_acquire);
         const auto reply = build_art_poll_reply(core_.port_address(), reply_identity);
         if (!reply.has_value()) {
-            ++diagnostics_.poll_replies_not_built;
+            increment_engineering_counter(diagnostics_.poll_replies_not_built);
             iterator = pending_poll_replies_.erase(iterator);
             continue;
         }
 
         if (!transport_.send_to(iterator->destination, kArtNetUdpPort, reply->bytes)) {
-            ++diagnostics_.send_errors;
+            increment_engineering_counter(diagnostics_.send_errors);
             iterator = pending_poll_replies_.erase(iterator);
             handle_transport_failure(now, false);
             return;
         }
 
-        ++diagnostics_.poll_replies_sent;
+        increment_engineering_counter(diagnostics_.poll_replies_sent);
         iterator = pending_poll_replies_.erase(iterator);
     }
 }
@@ -248,7 +287,7 @@ void ArtNetRuntime::handle_transport_failure(
     time_point now,
     bool receive_failure) noexcept {
     if (receive_failure) {
-        ++diagnostics_.receive_errors;
+        increment_engineering_counter(diagnostics_.receive_errors);
     }
     transport_failure_seen_ = true;
     clear_pending_poll_replies();
@@ -260,7 +299,9 @@ void ArtNetRuntime::handle_transport_failure(
 }
 
 void ArtNetRuntime::clear_pending_poll_replies() noexcept {
-    diagnostics_.poll_replies_dropped += static_cast<std::uint64_t>(pending_poll_replies_.size());
+    increment_engineering_counter(
+        diagnostics_.poll_replies_dropped,
+        static_cast<std::uint64_t>(pending_poll_replies_.size()));
     pending_poll_replies_.clear();
 }
 
@@ -271,9 +312,17 @@ std::chrono::milliseconds ArtNetRuntime::next_poll_reply_delay() noexcept {
         kArtNetPollReplyMaximumDelay);
     const auto clamped = std::clamp(requested, minimum, maximum);
     if (clamped != requested) {
-        ++diagnostics_.delay_values_clamped;
+        increment_engineering_counter(diagnostics_.delay_values_clamped);
     }
     return clamped;
+}
+
+void ArtNetRuntime::increment_engineering_counter(
+    std::uint64_t& counter,
+    std::uint64_t increment) noexcept {
+    if (engineering_instrumentation_enabled(instrumentation_mode_)) {
+        counter += increment;
+    }
 }
 
 }  // namespace dmxwb

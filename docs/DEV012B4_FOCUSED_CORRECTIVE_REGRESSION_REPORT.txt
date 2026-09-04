@@ -1,0 +1,31 @@
+=== DMXWB DEV-012B4 FOCUSED CORRECTIVE REGRESSION ACCEPTANCE ===
+generated_utc: 2026-09-02T10:22:50Z
+artifact_sha256: ccf8230efd14c4c90a4ad44f4b82f7e82dcc3b8ea30b215f0ecf21362f4f677d
+target: root@10.200.200.1
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+artnet_port_address: 0
+fixed_refresh_hz: 44
+local_static_contract: covered_by_prior_host_regression
+target_identity: RELEASE_NAME=wb-2606SUITE=stableTARGET=wb8/bullseyeREPO_PREFIX=
+no_running_dmxwb_process: PASS
+original_retained_topics_captured: PASS
+production_binary_installed_sha256: PASS (ccf8230efd14c4c90a4ad44f4b82f7e82dcc3b8ea30b215f0ecf21362f4f677d)
+systemctl_start: PASS (pid=47699)
+retained_operational_status: PASS
+systemd_start_physical_red_user: PASS
+artnet_dmx_port_reconfiguration_latest_snapshot_user: PASS
+artnet_dmx_port_reconfiguration_same_process: PASS (pid=47699)
+focused_mqtt_artnet_source_switch_user: PASS
+coherent_config_state_restart_user: PASS
+coherent_config_state_revision_restart: PASS (revision=3)
+serial_missing_device_factual_reconnecting_status: PASS
+serial_recovery_physical_user: PASS
+serial_recovery_same_process_factual_status: PASS (pid=50059)
+final_power_off_user: PASS
+final_clean_service_stop: PASS
+final_state_flush: PASS
+final_serial_port_release: PASS
+original_environment_restored: PASS
+dev012b4_result: PASS
+=== DMXWB DEV-012B4 FOCUSED CORRECTIVE REGRESSION PASS ===

@@ -292,6 +292,8 @@ int main(int argc, char** argv) {
         runtime_config.artnet_port_name = "DMXWB DEV010B3";
         runtime_config.artnet_long_name =
             "DMXWB DEV-010B3 source switching acceptance";
+        runtime_config.instrumentation_mode =
+            dmxwb::InstrumentationMode::engineering;
 
         dmxwb::IntegratedRuntime runtime{std::move(runtime_config)};
 

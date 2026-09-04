@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <optional>
-#include <unordered_set>
 #include <utility>
 
 namespace dmxwb {
@@ -96,15 +95,12 @@ MqttControllerUpdate MqttController::process_command(
 
         MqttControllerUpdate result;
         result.applied = true;
-        result.publications = build_system_state_publications(
-            MqttApplicationStatus::running,
-            runtime_.source());
+        result.publications = build_system_source_publications(runtime_.source());
         append_publications(
             result.publications,
-            build_internal_snapshot_publications(
+            build_internal_model_publications(
                 serialize_config_json(runtime_.config()),
-                serialize_state_json(runtime_.capture_state()),
-                build_status_json(MqttApplicationStatus::running)));
+                serialize_state_json(runtime_.capture_state())));
         return result;
     }
 
@@ -125,6 +121,12 @@ MqttControllerUpdate MqttController::process_command(
     }
     if (command.type == MqttCommandType::scene_apply) {
         return apply_scene_apply(command.scene_id, now);
+    }
+    if (command.type == MqttCommandType::scene_rename_request) {
+        return apply_scene_rename_request(command.scene_id, command.text, now);
+    }
+    if (command.type == MqttCommandType::scene_apply_request) {
+        return apply_scene_apply_request(command.scene_id, command.text, now);
     }
     if (command.type == MqttCommandType::scene_create) {
         return apply_scene_create(command.text, now);
@@ -158,13 +160,12 @@ MqttControllerUpdate MqttController::process_command(
     return result;
 }
 
-std::vector<MqttPublication> MqttController::build_full_republish(
-    MqttApplicationStatus status) {
+std::vector<MqttPublication> MqttController::build_full_republish() {
     group_scene_.synchronize_config();
     std::vector<MqttPublication> output;
 
     append_publications(output, build_system_metadata_publications());
-    append_publications(output, build_system_state_publications(status, runtime_.source()));
+    append_publications(output, build_system_source_publications(runtime_.source()));
 
     for (std::size_t index = 0; index < runtime_.fixtures().fixture_count(); ++index) {
         const auto* fixture = runtime_.fixtures().fixture_at(index);
@@ -190,10 +191,24 @@ std::vector<MqttPublication> MqttController::build_full_republish(
 
     append_publications(
         output,
-        build_internal_snapshot_publications(
+        build_internal_model_publications(
             serialize_config_json(runtime_.config()),
-            serialize_state_json(runtime_.capture_state()),
-            build_status_json(status)));
+            serialize_state_json(runtime_.capture_state())));
+    return output;
+}
+
+std::vector<MqttPublication> MqttController::build_retained_cleanup(
+    const MqttRetainedCleanup& cleanup) const {
+    std::vector<MqttPublication> output;
+    for (const auto id : cleanup.fixture_ids) {
+        append_publications(output, build_fixture_retained_cleanup_publications(id));
+    }
+    for (const auto id : cleanup.group_ids) {
+        append_publications(output, build_group_retained_cleanup_publications(id));
+    }
+    for (const auto id : cleanup.scene_ids) {
+        append_publications(output, build_scene_retained_cleanup_publications(id));
+    }
     return output;
 }
 
@@ -436,6 +451,62 @@ MqttControllerUpdate MqttController::apply_scene_apply(
     return result;
 }
 
+MqttControllerUpdate MqttController::apply_scene_rename_request(
+    SceneId scene_id,
+    std::string_view payload,
+    time_point now) {
+    const auto parsed = parse_mqtt_scene_create_request(payload);
+    if (!parsed.ok()) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            parsed.request_id,
+            false,
+            runtime_.config().revision,
+            parsed.error_code.empty() ? std::string_view{"invalid_request"} : std::string_view{parsed.error_code},
+            parsed.message));
+        result.error = parsed.message;
+        return result;
+    }
+
+    const auto request = *parsed.request;
+    auto result = apply_scene_name(scene_id, request.name, now);
+    result.publications.push_back(build_mqtt_config_result_publication(
+        request.request_id,
+        result.applied,
+        runtime_.config().revision,
+        result.applied ? std::string_view{"none"} : scene_operation_error_code(result.error),
+        result.applied ? std::string_view{"scene renamed"} : std::string_view{result.error}));
+    return result;
+}
+
+MqttControllerUpdate MqttController::apply_scene_apply_request(
+    SceneId scene_id,
+    std::string_view payload,
+    time_point now) {
+    const auto parsed = parse_mqtt_scene_action_request(payload);
+    if (!parsed.ok()) {
+        MqttControllerUpdate result;
+        result.publications.push_back(build_mqtt_config_result_publication(
+            parsed.request_id,
+            false,
+            runtime_.config().revision,
+            parsed.error_code.empty() ? std::string_view{"invalid_request"} : std::string_view{parsed.error_code},
+            parsed.message));
+        result.error = parsed.message;
+        return result;
+    }
+
+    const auto request = *parsed.request;
+    auto result = apply_scene_apply(scene_id, now);
+    result.publications.push_back(build_mqtt_config_result_publication(
+        request.request_id,
+        result.applied,
+        runtime_.config().revision,
+        result.applied ? std::string_view{"none"} : scene_operation_error_code(result.error),
+        result.applied ? std::string_view{"scene applied"} : std::string_view{result.error}));
+    return result;
+}
+
 MqttControllerUpdate MqttController::apply_scene_create(
     std::string_view payload,
     time_point now) {
@@ -453,7 +524,43 @@ MqttControllerUpdate MqttController::apply_scene_create(
     }
 
     const auto request = *parsed.request;
-    const auto created = group_scene_.create_scene(request.name, now);
+    if (const auto* replay = runtime_.find_scene_create_idempotency(
+            request.request_id);
+        replay != nullptr) {
+        MqttControllerUpdate result;
+        if (replay->name != request.name) {
+            result.publications.push_back(build_mqtt_config_result_publication(
+                request.request_id,
+                false,
+                runtime_.config().revision,
+                "idempotency_conflict",
+                "request_id was already used with another Scene Create payload"));
+            result.error = "Scene Create request_id payload conflict";
+            return result;
+        }
+
+        result.applied = true;
+        const auto* scene = find_scene(replay->scene_id);
+        if (scene != nullptr) {
+            append_publications(result.publications, build_scene_metadata_publications(*scene));
+            append_publications(result.publications, build_scene_state_publications(*scene));
+        }
+        result.publications.push_back(MqttPublication{
+            std::string{kMqttConfigTopic}, serialize_config_json(runtime_.config()), true});
+        result.publications.push_back(build_mqtt_config_result_publication(
+            request.request_id,
+            true,
+            replay->revision,
+            "none",
+            "scene created",
+            replay->scene_id));
+        return result;
+    }
+
+    const auto created = group_scene_.create_scene(
+        request.name,
+        now,
+        request.request_id);
     if (!created.ok) {
         MqttControllerUpdate result;
         result.publications.push_back(build_mqtt_config_result_publication(
@@ -478,9 +585,10 @@ MqttControllerUpdate MqttController::apply_scene_create(
     result.publications.push_back(build_mqtt_config_result_publication(
         request.request_id,
         true,
-        runtime_.config().revision,
+        created.revision,
         "none",
-        "scene created"));
+        "scene created",
+        created.scene_id));
     return result;
 }
 
@@ -565,7 +673,6 @@ MqttControllerUpdate MqttController::apply_scene_delete(
 
     MqttControllerUpdate result;
     result.applied = true;
-    append_publications(result.publications, build_scene_retained_cleanup_publications(scene_id));
     result.publications.push_back(MqttPublication{
         std::string{kMqttConfigTopic}, serialize_config_json(runtime_.config()), true});
     result.publications.push_back(build_mqtt_config_result_publication(
@@ -594,16 +701,6 @@ MqttControllerUpdate MqttController::apply_config_set(
     }
 
     const auto request = *parsed.request;
-    std::unordered_set<Fixture::Id> previous_fixture_ids;
-    std::unordered_set<GroupId> previous_group_ids;
-    std::unordered_set<SceneId> previous_scene_ids;
-    previous_fixture_ids.reserve(runtime_.config().fixtures.size());
-    previous_group_ids.reserve(runtime_.config().groups.size());
-    previous_scene_ids.reserve(runtime_.config().scenes.size());
-    for (const auto& fixture : runtime_.config().fixtures) previous_fixture_ids.insert(fixture.id);
-    for (const auto& group : runtime_.config().groups) previous_group_ids.insert(group.id);
-    for (const auto& scene : runtime_.config().scenes) previous_scene_ids.insert(scene.id);
-
     auto committed = runtime_.apply_config_transaction(
         request.expected_revision,
         request.proposed_config,
@@ -628,20 +725,6 @@ MqttControllerUpdate MqttController::apply_config_set(
         result.error = "configuration committed but whole MQTT DMX snapshot could not be built";
     }
 
-    for (const auto& fixture : runtime_.config().fixtures) previous_fixture_ids.erase(fixture.id);
-    for (const auto& group : runtime_.config().groups) previous_group_ids.erase(group.id);
-    for (const auto& scene : runtime_.config().scenes) previous_scene_ids.erase(scene.id);
-
-    for (const auto removed_id : previous_fixture_ids) {
-        append_publications(result.publications, build_fixture_retained_cleanup_publications(removed_id));
-    }
-    for (const auto removed_id : previous_group_ids) {
-        append_publications(result.publications, build_group_retained_cleanup_publications(removed_id));
-    }
-    for (const auto removed_id : previous_scene_ids) {
-        append_publications(result.publications, build_scene_retained_cleanup_publications(removed_id));
-    }
-
     for (std::size_t index = 0; index < runtime_.fixtures().fixture_count(); ++index) {
         const auto* fixture = runtime_.fixtures().fixture_at(index);
         if (fixture == nullptr) continue;
@@ -662,10 +745,9 @@ MqttControllerUpdate MqttController::apply_config_set(
 
     append_publications(
         result.publications,
-        build_internal_snapshot_publications(
+        build_internal_model_publications(
             serialize_config_json(runtime_.config()),
-            serialize_state_json(runtime_.capture_state()),
-            build_status_json(MqttApplicationStatus::running)));
+            serialize_state_json(runtime_.capture_state())));
     result.publications.push_back(build_mqtt_config_result_publication(
         request.request_id,
         true,
@@ -741,15 +823,6 @@ void MqttController::append_all_scene_states(std::vector<MqttPublication>& outpu
     for (const auto& scene : runtime_.config().scenes) {
         append_publications(output, build_scene_state_publications(scene));
     }
-}
-
-std::string MqttController::build_status_json(MqttApplicationStatus status) const {
-    std::string output{"{\"application\":\""};
-    output += mqtt_application_status_name(status);
-    output += "\",\"dmx\":\"controller\",\"mqtt\":\"controller\",\"artnet\":\"controller\",\"configuration\":";
-    output += runtime_.startup_status().ok() ? "\"ok\"" : "\"fallback\"";
-    output += ",\"last_error\":\"\"}";
-    return output;
 }
 
 }  // namespace dmxwb

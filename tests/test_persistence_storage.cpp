@@ -135,6 +135,36 @@ void test_config_transaction_and_revision_conflict() {
     }
 }
 
+void test_oversized_canonical_config_is_not_committed() {
+    TempDirectory temp;
+    if (!temp.valid()) {
+        expect_true(false, "temporary directory created for oversized config transaction");
+        return;
+    }
+
+    const auto path = temp.file("config.json");
+    const std::string original{"original-config"};
+    expect_true(!dmxwb::write_persistence_text_file_atomic(path, original),
+                "oversized config transaction original target written");
+
+    auto proposed = dmxwb::make_default_config();
+    const std::string name(dmxwb::kEntityNameMaxBytes, 'x');
+    constexpr std::uint64_t kGroupCount = 17000;
+    proposed.groups.reserve(kGroupCount);
+    for (std::uint64_t id = 1; id <= kGroupCount; ++id) {
+        proposed.groups.push_back(dmxwb::GroupConfigRecord{id, name, {}});
+    }
+    proposed.id_counters.next_group_id = kGroupCount + 1U;
+    expect_true(dmxwb::serialize_config_json(proposed).size() > dmxwb::kPersistenceMaxFileBytes,
+                "oversized canonical config fixture exceeds persistence limit");
+
+    const auto committed = dmxwb::commit_config_file_atomic(path, 0, 0, proposed);
+    expect_true(!committed.ok() && committed.error.code == dmxwb::PersistenceFileErrorCode::too_large,
+                "oversized canonical config rejected before commit");
+    expect_true(read_plain_text(path) == original,
+                "oversized canonical config leaves previous target unchanged");
+}
+
 void test_corrupt_config_uses_defaults_without_overwrite() {
     TempDirectory temp;
     if (!temp.valid()) {
@@ -152,7 +182,45 @@ void test_corrupt_config_uses_defaults_without_overwrite() {
     const auto loaded = dmxwb::load_persistence_files(config_path, state_path);
     expect_true(static_cast<bool>(loaded.config_error), "corrupt config error retained for diagnostics");
     expect_true(loaded.config == dmxwb::make_default_config(), "corrupt config falls back to safe defaults");
+    expect_true(!loaded.state_writes_allowed,
+                "corrupt config disables state writes for the fallback model");
     expect_true(read_plain_text(config_path) == corrupt, "corrupt config is not automatically overwritten");
+}
+
+void test_config_and_state_path_identity_is_rejected() {
+    TempDirectory temp;
+    if (!temp.valid()) {
+        expect_true(false, "temporary directory created for path identity");
+        return;
+    }
+
+    const auto shared = temp.file("shared.json");
+    const auto distinct = temp.file("state.json");
+    expect_true(!dmxwb::write_persistence_text_file_atomic(shared, "shared"),
+                "shared path fixture written");
+    expect_true(!dmxwb::write_persistence_text_file_atomic(distinct, "state"),
+                "distinct path fixture written");
+
+    expect_true(static_cast<bool>(dmxwb::validate_persistence_paths(shared, shared)),
+                "identical literal config/state path rejected");
+    expect_true(static_cast<bool>(dmxwb::validate_persistence_paths(
+                    shared, temp.file("unused/../shared.json"))),
+                "lexically equivalent config/state path rejected");
+
+    const auto symlink = temp.file("shared-symlink.json");
+    const auto hardlink = temp.file("shared-hardlink.json");
+    std::error_code error;
+    std::filesystem::create_symlink(shared, symlink, error);
+    expect_true(!error && static_cast<bool>(dmxwb::validate_persistence_paths(shared, symlink)),
+                "symlink config/state alias rejected");
+    error.clear();
+    std::filesystem::create_hard_link(shared, hardlink, error);
+    expect_true(!error && static_cast<bool>(dmxwb::validate_persistence_paths(shared, hardlink)),
+                "hard-link config/state alias rejected");
+    expect_true(!dmxwb::validate_persistence_paths(shared, distinct),
+                "distinct config/state paths accepted");
+    expect_true(read_plain_text(shared) == "shared",
+                "path validation never modifies the shared file");
 }
 
 void test_corrupt_state_keeps_valid_config_and_uses_default_state() {
@@ -271,17 +339,67 @@ void test_state_manager_due_save_and_forced_flush() {
     expect_true(!manager.dirty(), "successful forced flush clears dirty flag");
 }
 
+void test_state_save_failure_has_bounded_retry_and_recovers() {
+    using Manager = dmxwb::StatePersistenceManager;
+    using namespace std::chrono_literals;
+
+    TempDirectory temp;
+    if (!temp.valid()) {
+        expect_true(false, "temporary directory created for state retry");
+        return;
+    }
+
+    const auto config = dmxwb::make_default_config();
+    const auto state = dmxwb::make_default_state(config);
+    const auto state_path = temp.file("state.json");
+    const std::filesystem::path blocking_temp{state_path + ".tmp"};
+    std::error_code ec;
+    expect_true(std::filesystem::create_directory(blocking_temp, ec),
+                "state retry temp blocker created");
+
+    Manager manager{state_path};
+    const Manager::time_point t0{};
+    manager.mark_dirty(t0);
+    auto result = manager.save_if_due(state, config, t0 + 2s);
+    expect_true(result.action == dmxwb::StateSaveAction::failed,
+                "first due state write failure is reported");
+    expect_true(manager.dirty() &&
+                    manager.next_deadline() == std::optional<Manager::time_point>{t0 + 4s},
+                "failed state write remains dirty with two-second retry deadline");
+
+    result = manager.save_if_due(state, config, t0 + 2010ms);
+    expect_true(result.action == dmxwb::StateSaveAction::not_due,
+                "runtime tick immediately after failure does not retry write");
+    result = manager.save_if_due(state, config, t0 + 3999ms);
+    expect_true(result.action == dmxwb::StateSaveAction::not_due,
+                "failed state write is not retried before bounded deadline");
+    result = manager.save_if_due(state, config, t0 + 4s);
+    expect_true(result.action == dmxwb::StateSaveAction::failed &&
+                    manager.next_deadline() == std::optional<Manager::time_point>{t0 + 6s},
+                "persistent failure schedules exactly one later retry window");
+
+    std::filesystem::remove(blocking_temp, ec);
+    result = manager.save_if_due(state, config, t0 + 6s);
+    expect_true(result.action == dmxwb::StateSaveAction::saved,
+                "pending state saves at retry deadline after storage recovery");
+    expect_true(!manager.dirty() && !manager.next_deadline().has_value(),
+                "successful retry clears dirty state and stops retries");
+}
+
 }  // namespace
 
 int main() {
     test_atomic_write_success_and_failure_preserves_old_file();
     test_read_size_limit();
     test_config_transaction_and_revision_conflict();
+    test_oversized_canonical_config_is_not_committed();
     test_corrupt_config_uses_defaults_without_overwrite();
+    test_config_and_state_path_identity_is_rejected();
     test_corrupt_state_keeps_valid_config_and_uses_default_state();
     test_state_save_and_load_round_trip();
     test_state_scheduler_debounce_and_max_interval();
     test_state_manager_due_save_and_forced_flush();
+    test_state_save_failure_has_bounded_retry_and_recovers();
 
     if (failures != 0) {
         std::cerr << failures << " DEV-006B persistence storage test(s) failed\n";

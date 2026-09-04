@@ -201,17 +201,15 @@ ArtNetProcessResult ArtNetCore::process_art_dmx(
     const ArtNetSource candidate{source_ip, packet[13]};
     if (!active_source_.has_value()) {
         active_source_ = candidate;
-        source_state_ = ArtNetSourceState::active;
+        conflicting_source_.reset();
         last_sequence_.reset();
         staging_state_ = committed_state_;
         staging_dirty_ = false;
     } else if (*active_source_ != candidate) {
+        conflicting_source_ = candidate;
         source_state_ = ArtNetSourceState::conflict;
         return {ArtNetAction::conflict, ArtNetParseError::none};
     }
-
-    last_source_dmx_ = now;
-    source_state_ = ArtNetSourceState::active;
 
     const auto sequence = packet[12];
     if (sequence == 0) {
@@ -223,6 +221,12 @@ ArtNetProcessResult ArtNetCore::process_art_dmx(
     } else {
         return {ArtNetAction::ignored_stale_sequence, ArtNetParseError::none};
     }
+
+    // Only accepted ArtDmx is evidence that the source is live. A duplicate or
+    // stale Sequence must not postpone LOST or clear an existing conflict.
+    conflicting_source_.reset();
+    last_source_dmx_ = now;
+    source_state_ = ArtNetSourceState::active;
 
     auto& target = sync_mode_ == ArtNetSyncMode::synchronous ? staging_state_ : committed_state_;
     std::copy_n(packet.begin() + static_cast<std::ptrdiff_t>(kArtDmxHeaderSize), dmx_length, target.begin());
@@ -338,8 +342,20 @@ std::optional<ArtNetSource> ArtNetCore::active_source() const noexcept {
     return active_source_;
 }
 
+std::optional<ArtNetSource> ArtNetCore::conflicting_source() const noexcept {
+    return conflicting_source_;
+}
+
 std::optional<std::uint8_t> ArtNetCore::last_sequence() const noexcept {
     return last_sequence_;
+}
+
+std::optional<ArtNetCore::time_point> ArtNetCore::last_artdmx_time() const noexcept {
+    return last_source_dmx_;
+}
+
+std::optional<ArtNetCore::time_point> ArtNetCore::last_sync_time() const noexcept {
+    return last_sync_;
 }
 
 bool ArtNetCore::has_committed_dmx() const noexcept {
@@ -414,6 +430,7 @@ bool ArtNetCore::sequence_is_newer(std::uint8_t candidate, std::uint8_t previous
 
 void ArtNetCore::reset_source_tracking() noexcept {
     active_source_.reset();
+    conflicting_source_.reset();
     last_sequence_.reset();
     last_source_dmx_.reset();
     last_sync_.reset();

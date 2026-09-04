@@ -257,6 +257,60 @@ void test_sequence_rollover_stale_and_zero_disable() {
         "missing sequence numbers do not block a newer packet");
 }
 
+void test_stale_sequence_does_not_refresh_liveness_and_restart_recovers() {
+    auto core = *dmxwb::ArtNetCore::create({23});
+    const auto t0 = dmxwb::ArtNetCore::time_point{};
+    const std::array<std::uint8_t, 2> old_frame{{128, 128}};
+    const std::array<std::uint8_t, 2> restarted_frame{{1, 1}};
+
+    auto result = core.process_datagram(make_dmx(23, 1, 128, old_frame), kIpA, t0);
+    expect_true(result.action == dmxwb::ArtNetAction::dmx_committed &&
+                    core.last_artdmx_time() == std::optional{t0},
+        "accepted high Sequence establishes source activity baseline");
+
+    result = core.process_datagram(
+        make_dmx(23, 1, 1, restarted_frame),
+        kIpA,
+        t0 + std::chrono::seconds{1});
+    expect_true(result.action == dmxwb::ArtNetAction::ignored_stale_sequence &&
+                    core.last_artdmx_time() == std::optional{t0},
+        "restarted low Sequence is stale and does not refresh source activity");
+
+    result = core.process_datagram(
+        make_dmx(23, 2, 2, restarted_frame),
+        kIpB,
+        t0 + std::chrono::milliseconds{1500});
+    expect_true(result.action == dmxwb::ArtNetAction::conflict &&
+                    core.source_state() == dmxwb::ArtNetSourceState::conflict,
+        "different source establishes conflict without changing accepted activity");
+
+    result = core.process_datagram(
+        make_dmx(23, 1, 1, restarted_frame),
+        kIpA,
+        t0 + std::chrono::milliseconds{2900});
+    expect_true(result.action == dmxwb::ArtNetAction::ignored_stale_sequence &&
+                    core.source_state() == dmxwb::ArtNetSourceState::conflict &&
+                    core.last_artdmx_time() == std::optional{t0},
+        "stale active-source traffic neither clears conflict nor postpones LOST");
+
+    result = core.tick(t0 + dmxwb::kArtNetSourceLossTimeout);
+    expect_true(result.action == dmxwb::ArtNetAction::source_lost &&
+                    core.source_state() == dmxwb::ArtNetSourceState::lost &&
+                    !core.active_source().has_value() && !core.last_sequence().has_value(),
+        "source becomes LOST on accepted-traffic deadline despite rejected packets");
+    expect_true(core.channel(1) == 128,
+        "LOST retains the last accepted whole Art-Net snapshot");
+
+    result = core.process_datagram(
+        make_dmx(23, 1, 1, restarted_frame),
+        kIpA,
+        t0 + dmxwb::kArtNetSourceLossTimeout + std::chrono::milliseconds{1});
+    expect_true(result.action == dmxwb::ArtNetAction::dmx_committed &&
+                    core.last_sequence() == std::optional<std::uint8_t>{1} &&
+                    core.channel(1) == 1,
+        "first low Sequence after LOST establishes restarted controller baseline");
+}
+
 void test_source_identity_conflict_and_loss_release() {
     auto core = *dmxwb::ArtNetCore::create({3});
     const auto t0 = dmxwb::ArtNetCore::time_point{};
@@ -274,6 +328,9 @@ void test_source_identity_conflict_and_loss_release() {
     expect_true(result.action == dmxwb::ArtNetAction::conflict &&
                 core.source_state() == dmxwb::ArtNetSourceState::conflict,
         "different IPv4 on same Port-Address enters CONFLICT");
+    expect_true(core.conflicting_source() ==
+                    std::optional<dmxwb::ArtNetSource>{{kIpB, 7}},
+        "conflict diagnostics identify the competing IPv4 and Physical source");
     expect_true(core.channel(1) == 1, "conflicting source data ignored with no merge");
 
     result = core.process_datagram(make_dmx(3, 8, 2, other), kIpA, t0 + std::chrono::milliseconds{2});
@@ -285,6 +342,8 @@ void test_source_identity_conflict_and_loss_release() {
     expect_true(result.action == dmxwb::ArtNetAction::dmx_committed &&
                 core.source_state() == dmxwb::ArtNetSourceState::active,
         "current locked source remains accepted after conflict event");
+    expect_true(!core.conflicting_source().has_value(),
+        "accepted locked source clears the current conflict identity");
 
     result = core.tick(t0 + std::chrono::seconds{3} + std::chrono::milliseconds{3});
     expect_true(result.action == dmxwb::ArtNetAction::source_lost &&
@@ -456,6 +515,7 @@ int main() {
     test_art_dmx_validation_trailing_and_port_address();
     test_persistent_512_state_and_300_projection();
     test_sequence_rollover_stale_and_zero_disable();
+    test_stale_sequence_does_not_refresh_liveness_and_restart_recovers();
     test_source_identity_conflict_and_loss_release();
     test_art_sync_staging_release_source_filter_and_fallback();
     test_targeted_art_poll();

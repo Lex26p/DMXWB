@@ -2,6 +2,7 @@
 
 #include "dmxwb/dmx_snapshot.hpp"
 #include "dmxwb/dmx_transport.hpp"
+#include "dmxwb/instrumentation.hpp"
 #include "dmxwb/monotonic_clock.hpp"
 
 #include <array>
@@ -75,6 +76,15 @@ struct DmxOutputDiagnostics final {
     std::string last_error;
 };
 
+struct DmxOutputOperationalState final {
+    bool running{false};
+    bool serial_open{false};
+    std::size_t slot_count{0};
+    DmxSnapshot::Generation active_generation{0};
+    std::uint32_t refresh_hz{kDmxOutputRefreshHz};
+    std::string last_error;
+};
+
 enum class DmxOutputStepKind {
     wait_until,
     frame_sent,
@@ -92,12 +102,15 @@ public:
         DmxTransportInterface& transport,
         DmxOutputMailbox& mailbox,
         MonotonicClock& clock,
-        std::chrono::milliseconds reopen_interval = std::chrono::milliseconds{250});
+        std::chrono::milliseconds reopen_interval = std::chrono::milliseconds{250},
+        InstrumentationMode instrumentation_mode = InstrumentationMode::engineering);
 
     [[nodiscard]] DmxOutputStep step();
     void shutdown() noexcept;
 
     [[nodiscard]] DmxOutputDiagnostics diagnostics() const;
+    [[nodiscard]] DmxOutputOperationalState operational_state() const;
+    [[nodiscard]] InstrumentationMode instrumentation_mode() const noexcept;
 
 private:
     void set_error(std::string message);
@@ -109,6 +122,7 @@ private:
     DmxOutputMailbox& mailbox_;
     MonotonicClock& clock_;
     std::chrono::milliseconds reopen_interval_;
+    InstrumentationMode instrumentation_mode_{InstrumentationMode::engineering};
 
     std::optional<MonotonicClock::time_point> next_open_attempt_;
     std::optional<MonotonicClock::time_point> next_frame_start_;
@@ -138,11 +152,14 @@ struct DmxOutputConfig final {
 
 class DmxOutput final {
 public:
-    explicit DmxOutput(DmxOutputConfig config = {});
+    explicit DmxOutput(
+        DmxOutputConfig config = {},
+        InstrumentationMode instrumentation_mode = InstrumentationMode::engineering);
     DmxOutput(
         DmxOutputConfig config,
         std::unique_ptr<DmxTransportInterface> transport,
-        std::unique_ptr<MonotonicClock> clock);
+        std::unique_ptr<MonotonicClock> clock,
+        InstrumentationMode instrumentation_mode = InstrumentationMode::engineering);
     ~DmxOutput();
 
     DmxOutput(const DmxOutput&) = delete;
@@ -156,6 +173,8 @@ public:
 
     [[nodiscard]] bool publish_snapshot(const DmxSnapshot& snapshot);
     [[nodiscard]] DmxOutputDiagnostics diagnostics() const;
+    [[nodiscard]] DmxOutputOperationalState operational_state() const;
+    [[nodiscard]] InstrumentationMode instrumentation_mode() const noexcept;
 
 private:
     void worker_main() noexcept;

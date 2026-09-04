@@ -1,0 +1,27 @@
+=== DMXWB DEV-012D3 REBOOT AND RUNTIME RECOVERY ACCEPTANCE ===
+generated_utc: 2026-09-03T10:38:28Z
+target: root@10.200.200.1
+bundle_sha256: fff9a77687bc90250694c585570b78841051c97f66ed4f5b1772298aabe40162
+source_id: dev012c4-local
+artifact_sha256: 6dbff5ea94399075392a427f9bbf089a76ed1474900b3d5f44ece3925f27391d
+dmx_port: /dev/ttyRS485-1
+fixture_start_address: 1
+persistent_original_environment_captured: PASS
+DMXWB fresh installation completed.
+config_path=/etc/dmxwb/config.json
+state_path=/var/lib/dmxwb/state.json
+service=enabled_and_started
+pre_reboot_persisted_red_state: PASS (pid=160977)
+wb8_shutdown_observed: PASS
+wb8_reboot_autostart_config_state_mqtt_restore: PASS (4fded009-fa45-4d0f-8c68-171ce61d6a94 -> de7d0255-9425-457d-a4f6-841480589e26, pid=1556)
+post_reboot_physical_red_user: PASS
+post_reboot_local_web_user: PASS
+post_reboot_artnet_physical_blue_user: PASS
+post_reboot_explicit_source_return_red_user: PASS
+systemd_process_crash_recovery_physical_user: PASS (1556 -> 5902)
+mosquitto_in_process_recovery_physical_user: PASS (pid=5902)
+standard_wb_homeui_status_source_only_user: PASS
+final_power_off_clean_stop_port_release: PASS
+original_environment_restored: PASS
+dev012d3_result: PASS
+=== DMXWB DEV-012D3 REBOOT AND RUNTIME RECOVERY ACCEPTANCE PASS ===

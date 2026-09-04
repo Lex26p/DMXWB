@@ -224,16 +224,14 @@ void test_system_publications() {
             source_meta->payload.find("\"artnet\"") != std::string::npos,
         "system Source metadata exposes mqtt/artnet enum");
 
-    const auto state = dmxwb::build_system_state_publications(
-        dmxwb::MqttApplicationStatus::running,
-        dmxwb::PersistedSource::mqtt);
-    const auto* status = find_publication(state, "/devices/dmxwb/controls/status");
+    const auto state = dmxwb::build_system_source_publications(dmxwb::PersistedSource::mqtt);
     const auto* source = find_publication(state, "/devices/dmxwb/controls/source");
-    expect_true(status != nullptr && status->payload == "running" && status->retained, "system status retained state built");
     expect_true(source != nullptr && source->payload == "mqtt" && source->retained, "system Source retained state built");
+    expect_true(find_publication(state, "/devices/dmxwb/controls/status") == nullptr,
+        "Controller-facing system state helper does not publish operational status");
 }
 
-void test_fixture_metadata_hidden() {
+void test_fixture_metadata_visible() {
     dmxwb::Fixture fixture{42, "Правая \"линия\""};
     const auto metadata = dmxwb::build_fixture_metadata_publications(fixture);
     expect_true(metadata.size() == 10, "Fixture metadata includes device plus nine controls");
@@ -245,14 +243,15 @@ void test_fixture_metadata_hidden() {
 
     const std::vector<std::string_view> controls{
         "name", "power", "red", "green", "blue", "color", "brightness", "temperature", "reset"};
-    bool all_hidden = true;
+    bool all_visible = true;
     for (const auto control : controls) {
         const auto topic = std::string{"/devices/dmxwb_fixture_42/controls/"} + std::string{control} + "/meta";
         const auto* publication = find_publication(metadata, topic);
-        all_hidden = all_hidden && publication != nullptr && publication->retained &&
-            publication->payload.find("\"hidden\":true") != std::string::npos;
+        all_visible = all_visible && publication != nullptr && publication->retained &&
+            publication->payload.find("\"hidden\":false") != std::string::npos &&
+            publication->payload.find("\"hidden\":true") == std::string::npos;
     }
-    expect_true(all_hidden, "all Fixture control metadata is retained and hidden from standard WB web");
+    expect_true(all_visible, "all Fixture control metadata is retained and visible in standard WB web");
 }
 
 void test_fixture_factual_state_publications() {
@@ -281,17 +280,16 @@ void test_fixture_factual_state_publications() {
 }
 
 void test_internal_snapshot_publications() {
-    const auto publications = dmxwb::build_internal_snapshot_publications(
+    const auto publications = dmxwb::build_internal_model_publications(
         "{\"revision\":7}",
-        "{\"source\":\"mqtt\"}",
-        "{\"application\":\"running\"}");
-    expect_true(publications.size() == 3, "internal config/state/status snapshot publications built");
+        "{\"source\":\"mqtt\"}");
+    expect_true(publications.size() == 2, "internal config/state model publications built");
     const auto* config = find_publication(publications, "/dmxwb/config");
     const auto* state = find_publication(publications, "/dmxwb/state");
-    const auto* status = find_publication(publications, "/dmxwb/status");
     expect_true(config != nullptr && config->payload == "{\"revision\":7}" && config->retained, "canonical config payload preserved exactly");
     expect_true(state != nullptr && state->payload == "{\"source\":\"mqtt\"}" && state->retained, "canonical state payload preserved exactly");
-    expect_true(status != nullptr && status->retained, "internal status snapshot is retained");
+    expect_true(find_publication(publications, "/dmxwb/status") == nullptr,
+        "internal model helper cannot publish operational status");
 }
 
 }  // namespace
@@ -304,7 +302,7 @@ int main() {
     test_fixture_retained_cleanup();
     test_command_queue_fifo();
     test_system_publications();
-    test_fixture_metadata_hidden();
+    test_fixture_metadata_visible();
     test_fixture_factual_state_publications();
     test_internal_snapshot_publications();
 

@@ -5,6 +5,7 @@ export const MQTT_CONFIG_SET_TOPIC = "/dmxwb/config/set";
 export const MQTT_CONFIG_RESULT_TOPIC = "/dmxwb/config/result";
 export const MQTT_STATE_TOPIC = "/dmxwb/state";
 export const MQTT_STATUS_TOPIC = "/dmxwb/status";
+export const MQTT_SYSTEM_STATUS_TOPIC = "/devices/dmxwb/controls/status";
 export const MQTT_SCENE_CREATE_TOPIC = "/dmxwb/scenes/create";
 export const MQTT_SYSTEM_SOURCE_COMMAND_TOPIC =
   "/devices/dmxwb/controls/source/on";
@@ -83,7 +84,12 @@ export function sceneCommandTopic(sceneIdValue, control) {
 
 export function sceneLifecycleTopic(sceneIdValue, action) {
   const sceneId = normalizePositiveId(sceneIdValue, "Scene");
-  if (action !== "overwrite" && action !== "delete") {
+  if (
+    action !== "rename" &&
+    action !== "apply" &&
+    action !== "overwrite" &&
+    action !== "delete"
+  ) {
     throw new RangeError(`unsupported Scene lifecycle action: ${action}`);
   }
   return `/dmxwb/scenes/${sceneId}/${action}`;
@@ -382,6 +388,17 @@ export class MqttWebSocketClient {
 
     if (this.connected && added.length > 0) {
       this.#sendSubscriptions(added);
+    }
+  }
+
+  refreshSubscription(topic) {
+    const normalized = String(topic);
+    if (!normalized) {
+      return;
+    }
+    this.subscriptions.add(normalized);
+    if (this.connected) {
+      this.#sendSubscriptions([normalized]);
     }
   }
 

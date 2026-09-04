@@ -497,6 +497,63 @@ void test_pending_limit_and_delay_clamp() {
         "clamped PollReply is sent at one-second maximum delay");
 }
 
+void test_production_runtime_recovers_without_counters() {
+    FakeTransport transport;
+    FakeDelaySource delays;
+    auto runtime = dmxwb::ArtNetRuntime::create(
+        make_runtime_config(8),
+        transport,
+        delays,
+        dmxwb::InstrumentationMode::production);
+    if (!runtime) {
+        expect_true(false, "production Art-Net runtime created");
+        return;
+    }
+
+    const auto t0 = dmxwb::ArtNetRuntime::time_point{};
+    const std::array<std::uint8_t, 2> values{{71, 72}};
+    transport.queue_datagram(kIpA, make_dmx(8, 1, 1, values));
+    runtime->step(t0);
+    auto snapshot = runtime->latest_physical_snapshot();
+    expect_true(snapshot && snapshot->channel(1) == std::optional<std::uint8_t>{71},
+        "production Art-Net runtime still commits a whole physical snapshot");
+
+    transport.queue_receive_error();
+    runtime->step(t0 + std::chrono::milliseconds{100});
+    expect_true(!runtime->diagnostics().transport_open,
+        "production Art-Net runtime still enters rebind after receive failure");
+    runtime->step(t0 + std::chrono::milliseconds{1100});
+    expect_true(runtime->diagnostics().transport_open,
+        "production Art-Net runtime still recovers transport in process");
+
+    transport.queue_datagram(kIpA, make_poll());
+    runtime->step(t0 + std::chrono::milliseconds{1101});
+    expect_true(transport.sent.size() == 1,
+        "production Art-Net runtime still sends a scheduled PollReply");
+
+    const auto& diagnostics = runtime->diagnostics();
+    expect_true(diagnostics.bind_attempts == 0 &&
+                    diagnostics.bind_failures == 0 &&
+                    diagnostics.transport_recoveries == 0 &&
+                    diagnostics.datagrams_received == 0 &&
+                    diagnostics.receive_errors == 0 &&
+                    diagnostics.send_errors == 0 &&
+                    diagnostics.core_rejections == 0 &&
+                    diagnostics.conflicts == 0 &&
+                    diagnostics.source_lost_events == 0 &&
+                    diagnostics.snapshots_published == 0 &&
+                    diagnostics.poll_replies_scheduled == 0 &&
+                    diagnostics.poll_replies_sent == 0 &&
+                    diagnostics.poll_replies_dropped == 0 &&
+                    diagnostics.poll_replies_not_built == 0 &&
+                    diagnostics.delay_values_clamped == 0,
+        "production Art-Net runtime does not accumulate engineering counters");
+    expect_true(diagnostics.transport_open &&
+                    runtime->core().committed_revision() == 1 &&
+                    runtime->pending_poll_replies() == 0,
+        "production Art-Net runtime retains factual and algorithmic state");
+}
+
 }  // namespace
 
 int main() {
@@ -508,6 +565,7 @@ int main() {
     test_send_error_enters_rebind_path();
     test_sync_commit_publishes_only_committed_state();
     test_pending_limit_and_delay_clamp();
+    test_production_runtime_recovers_without_counters();
 
     if (failures != 0) {
         std::cerr << failures << " DEV-010A Art-Net runtime test(s) failed\n";

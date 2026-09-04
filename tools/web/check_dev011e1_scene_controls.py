@@ -76,13 +76,17 @@ for token in [
     "renderSceneControls",
     "maybeConfirmSceneApply",
     'operation === "create"',
-    'sceneCommandTopic(sceneId, "apply")',
-    'sceneCommandTopic(sceneId, "name")',
+    'sceneLifecycleTopic(sceneId, "rename")',
+    'sceneLifecycleTopic(sceneId, "apply")',
     'sceneLifecycleTopic(sceneId, "overwrite")',
     'sceneLifecycleTopic(sceneId, "delete")',
     "request_id: requestId",
     "JSON.stringify(payload)",
     "MQTT_CONFIG_RESULT_TOPIC",
+    "COMMAND_RESULT_TIMEOUT_MS",
+    "window.clearTimeout(pendingSceneApply.timer)",
+    "pendingSceneApply?.requestId === result.request_id",
+    "pendingSceneRenames.get(result.request_id)",
 ]:
     if token not in app:
         fail(f"app.js missing Scene lifecycle token {token}")
@@ -91,6 +95,13 @@ if app.count('elements.sceneList.addEventListener("click"') != 1:
     fail("Scene click handler must be registered exactly once")
 if app.count('elements.sceneList.addEventListener("change"') != 1:
     fail("Scene change handler must be registered exactly once")
+
+for obsolete in [
+    'sceneCommandTopic(sceneId, "apply")',
+    'sceneCommandTopic(sceneId, "name")',
+]:
+    if obsolete in app:
+        fail(f"Web Scene operation lacks request correlation: {obsolete}")
 
 render_start = app.find("function render() {")
 render_end = app.find("\nfunction parseSnapshot(", render_start)
@@ -125,6 +136,8 @@ print("dev011e1_scene_overwrite_contract: PASS")
 print("dev011e1_scene_rename_contract: PASS")
 print("dev011e1_scene_delete_contract: PASS")
 print("dev011e1_scene_request_id_result_matching: PASS")
+print("dev012b4_scene_rename_apply_result_matching: PASS")
+print("dev012b4_scene_pending_timeout_contract: PASS")
 print("dev011e1_scene_apply_factual_state_confirmation: PASS")
 print("dev011e1_scene_no_false_disconnect_error_without_pending: PASS")
 print("dev011e1_scene_no_command_replay_storage: PASS")

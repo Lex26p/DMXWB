@@ -51,6 +51,10 @@ dmxwb::AppState make_populated_state() {
         {42, true, {100, 50, 25, 12}, 80, 33},
         {90, false, {255, 255, 255, 128}, 50, 50},
     };
+    state.mqtt_retained_cleanup.fixture_ids = {41};
+    state.mqtt_retained_cleanup.group_ids = {4};
+    state.mqtt_retained_cleanup.scene_ids = {7};
+    state.scene_create_idempotency = {{"scene-create-8", "Вечер", 8, 7}};
     return state;
 }
 
@@ -64,6 +68,9 @@ void test_default_documents() {
     const auto state = dmxwb::make_default_state(config);
     expect_true(state.source == dmxwb::PersistedSource::mqtt, "safe default source is mqtt");
     expect_true(state.fixtures.empty(), "default state follows empty config");
+    expect_true(state.mqtt_retained_cleanup.empty(), "default state has no retained cleanup intent");
+    expect_true(state.scene_create_idempotency.empty(),
+        "default state has no Scene Create idempotency history");
 }
 
 void test_config_round_trip() {
@@ -88,6 +95,19 @@ void test_state_round_trip() {
         expect_true(*parsed.value == original, "state JSON round-trip preserves saved logical state");
         expect_true(!dmxwb::validate_state(*parsed.value, config), "parsed state validates against config");
     }
+
+    const auto legacy = dmxwb::parse_state_json(
+        "{\"version\":1,\"source\":\"mqtt\",\"fixtures\":[]}");
+    expect_true(legacy.ok() && legacy.value->mqtt_retained_cleanup.empty() &&
+                    legacy.value->scene_create_idempotency.empty(),
+        "legacy state without operational extension fields remains backward compatible");
+
+    auto unsafe_cleanup = original;
+    unsafe_cleanup.mqtt_retained_cleanup.fixture_ids.push_back(42);
+    expect_true(
+        dmxwb::validate_state(unsafe_cleanup, config).code ==
+            dmxwb::PersistenceErrorCode::validation,
+        "retained cleanup cannot target an active stable ID");
 }
 
 void test_json_unicode_escape() {
@@ -166,6 +186,89 @@ void test_config_validation() {
         config.dmx_port = "/dev/ttyS0";
         expect_true(dmxwb::validate_config(config).code == dmxwb::PersistenceErrorCode::validation,
                     "unsupported DMX port rejected");
+    }
+}
+
+void test_name_and_stable_id_transition_validation() {
+    const std::string boundary_name(dmxwb::kEntityNameMaxBytes, 'x');
+    const std::string oversized_name(dmxwb::kEntityNameMaxBytes + 1U, 'x');
+
+    {
+        auto config = make_populated_config();
+        config.fixtures[0].name = boundary_name;
+        config.groups[0].name = boundary_name;
+        config.scenes[0].name = boundary_name;
+        expect_true(!dmxwb::validate_config(config), "256-byte Fixture/Group/Scene names accepted");
+    }
+    {
+        auto config = make_populated_config();
+        config.fixtures[0].name = oversized_name;
+        expect_true(dmxwb::validate_config(config).code == dmxwb::PersistenceErrorCode::validation,
+                    "257-byte Fixture name rejected");
+        config = make_populated_config();
+        config.groups[0].name = oversized_name;
+        expect_true(dmxwb::validate_config(config).code == dmxwb::PersistenceErrorCode::validation,
+                    "257-byte Group name rejected");
+        config = make_populated_config();
+        config.scenes[0].name = oversized_name;
+        expect_true(dmxwb::validate_config(config).code == dmxwb::PersistenceErrorCode::validation,
+                    "257-byte Scene name rejected");
+    }
+    {
+        auto config = make_populated_config();
+        config.fixtures[0].name = std::string{static_cast<char>(0xC3), '('};
+        expect_true(dmxwb::validate_config(config).code == dmxwb::PersistenceErrorCode::validation,
+                    "malformed UTF-8 entity name rejected");
+    }
+
+    const auto current = make_populated_config();
+    {
+        auto proposed = current;
+        --proposed.id_counters.next_fixture_id;
+        expect_true(dmxwb::validate_config_transition(current, proposed).code ==
+                        dmxwb::PersistenceErrorCode::validation,
+                    "Fixture ID counter rollback rejected");
+        proposed = current;
+        --proposed.id_counters.next_group_id;
+        expect_true(dmxwb::validate_config_transition(current, proposed).code ==
+                        dmxwb::PersistenceErrorCode::validation,
+                    "Group ID counter rollback rejected");
+        proposed = current;
+        --proposed.id_counters.next_scene_id;
+        expect_true(dmxwb::validate_config_transition(current, proposed).code ==
+                        dmxwb::PersistenceErrorCode::validation,
+                    "Scene ID counter rollback rejected");
+    }
+    {
+        auto proposed = current;
+        proposed.fixtures[1].id = 43;
+        proposed.groups[0].members[1] = 43;
+        expect_true(!dmxwb::validate_config(proposed) &&
+                        dmxwb::validate_config_transition(current, proposed).code ==
+                            dmxwb::PersistenceErrorCode::validation,
+                    "previously allocated Fixture ID cannot be reintroduced");
+
+        proposed = current;
+        proposed.groups.push_back({6, "Reused group", {}});
+        expect_true(!dmxwb::validate_config(proposed) &&
+                        dmxwb::validate_config_transition(current, proposed).code ==
+                            dmxwb::PersistenceErrorCode::validation,
+                    "previously allocated Group ID cannot be reintroduced");
+
+        proposed = current;
+        proposed.scenes.push_back({9, "Reused scene", {}});
+        expect_true(!dmxwb::validate_config(proposed) &&
+                        dmxwb::validate_config_transition(current, proposed).code ==
+                            dmxwb::PersistenceErrorCode::validation,
+                    "previously allocated Scene ID cannot be reintroduced");
+    }
+    {
+        auto proposed = current;
+        proposed.fixtures.push_back({current.id_counters.next_fixture_id, "New fixture"});
+        ++proposed.fixture_count;
+        ++proposed.id_counters.next_fixture_id;
+        expect_true(!dmxwb::validate_config_transition(current, proposed),
+                    "fresh Fixture ID at monotonic counter accepted");
     }
 }
 
@@ -248,6 +351,7 @@ int main() {
     test_json_unicode_escape();
     test_schema_and_version_rejection();
     test_config_validation();
+    test_name_and_stable_id_transition_validation();
     test_revision_conflict();
     test_state_validation_and_safe_defaults();
     test_stable_ids_survive_restore();
